@@ -1,12 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  eslint: {
-    // Ignora erros de "estilo" de código (variáveis não usadas, etc) durante o deploy
-    ignoreDuringBuilds: true,
-  },
+  // A configuração do 'eslint' foi REMOVIDA daqui pois gera erro no Next.js 16
+  
   typescript: {
-    // Ignora erros de tipagem rigorosa (TypeScript) durante o deploy
+    // Mantemos este para garantir que o build não pare por erros de tipagem
     ignoreBuildErrors: true,
   },
 };
