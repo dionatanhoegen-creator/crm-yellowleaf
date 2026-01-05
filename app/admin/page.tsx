@@ -10,30 +10,56 @@ const MASTER_EMAIL = "dionatanhoegen@gmail.com";
 function GestaoUsuarios() {
   const [usuarios, setUsuarios] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null); // LINHA ADICIONADA
+  const [error, setError] = useState<string | null>(null);
 
   // Carrega usuários do banco ao abrir a tela
   useEffect(() => {
-    fetchUsuarios();
+    // IMPORTANTE: Só executa no navegador, não durante o build
+    if (typeof window === 'undefined') {
+      setLoading(false);
+      return;
+    }
+    
+    // Pequeno delay para garantir que tudo está inicializado
+    const timer = setTimeout(() => {
+      fetchUsuarios();
+    }, 100);
+    
+    return () => clearTimeout(timer);
   }, []);
 
   const fetchUsuarios = async () => {
+    // NUNCA executa durante o build/SSR
+    if (typeof window === 'undefined') {
+      setLoading(false);
+      return;
+    }
+    
     setLoading(true);
-    setError(null); // LINHA ADICIONADA
+    setError(null);
     
     try {
-      // BLOCO ADICIONADO - verifica conexão
-      if (!supabase) {
-        throw new Error('Conexão com banco de dados não disponível');
+      // Verifica se o Supabase está disponível (apenas no cliente)
+      const client = supabase;
+      if (!client) {
+        throw new Error('Banco de dados não está disponível no momento');
       }
       
-      const { data, error: supabaseError } = await supabase.from('usuarios').select('*').order('id');
+      const { data, error: supabaseError } = await client.from('usuarios').select('*').order('id');
       
-      if (supabaseError) throw supabaseError; // LINHA ADICIONADA
-      if (data) setUsuarios(data);
-    } catch (err) {
+      if (supabaseError) {
+        console.error('Erro do Supabase:', supabaseError);
+        throw new Error(`Erro do banco: ${supabaseError.message}`);
+      }
+      
+      if (data) {
+        setUsuarios(data);
+      } else {
+        setUsuarios([]);
+      }
+    } catch (err: any) {
       console.error('Erro ao carregar usuários:', err);
-      setError('Não foi possível carregar os usuários. Verifique a conexão.'); // LINHA ADICIONADA
+      setError(err.message || 'Não foi possível carregar os usuários. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -41,18 +67,27 @@ function GestaoUsuarios() {
 
   const toggleStatus = async (id: number, statusAtual: boolean) => {
     try {
-      // VERIFICAÇÃO ADICIONADA
-      if (!supabase) {
-        alert('Conexão com banco de dados não disponível');
+      // Verifica se estamos no navegador
+      if (typeof window === 'undefined') return;
+      
+      const client = supabase;
+      if (!client) {
+        alert('Conexão com banco de dados não disponível no momento');
         return;
       }
       
-      const { error } = await supabase.from('usuarios').update({ ativo: !statusAtual }).eq('id', id);
-      if (error) throw error; // LINHA ADICIONADA
-      if (!error) fetchUsuarios(); // Recarrega a lista se deu certo
-    } catch (err) {
+      const { error } = await client.from('usuarios').update({ ativo: !statusAtual }).eq('id', id);
+      
+      if (error) {
+        console.error('Erro ao atualizar:', error);
+        throw new Error(`Erro: ${error.message}`);
+      }
+      
+      // Recarrega a lista se deu certo
+      fetchUsuarios();
+    } catch (err: any) {
       console.error('Erro ao atualizar usuário:', err);
-      alert('Erro ao atualizar status do usuário');
+      alert(err.message || 'Erro ao atualizar status do usuário');
     }
   };
 
@@ -88,6 +123,17 @@ function GestaoUsuarios() {
        ) : loading ? (
          <div className="p-12 text-center text-slate-400 flex flex-col items-center gap-2">
             <Loader2 className="animate-spin" /> Carregando equipe...
+         </div>
+       ) : usuarios.length === 0 ? (
+         <div className="p-12 text-center text-slate-400">
+            <Users className="mx-auto mb-3" size={32} />
+            <p>Nenhum usuário cadastrado</p>
+            <button
+              onClick={fetchUsuarios}
+              className="mt-4 text-blue-600 hover:text-blue-700 text-sm font-bold"
+            >
+              Recarregar
+            </button>
          </div>
        ) : (
          <table className="w-full text-left text-sm">
