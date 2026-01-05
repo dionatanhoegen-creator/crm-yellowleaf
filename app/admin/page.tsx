@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Users, RefreshCw, CheckCircle2, XCircle, Key, Loader2 } from 'lucide-react';
+import { Shield, Users, RefreshCw, CheckCircle2, XCircle, Key, Loader2, AlertCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase'; // Conexão real
 
 const MASTER_EMAIL = "dionatanhoegen@gmail.com";
@@ -10,6 +10,7 @@ const MASTER_EMAIL = "dionatanhoegen@gmail.com";
 function GestaoUsuarios() {
   const [usuarios, setUsuarios] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null); // LINHA ADICIONADA
 
   // Carrega usuários do banco ao abrir a tela
   useEffect(() => {
@@ -18,15 +19,41 @@ function GestaoUsuarios() {
 
   const fetchUsuarios = async () => {
     setLoading(true);
-    const { data } = await supabase.from('usuarios').select('*').order('id');
-    if (data) setUsuarios(data);
-    setLoading(false);
+    setError(null); // LINHA ADICIONADA
+    
+    try {
+      // BLOCO ADICIONADO - verifica conexão
+      if (!supabase) {
+        throw new Error('Conexão com banco de dados não disponível');
+      }
+      
+      const { data, error: supabaseError } = await supabase.from('usuarios').select('*').order('id');
+      
+      if (supabaseError) throw supabaseError; // LINHA ADICIONADA
+      if (data) setUsuarios(data);
+    } catch (err) {
+      console.error('Erro ao carregar usuários:', err);
+      setError('Não foi possível carregar os usuários. Verifique a conexão.'); // LINHA ADICIONADA
+    } finally {
+      setLoading(false);
+    }
   };
 
   const toggleStatus = async (id: number, statusAtual: boolean) => {
-    // Atualiza no banco
-    const { error } = await supabase.from('usuarios').update({ ativo: !statusAtual }).eq('id', id);
-    if (!error) fetchUsuarios(); // Recarrega a lista se deu certo
+    try {
+      // VERIFICAÇÃO ADICIONADA
+      if (!supabase) {
+        alert('Conexão com banco de dados não disponível');
+        return;
+      }
+      
+      const { error } = await supabase.from('usuarios').update({ ativo: !statusAtual }).eq('id', id);
+      if (error) throw error; // LINHA ADICIONADA
+      if (!error) fetchUsuarios(); // Recarrega a lista se deu certo
+    } catch (err) {
+      console.error('Erro ao atualizar usuário:', err);
+      alert('Erro ao atualizar status do usuário');
+    }
   };
 
   return (
@@ -38,13 +65,27 @@ function GestaoUsuarios() {
             </h3>
             <p className="text-xs text-slate-500">Controle quem acessa o sistema.</p>
           </div>
-          {/* Botão Novo Usuário (Visual por enquanto, depois fazemos o modal) */}
           <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition shadow-sm">
             + Novo Usuário
           </button>
        </div>
        
-       {loading ? (
+       {/* BLOCO MODIFICADO - adiciona tratamento de erro */}
+       {error ? (
+         <div className="p-8 text-center">
+           <div className="bg-red-50 border border-red-200 rounded-xl p-6 max-w-md mx-auto">
+             <AlertCircle className="text-red-500 mx-auto mb-3" size={32} />
+             <h4 className="font-bold text-red-700 mb-2">Erro de Conexão</h4>
+             <p className="text-red-600 text-sm mb-4">{error}</p>
+             <button
+               onClick={fetchUsuarios}
+               className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-bold"
+             >
+               Tentar Novamente
+             </button>
+           </div>
+         </div>
+       ) : loading ? (
          <div className="p-12 text-center text-slate-400 flex flex-col items-center gap-2">
             <Loader2 className="animate-spin" /> Carregando equipe...
          </div>
