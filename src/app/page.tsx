@@ -2,17 +2,22 @@
 
 import React, { useState, useEffect } from 'react';
 import { 
-  DollarSign, Users, CheckCircle2, Circle, Plus, Trash2, Edit2 
+  DollarSign, Users, CheckCircle2, Circle, Plus, Trash2, Edit2, 
+  Sun, MapPin, Calendar, TrendingUp 
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 export default function Dashboard() {
   const supabase = createClientComponentClient();
   
-  // --- ESTADOS (Memória do componente) ---
+  // --- ESTADOS ---
   const [loading, setLoading] = useState(true);
-  const [userName, setUserName] = useState("Visitante");
+  const [primeiroNome, setPrimeiroNome] = useState("Visitante");
+  const [saudacao, setSaudacao] = useState("Olá");
   
+  // Clima (Simulado por enquanto, igual ao antigo)
+  const [clima, setClima] = useState({ temp: 28, cidade: 'Sua Região' });
+
   // Dados do Dashboard
   const [meta, setMeta] = useState({ atual: 0, alvo: 150000 });
   const [totalClientes, setTotalClientes] = useState(0);
@@ -28,23 +33,48 @@ export default function Dashboard() {
   const [isMetaModalOpen, setIsMetaModalOpen] = useState(false);
   const [novaMetaValor, setNovaMetaValor] = useState("");
 
-  // --- EFEITO INICIAL (Carregar dados) ---
+  // --- EFEITO INICIAL ---
   useEffect(() => {
     carregarDados();
+    definirSaudacao();
   }, []);
+
+  const definirSaudacao = () => {
+    const hora = new Date().getHours();
+    if (hora >= 5 && hora < 12) setSaudacao("Bom dia");
+    else if (hora >= 12 && hora < 18) setSaudacao("Boa tarde");
+    else setSaudacao("Boa noite");
+  };
+
+  const formatarNome = (email: string) => {
+    // Pega o que vem antes do @ (ex: dionatanhoegen)
+    const prefixo = email.split('@')[0]; 
+    // Tenta separar se tiver ponto ou números, senão pega os primeiros caracteres
+    // Aqui vamos pegar apenas a parte "Dionatan" assumindo que seja o início
+    // Se for tudo junto "dionatanhoegen", vamos forçar uma quebra visual ou capitalizar
+    // Estratégia: Capitalizar a primeira letra
+    return prefixo.charAt(0).toUpperCase() + prefixo.slice(1).replace(/[0-9]/g, '').replace('hoegen', ''); // Ajuste manual fino para remover sobrenome se estiver colado
+  };
 
   const carregarDados = async () => {
     setLoading(true);
     
     // 1. Pega Usuário
     const { data: { user } } = await supabase.auth.getUser();
-    if (user) setUserName(user.email?.split('@')[0] || "Dionatan");
+    
+    if (user && user.email) {
+      // Formata o nome para ficar apenas "Dionatan"
+      // Removemos "hoegen" se estiver colado, ou apenas capitalizamos
+      let nomeLimpo = user.email.split('@')[0];
+      // Tenta remover o sobrenome se soubermos qual é, ou pega substring
+      if(nomeLimpo.includes("dionatan")) nomeLimpo = "Dionatan"; // Forçando para ficar perfeito pra você
+      else nomeLimpo = nomeLimpo.charAt(0).toUpperCase() + nomeLimpo.slice(1);
+      
+      setPrimeiroNome(nomeLimpo);
 
-    if (user) {
       // 2. Busca Meta
       let { data: dadosMeta } = await supabase.from('metas').select('*').eq('user_id', user.id).single();
       
-      // Se não existir meta, cria uma padrão
       if (!dadosMeta) {
         const { data: novaMeta } = await supabase
           .from('metas')
@@ -63,7 +93,7 @@ export default function Dashboard() {
         .from('tarefas')
         .select('*')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false }); // Mais recentes primeiro
+        .order('created_at', { ascending: false });
       
       setTarefas(dadosTarefas || []);
     }
@@ -71,24 +101,13 @@ export default function Dashboard() {
     setLoading(false);
   };
 
-  // --- FUNÇÕES DE AÇÃO ---
-
+  // --- AÇÕES ---
   const adicionarTarefa = async () => {
     if (!novaTarefaTexto.trim()) return;
-    
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data } = await supabase
-      .from('tarefas')
-      .insert({ 
-        user_id: user.id, 
-        titulo: novaTarefaTexto, 
-        concluido: false 
-      })
-      .select()
-      .single();
-
+    const { data } = await supabase.from('tarefas').insert({ user_id: user.id, titulo: novaTarefaTexto, concluido: false }).select().single();
     if (data) {
       setTarefas([data, ...tarefas]);
       setNovaTarefaTexto("");
@@ -97,11 +116,8 @@ export default function Dashboard() {
   };
 
   const toggleTarefa = async (id: string, statusAtual: boolean) => {
-    // Atualiza visualmente na hora (otimista)
     const novasTarefas = tarefas.map(t => t.id === id ? { ...t, concluido: !statusAtual } : t);
     setTarefas(novasTarefas);
-
-    // Atualiza no banco
     await supabase.from('tarefas').update({ concluido: !statusAtual }).eq('id', id);
   };
 
@@ -113,61 +129,82 @@ export default function Dashboard() {
   const atualizarMeta = async () => {
     const valorNumerico = parseFloat(novaMetaValor);
     if (isNaN(valorNumerico)) return;
-
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    await supabase
-      .from('metas')
-      .update({ valor_meta: valorNumerico })
-      .eq('user_id', user.id);
-      
+    await supabase.from('metas').update({ valor_meta: valorNumerico }).eq('user_id', user.id);
     setMeta(prev => ({ ...prev, alvo: valorNumerico }));
     setIsMetaModalOpen(false);
   };
 
-  // --- CÁLCULO DE PORCENTAGEM DA META ---
   const porcentagemMeta = Math.min(Math.round((meta.atual / meta.alvo) * 100), 100);
 
   return (
-    <div className="p-4 max-w-7xl mx-auto space-y-6 pb-20 md:pb-4">
+    <div className="p-4 max-w-7xl mx-auto space-y-8 pb-20 md:pb-4">
       
-      {/* 1. CABEÇALHO COM FRASE DO DIA INTEGRADA */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-        <div>
+      {/* 1. CABEÇALHO TRIPLO (Saudação | Frase | Clima) */}
+      <div className="flex flex-col xl:flex-row items-center justify-between gap-6 bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+        
+        {/* BLOCO ESQUERDA: Saudação */}
+        <div className="text-center xl:text-left min-w-[200px]">
+          <p className="text-slate-500 font-medium flex items-center justify-center xl:justify-start gap-2 mb-1">
+             <Calendar size={16} className="text-green-600"/> {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
+          </p>
           <h1 className="text-3xl font-black text-slate-800 tracking-tight">
-            Boa noite, <span className="text-green-700 capitalize">{userName}</span>!
+            {saudacao}, <span className="text-green-700">{primeiroNome}!</span>
           </h1>
-          <p className="text-slate-400 font-medium">Pronto para dominar o mercado hoje?</p>
         </div>
         
-        {/* Frase do dia */}
-        <div className="md:max-w-md bg-green-50 border border-green-100 p-4 rounded-2xl relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-16 h-16 bg-green-200 rounded-full blur-2xl opacity-20 -translate-y-1/2 translate-x-1/2"></div>
-          <p className="text-sm text-green-800 font-medium italic relative z-10">
+        {/* BLOCO CENTRO: Frase Motivacional */}
+        <div className="flex-1 w-full xl:w-auto bg-green-50 border border-green-100 p-4 rounded-2xl relative overflow-hidden flex flex-col items-center justify-center text-center">
+          <div className="absolute top-0 right-0 w-20 h-20 bg-green-200 rounded-full blur-2xl opacity-30 -translate-y-1/2 translate-x-1/2"></div>
+          <p className="text-sm text-green-800 font-medium italic relative z-10 max-w-lg leading-relaxed">
             "O prescritor não compra um ativo, ele compra a solução para a dor do paciente."
           </p>
-          <span className="text-[10px] font-bold text-green-600 uppercase mt-2 block tracking-wider">#FocoNoResultado</span>
+          <span className="text-[10px] font-black text-green-700 uppercase mt-2 block tracking-widest bg-white/50 px-2 py-0.5 rounded-full">
+            #FocoNoResultado
+          </span>
+        </div>
+
+        {/* BLOCO DIREITA: Clima (Resgatado!) */}
+        <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 flex items-center gap-4 min-w-[180px]">
+           <div className="p-3 bg-white text-blue-500 rounded-full shadow-sm">
+             <Sun size={24}/>
+           </div>
+           <div>
+             <p className="text-2xl font-black text-slate-800">{clima.temp}°C</p>
+             <p className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+               <MapPin size={10}/> {clima.cidade}
+             </p>
+           </div>
         </div>
       </div>
 
-      {/* 2. DASHBOARD CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* 2. DASHBOARD CARDS (Com Bordas Verdes Destaque) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
-        {/* CARD META */}
-        <div className="bg-[#1e293b] text-white p-6 rounded-3xl relative overflow-hidden shadow-lg group">
-          <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition cursor-pointer" onClick={() => setIsMetaModalOpen(true)}>
-            <Edit2 size={16} className="text-slate-400 hover:text-white" />
-          </div>
-          <div className="absolute top-0 right-0 w-32 h-32 bg-green-500 rounded-full blur-3xl opacity-10 -translate-y-1/2 translate-x-1/2"></div>
+        {/* CARD META (Editável) */}
+        <div className="bg-[#1e293b] text-white p-6 rounded-3xl relative overflow-hidden shadow-lg border-2 border-green-600">
+          <button 
+             onClick={() => setIsMetaModalOpen(true)}
+             className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 rounded-full transition text-white"
+             title="Editar Meta"
+          >
+            <Edit2 size={16} />
+          </button>
           
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Meta Mensal</p>
+          <div className="absolute top-0 right-0 w-32 h-32 bg-green-500 rounded-full blur-3xl opacity-10 -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
+          
+          <div className="flex items-center gap-2 mb-2">
+            <TrendingUp size={20} className="text-green-400"/>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Meta Mensal</p>
+          </div>
+          
           <div className="flex items-end gap-2 mb-4">
             <span className="text-3xl font-bold">R$ {meta.atual.toLocaleString('pt-BR')}</span>
             <span className="text-sm text-slate-500 mb-1">/ {meta.alvo.toLocaleString('pt-BR')}</span>
           </div>
 
-          {/* Barra de Progresso */}
           <div className="w-full h-3 bg-slate-700 rounded-full overflow-hidden">
             <div 
               className="h-full bg-gradient-to-r from-green-500 to-emerald-400 rounded-full transition-all duration-1000"
@@ -179,8 +216,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* CARD OPORTUNIDADES (Estático por enquanto) */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col justify-between">
+        {/* CARD OPORTUNIDADES */}
+        <div className="bg-white p-6 rounded-3xl border-2 border-green-600 shadow-sm flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <div>
               <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Oportunidades</p>
@@ -195,8 +232,8 @@ export default function Dashboard() {
           </p>
         </div>
 
-        {/* CARD CARTEIRA ATIVA (Estático por enquanto) */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col justify-between">
+        {/* CARD CARTEIRA ATIVA */}
+        <div className="bg-white p-6 rounded-3xl border-2 border-green-600 shadow-sm flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <div>
               <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Carteira Ativa</p>
@@ -215,7 +252,7 @@ export default function Dashboard() {
       {/* 3. ÁREA DE TAREFAS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* AGENDA DE HOJE (Tarefas Dinâmicas) */}
+        {/* AGENDA DE HOJE */}
         <div className="lg:col-span-2 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
@@ -261,7 +298,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* PRÓXIMOS EVENTOS (Fixo por enquanto) */}
+        {/* PRÓXIMOS EVENTOS */}
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm h-fit">
           <h3 className="font-bold text-lg text-slate-700 mb-6">Próximos Eventos</h3>
           <div className="space-y-6">
@@ -284,7 +321,7 @@ export default function Dashboard() {
       </div>
 
       {/* --- MODAIS --- */}
-
+      
       {/* Modal Nova Tarefa */}
       {isTaskModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
