@@ -5,18 +5,18 @@ import { createPortal } from 'react-dom';
 import { 
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Briefcase, Tag, Beaker, MessageCircle, AlertCircle, Clock,
-  CheckCircle2, Trash2, ShieldAlert, AlertTriangle
+  CheckCircle2, Trash2, ShieldAlert, AlertTriangle, Loader2
 } from 'lucide-react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
-const USUARIO_LOGADO = "Dionatan"; 
 
 // --- TIPOS ---
 interface Oportunidade {
   id: string;
   cnpj: string;
   nomeCliente: string; 
-  contato: string;     
+  contato: string;      
   telefone: string;
   produto: string;
   aplicacao: string;
@@ -51,27 +51,17 @@ const ESTAGIOS = [
 ];
 
 export default function PipelinePage() {
-  const [oportunidades, setOportunidades] = useState<Oportunidade[]>([
-    {
-      id: '1',
-      cnpj: '87.367.165/0001-84',
-      nomeCliente: 'Farmácia A Fórmula',
-      contato: 'Dr. Roberto',
-      telefone: '(41) 99999-8888',
-      produto: 'Anethin®',
-      aplicacao: 'Emagrecimento',
-      valor: 15000,
-      dataEntrada: '2025-01-10',
-      estagio: 'prospeccao',
-      responsavel: 'Dionatan'
-    }
-  ]);
-
+  const supabase = createClientComponentClient();
+  
+  // ESTADOS
+  const [oportunidades, setOportunidades] = useState<Oportunidade[]>([]);
+  const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<Oportunidade | null>(null);
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [baseClientes, setBaseClientes] = useState<any[]>([]);
   const [mounted, setMounted] = useState(false);
+  const [usuarioLogadoNome, setUsuarioLogadoNome] = useState("Vendedor");
   
   // ESTADOS DE CONTROLE VISUAL
   const [erroBloqueio, setErroBloqueio] = useState<string | null>(null);
@@ -85,22 +75,65 @@ export default function PipelinePage() {
   const [formData, setFormData] = useState<Partial<Oportunidade>>({
     estagio: 'prospeccao',
     dataEntrada: new Date().toISOString().split('T')[0], 
-    responsavel: USUARIO_LOGADO,
     produto: '',
     aplicacao: ''
   });
 
+  // --- EFEITOS (Carregamento Inicial) ---
   useEffect(() => {
-    setMounted(true); // Habilita o Portal
-    const carregarBaseClientes = async () => {
-      try {
-        const res = await fetch(`${API_URL}?path=clientes`);
-        const json = await res.json();
-        if (json.success && Array.isArray(json.data)) setBaseClientes(json.data);
-      } catch (e) { console.error("Erro ao carregar base", e); }
-    };
+    setMounted(true);
+    carregarUsuario();
+    carregarOportunidades();
     carregarBaseClientes();
   }, []);
+
+  const carregarUsuario = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user && user.email) {
+      setUsuarioLogadoNome(user.email.split('@')[0]);
+    }
+  };
+
+  const carregarOportunidades = async () => {
+    setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from('pipeline')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (!error && data) {
+      // Mapeia do Banco (snake_case) para o Front (camelCase)
+      const opsFormatadas: Oportunidade[] = data.map(item => ({
+        id: item.id,
+        cnpj: item.cnpj,
+        nomeCliente: item.nome_cliente,
+        contato: item.contato,
+        telefone: item.telefone,
+        produto: item.produto,
+        aplicacao: item.aplicacao,
+        valor: item.valor,
+        dataEntrada: item.data_entrada,
+        dataLembrete: item.data_lembrete,
+        estagio: item.status as any, // Mapeia status do banco para estagio
+        motivoPerda: item.motivo_perda,
+        responsavel: usuarioLogadoNome
+      }));
+      setOportunidades(opsFormatadas);
+    }
+    setLoading(false);
+  };
+
+  const carregarBaseClientes = async () => {
+    try {
+      const res = await fetch(`${API_URL}?path=clientes`);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) setBaseClientes(json.data);
+    } catch (e) { console.error("Erro ao carregar base Google", e); }
+  };
 
   const showToast = (msg: string, type: 'success' | 'error' | 'warning' = 'success') => {
     setToast({ show: true, msg, type });
@@ -118,7 +151,7 @@ export default function PipelinePage() {
       setFormData({
         estagio: 'prospeccao',
         dataEntrada: new Date().toISOString().split('T')[0],
-        responsavel: USUARIO_LOGADO,
+        responsavel: usuarioLogadoNome,
         valor: 0,
         produto: '',
         aplicacao: ''
@@ -134,7 +167,7 @@ export default function PipelinePage() {
     setLoadingCNPJ(true);
     setErroBloqueio(null);
 
-    // 1. Verifica na base interna
+    // 1. Verifica na base interna (Google Sheets)
     const clienteExistente = baseClientes.find(c => {
        const cCnpj = c.cnpj?.toString().replace(/\D/g, '');
        return cCnpj === cnpjLimpo;
@@ -143,8 +176,8 @@ export default function PipelinePage() {
     if (clienteExistente) {
         const donoCarteira = clienteExistente.vendedor || clienteExistente.representante || '';
         
-        // TRAVA DE VENDEDOR
-        if (donoCarteira && !donoCarteira.toUpperCase().includes(USUARIO_LOGADO.toUpperCase())) {
+        // TRAVA DE VENDEDOR (Simulação básica, idealmente viria do backend)
+        if (donoCarteira && !donoCarteira.toUpperCase().includes(usuarioLogadoNome.toUpperCase()) && usuarioLogadoNome !== 'Vendedor') {
             setErroBloqueio(`AÇÃO BLOQUEADA: Este cliente pertence à carteira de ${donoCarteira}.`);
             setFormData(prev => ({
                 ...prev,
@@ -186,7 +219,7 @@ export default function PipelinePage() {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (erroBloqueio) {
         showToast("Ação bloqueada. Verifique os avisos.", 'error');
         return;
@@ -200,28 +233,68 @@ export default function PipelinePage() {
         return;
     }
 
-    if (editingOp) {
-      setOportunidades(prev => prev.map(item => 
-        item.id === editingOp.id ? { ...formData as Oportunidade } : item
-      ));
-      showToast("Oportunidade atualizada!", 'success');
-    } else {
-      const novaOp: Oportunidade = {
-        ...formData as Oportunidade,
-        id: Date.now().toString()
-      };
-      setOportunidades([...oportunidades, novaOp]);
-      showToast("Oportunidade criada com sucesso!", 'success');
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // Prepara objeto para o Supabase (snake_case)
+    const payloadSupabase = {
+        user_id: user.id,
+        cnpj: formData.cnpj,
+        nome_cliente: formData.nomeCliente,
+        contato: formData.contato,
+        telefone: formData.telefone,
+        produto: formData.produto,
+        aplicacao: formData.aplicacao,
+        valor: formData.valor || 0,
+        status: formData.estagio, // Aqui é o segredo para o Dashboard ler!
+        data_entrada: formData.dataEntrada,
+        data_lembrete: formData.dataLembrete,
+        motivo_perda: formData.motivoPerda
+    };
+
+    try {
+        if (editingOp) {
+            // ATUALIZAR
+            const { error } = await supabase
+                .from('pipeline')
+                .update(payloadSupabase)
+                .eq('id', editingOp.id);
+            
+            if (error) throw error;
+            showToast("Oportunidade atualizada!", 'success');
+        } else {
+            // CRIAR
+            const { error } = await supabase
+                .from('pipeline')
+                .insert(payloadSupabase);
+
+            if (error) throw error;
+            showToast("Oportunidade criada com sucesso!", 'success');
+        }
+
+        await carregarOportunidades(); // Recarrega a tela
+        setModalOpen(false);
+
+    } catch (error) {
+        console.error(error);
+        showToast("Erro ao salvar. Tente novamente.", 'error');
     }
-    setModalOpen(false);
   };
 
-  const deleteOportunidade = () => {
+  const deleteOportunidade = async () => {
       if (!editingOp) return;
-      setOportunidades(prev => prev.filter(op => op.id !== editingOp.id));
-      setConfirmDelete(false);
-      setModalOpen(false);
-      showToast("Oportunidade excluída.", 'success');
+      
+      try {
+          const { error } = await supabase.from('pipeline').delete().eq('id', editingOp.id);
+          if (error) throw error;
+          
+          await carregarOportunidades();
+          setConfirmDelete(false);
+          setModalOpen(false);
+          showToast("Oportunidade excluída.", 'success');
+      } catch (error) {
+          showToast("Erro ao excluir.", 'error');
+      }
   };
 
   const formatMoney = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
@@ -243,7 +316,7 @@ export default function PipelinePage() {
 
   return (
     <div className="w-full">
-      {/* TOAST DE NOTIFICAÇÃO (FLUTUANTE) */}
+      {/* TOAST */}
       {toast.show && mounted && createPortal(
           <div className={`fixed top-5 right-5 z-[100000] px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-right duration-300 ${
               toast.type === 'success' ? 'bg-green-600 text-white' : 
@@ -266,47 +339,54 @@ export default function PipelinePage() {
         </button>
       </div>
 
-      {/* KANBAN */}
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-2 h-[calc(100vh-160px)]">
-        {ESTAGIOS.map(estagio => {
-          const itens = oportunidades.filter(o => o.estagio === estagio.id);
-          const totalColuna = itens.reduce((acc, curr) => acc + Number(curr.valor || 0), 0);
-          return (
-            <div key={estagio.id} className="flex flex-col h-full bg-slate-100/50 rounded-xl border border-slate-200 overflow-hidden min-w-[200px]">
-              <div className={`p-2 border-b-2 ${estagio.color} bg-white`}>
-                <div className="flex justify-between items-center mb-1">
-                  <h3 className={`font-bold text-xs truncate ${estagio.text}`}>{estagio.label}</h3>
-                  <span className="bg-slate-100 text-slate-500 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{itens.length}</span>
-                </div>
-                <p className="text-[10px] text-slate-400 font-bold">{formatMoney(totalColuna)}</p>
-              </div>
-              <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
-                {itens.map(item => (
-                  <div key={item.id} onClick={() => handleOpenModal(item)} className="bg-white p-3 rounded-lg shadow-sm border border-slate-100 cursor-pointer hover:border-blue-400 transition group relative">
-                    <div className="flex justify-between items-start mb-1">
-                        <div className="bg-slate-50 text-slate-400 text-[9px] px-1.5 py-0.5 rounded font-mono truncate max-w-[80px]">{item.cnpj || 'S/ CNPJ'}</div>
-                        {item.clienteJaCadastrado && <span className="text-[8px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-0.5"><CheckCircle2 size={8}/> BASE</span>}
-                        {item.estagio === 'perdido' && <span className="text-[8px] bg-red-50 text-red-600 px-1.5 py-0.5 rounded-full font-bold uppercase">Perdido</span>}
-                    </div>
-                    <h4 className="font-bold text-slate-700 text-sm leading-tight mb-1 line-clamp-2">{item.nomeCliente}</h4>
-                    <div className="mb-2">
-                      {item.produto ? <p className="text-[10px] text-blue-600 font-bold flex items-center gap-1 truncate"><Beaker size={10}/> {item.produto}</p> : <p className="text-[10px] text-purple-500 font-bold flex items-center gap-1 truncate"><Tag size={10}/> {item.aplicacao || 'Geral'}</p>}
-                    </div>
-                    <div className="space-y-1 border-t border-slate-50 pt-1">
-                      <div className="flex justify-between items-center">
-                         <div className="flex items-center gap-1 text-[10px] text-slate-500 truncate max-w-[80px]"><User size={10} className="text-slate-300"/> {item.contato || '-'}</div>
-                         <div className="flex items-center gap-1 text-[10px] text-slate-500"><Calendar size={10} className="text-slate-300"/> {new Date(item.dataEntrada).toLocaleDateString('pt-BR').slice(0,5)}</div>
-                      </div>
-                      {item.telefone && <button onClick={(e) => handleWhatsappClick(e, item.telefone)} className="w-full flex items-center justify-center gap-1 bg-green-50 hover:bg-green-100 text-green-700 text-[10px] font-bold py-1 rounded transition mt-1"><MessageCircle size={10} /> Zap</button>}
-                    </div>
-                    <div className="mt-2 flex justify-between items-center"><span className="text-xs font-black text-slate-600">{formatMoney(item.valor)}</span></div>
+      {/* LOADING INICIAL */}
+      {loading ? (
+        <div className="flex items-center justify-center h-64 text-slate-400">
+            <Loader2 className="animate-spin mr-2"/> Carregando pipeline...
+        </div>
+      ) : (
+        /* KANBAN */
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-2 h-[calc(100vh-160px)]">
+          {ESTAGIOS.map(estagio => {
+            const itens = oportunidades.filter(o => o.estagio === estagio.id);
+            const totalColuna = itens.reduce((acc, curr) => acc + Number(curr.valor || 0), 0);
+            return (
+              <div key={estagio.id} className="flex flex-col h-full bg-slate-100/50 rounded-xl border border-slate-200 overflow-hidden min-w-[200px]">
+                <div className={`p-2 border-b-2 ${estagio.color} bg-white`}>
+                  <div className="flex justify-between items-center mb-1">
+                    <h3 className={`font-bold text-xs truncate ${estagio.text}`}>{estagio.label}</h3>
+                    <span className="bg-slate-100 text-slate-500 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{itens.length}</span>
                   </div>
-                ))}
+                  <p className="text-[10px] text-slate-400 font-bold">{formatMoney(totalColuna)}</p>
+                </div>
+                <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+                  {itens.map(item => (
+                    <div key={item.id} onClick={() => handleOpenModal(item)} className="bg-white p-3 rounded-lg shadow-sm border border-slate-100 cursor-pointer hover:border-blue-400 transition group relative">
+                      <div className="flex justify-between items-start mb-1">
+                          <div className="bg-slate-50 text-slate-400 text-[9px] px-1.5 py-0.5 rounded font-mono truncate max-w-[80px]">{item.cnpj || 'S/ CNPJ'}</div>
+                          {item.clienteJaCadastrado && <span className="text-[8px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-bold flex items-center gap-0.5"><CheckCircle2 size={8}/> BASE</span>}
+                          {item.estagio === 'perdido' && <span className="text-[8px] bg-red-50 text-red-600 px-1.5 py-0.5 rounded-full font-bold uppercase">Perdido</span>}
+                      </div>
+                      <h4 className="font-bold text-slate-700 text-sm leading-tight mb-1 line-clamp-2">{item.nomeCliente}</h4>
+                      <div className="mb-2">
+                        {item.produto ? <p className="text-[10px] text-blue-600 font-bold flex items-center gap-1 truncate"><Beaker size={10}/> {item.produto}</p> : <p className="text-[10px] text-purple-500 font-bold flex items-center gap-1 truncate"><Tag size={10}/> {item.aplicacao || 'Geral'}</p>}
+                      </div>
+                      <div className="space-y-1 border-t border-slate-50 pt-1">
+                        <div className="flex justify-between items-center">
+                           <div className="flex items-center gap-1 text-[10px] text-slate-500 truncate max-w-[80px]"><User size={10} className="text-slate-300"/> {item.contato || '-'}</div>
+                           <div className="flex items-center gap-1 text-[10px] text-slate-500"><Calendar size={10} className="text-slate-300"/> {item.dataEntrada ? new Date(item.dataEntrada).toLocaleDateString('pt-BR').slice(0,5) : '-'}</div>
+                        </div>
+                        {item.telefone && <button onClick={(e) => handleWhatsappClick(e, item.telefone)} className="w-full flex items-center justify-center gap-1 bg-green-50 hover:bg-green-100 text-green-700 text-[10px] font-bold py-1 rounded transition mt-1"><MessageCircle size={10} /> Zap</button>}
+                      </div>
+                      <div className="mt-2 flex justify-between items-center"><span className="text-xs font-black text-slate-600">{formatMoney(item.valor)}</span></div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* --- MODAL PRINCIPAL (COM PORTAL) --- */}
       {modalOpen && mounted && createPortal(
@@ -323,7 +403,7 @@ export default function PipelinePage() {
 
             <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto custom-scrollbar flex-1">
               
-              {/* ERRO VISUAL DENTRO DA TELA */}
+              {/* ERRO VISUAL */}
               {erroBloqueio && (
                 <div className="md:col-span-2 bg-red-50 border-l-4 border-red-500 p-4 rounded-r flex items-start gap-3 animate-pulse">
                     <ShieldAlert className="text-red-600 shrink-0" size={24} />
@@ -432,7 +512,7 @@ export default function PipelinePage() {
         document.body
       )}
 
-      {/* --- CONFIRMAÇÃO DE EXCLUSÃO (CORRIGIDO) --- */}
+      {/* --- CONFIRMAÇÃO DE EXCLUSÃO --- */}
       {confirmDelete && mounted && createPortal(
         <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
            <div className="bg-white w-full max-w-sm rounded-xl shadow-2xl p-6 text-center animate-in zoom-in-95">
