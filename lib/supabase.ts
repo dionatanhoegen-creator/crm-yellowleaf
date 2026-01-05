@@ -4,3 +4,5 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-key";
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Forçando atualização do deploy Vercel
