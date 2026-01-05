@@ -6,8 +6,9 @@ export async function middleware(req: NextRequest) {
   const res = NextResponse.next()
 
   try {
-    // ⚠️ AQUI ESTÁ O PULO DO GATO:
+    // AQUI ESTÁ A CORREÇÃO:
     // Passamos a URL e a CHAVE manualmente para garantir que ele leia
+    // Isso evita o erro de build na Vercel
     const supabase = createMiddlewareClient(
       { req, res },
       {
@@ -23,22 +24,22 @@ export async function middleware(req: NextRequest) {
 
     const path = req.nextUrl.pathname
 
-    // Lógica de proteção
-    // Se NÃO tem sessão e NÃO está no login -> Manda pro Login
+    // 1. Se NÃO tem sessão e tenta acessar qualquer coisa que NÃO seja login
     if (!session && path !== '/login') {
       const redirectUrl = req.nextUrl.clone()
       redirectUrl.pathname = '/login'
       return NextResponse.redirect(redirectUrl)
     }
 
-    // Se TEM sessão e tenta ir no login -> Manda pra Home
+    // 2. Se TEM sessão e tenta acessar o login
     if (session && path === '/login') {
       const redirectUrl = req.nextUrl.clone()
       redirectUrl.pathname = '/'
       return NextResponse.redirect(redirectUrl)
     }
+
   } catch (e) {
-    // Se der erro, não derruba o site, apenas segue
+    // Se der erro, segue o jogo (não quebra o site)
     console.error('Erro no middleware:', e)
   }
 
@@ -46,6 +47,6 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Protege tudo exceto arquivos estáticos e API
+  // Protege tudo, exceto arquivos de sistema (imagens, api, icones)
   matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
 }
