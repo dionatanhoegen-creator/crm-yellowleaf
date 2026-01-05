@@ -4,20 +4,27 @@ import React, { useState, useEffect } from 'react';
 import { Outfit } from "next/font/google";
 import "./globals.css";
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation'; // Adicionado useRouter
+import { usePathname, useRouter } from 'next/navigation';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'; // Importação do Supabase
 import { 
   LayoutDashboard, Users, Trello, Package, Lock, 
   BarChart3, LogOut, Menu, X, ChevronRight,
-  FileText, Shield, ChevronDown, UserCircle
+  FileText, Shield, ChevronDown
 } from 'lucide-react';
 
 const outfit = Outfit({ subsets: ["latin"] });
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter(); // Para redirecionar
+  const router = useRouter();
+  const supabase = createClientComponentClient(); // Cliente Supabase
+  
   const [isOpen, setIsOpen] = useState(false); // Menu Lateral
   const [isProfileOpen, setIsProfileOpen] = useState(false); // Menu do Perfil
+  const [userEmail, setUserEmail] = useState("Carregando..."); // Estado para o email
+
+  // Verifica se é a página de login para não mostrar o menu
+  const isLoginPage = pathname === '/login';
 
   // ITENS DO MENU
   const MENU = [
@@ -31,13 +38,48 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     { name: 'Admin', path: '/admin', icon: Shield }, 
   ];
 
-  // --- FUNÇÃO DE LOGOUT ---
-  const handleLogout = () => {
-    // 1. Limpa a "sessão" do navegador
-    localStorage.removeItem('crm_user');
-    // 2. Manda para a tela de login
+  // --- EFEITO: BUSCAR USUÁRIO LOGADO ---
+  useEffect(() => {
+    const getUser = async () => {
+      if (isLoginPage) return; // Não busca na tela de login
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setUserEmail(user.email || "Usuário");
+      } else {
+        // Se não tiver usuário e não for login, o middleware já deve ter barrado,
+        // mas por segurança limpamos o estado.
+        setUserEmail("Visitante");
+      }
+    };
+
+    getUser();
+  }, [supabase, isLoginPage]);
+
+
+  // --- FUNÇÃO DE LOGOUT (ATUALIZADA) ---
+  const handleLogout = async () => {
+    // 1. Avise o Supabase para encerrar a sessão no servidor
+    await supabase.auth.signOut();
+    
+    // 2. Limpa qualquer lixo do navegador
+    localStorage.clear();
+    
+    // 3. Atualiza a página para o Middleware pegar o logout e mandar pro login
+    router.refresh();
     router.push('/login');
   };
+
+  // Se for a página de login, renderiza apenas o conteúdo limpo (sem header/menu)
+  if (isLoginPage) {
+    return (
+      <html lang="pt-br">
+        <body className={`${outfit.className} bg-slate-50 text-slate-700`}>
+          {children}
+        </body>
+      </html>
+    );
+  }
 
   return (
     <html lang="pt-br">
@@ -72,8 +114,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                      href={item.path} 
                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
                        active 
-                         ? 'bg-green-50 text-green-700 border border-green-200' 
-                         : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800 border border-transparent'
+                          ? 'bg-green-50 text-green-700 border border-green-200' 
+                          : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800 border border-transparent'
                      }`}
                    >
                       <item.icon size={14}/> {item.name}
@@ -90,11 +132,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 className="flex items-center gap-3 hover:bg-slate-50 p-2 rounded-xl transition"
              >
                  <div className="text-right hidden sm:block">
-                    <p className="text-xs font-bold text-slate-700">Dionatan Hoegen</p>
-                    <p className="text-[10px] text-green-600 font-bold">Representante</p>
+                    {/* Agora mostra o email real do usuário logado */}
+                    <p className="text-xs font-bold text-slate-700 max-w-[150px] truncate">{userEmail}</p>
+                    <p className="text-[10px] text-green-600 font-bold">Usuário Conectado</p>
                  </div>
                  <div className="w-9 h-9 rounded-full bg-[#0f392b] text-[#82D14D] flex items-center justify-center font-bold text-sm border-2 border-[#82D14D]">
-                    DH
+                    {userEmail.substring(0, 2).toUpperCase()}
                  </div>
                  <ChevronDown size={16} className={`text-slate-400 transition-transform ${isProfileOpen ? 'rotate-180' : ''}`}/>
              </button>
@@ -107,8 +150,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     <div className="px-3 py-2 border-b border-slate-100 mb-1">
                        <p className="text-xs font-bold text-slate-400 uppercase">Minha Conta</p>
                     </div>
-                    <Link href="/admin" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900 rounded-lg transition font-medium">
-                       <Shield size={16}/> Admin
+                    {/* Link Admin protegido visualmente (não quebra se clicar) */}
+                    <Link href="#" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-slate-400 cursor-not-allowed hover:bg-slate-50 rounded-lg transition font-medium">
+                       <Shield size={16}/> Admin (Em breve)
                     </Link>
                     <button 
                        onClick={handleLogout}
