@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Outfit } from "next/font/google";
 import { Lock, Mail, ArrowRight, Loader2, Leaf } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase'; // Importa nosso cliente
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'; // ⚠️ Importação Correta para Next.js
 
 const outfit = Outfit({ subsets: ["latin"] });
 
@@ -15,36 +15,41 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // Inicializa o cliente que gerencia os Cookies automaticamente
+  const supabase = createClientComponentClient();
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
     try {
-      // 1. Busca o usuário no Supabase
-      const { data, error } = await supabase
-        .from('usuarios')
-        .select('*')
-        .eq('email', email)
-        .eq('senha', password) // Em produção, usaríamos hash/criptografia
-        .single();
+      // 1. Autenticação OFICIAL do Supabase
+      // Isso verifica o usuário criado no painel Authentication e cria o cookie
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-      if (error || !data) {
-        throw new Error("E-mail ou senha incorretos.");
+      if (error) {
+        throw error;
       }
 
-      if (!data.ativo) {
-        throw new Error("Usuário bloqueado. Contate o administrador.");
-      }
-
-      // 2. Se deu certo, salva no navegador (simples) e redireciona
-      // Dica: Para segurança total, futuramente usaremos o Auth do Next.js
-      localStorage.setItem('crm_user', JSON.stringify(data));
-      
+      // 2. Login Sucesso!
+      // Atualiza o roteador para o middleware perceber a mudança
+      router.refresh(); 
       router.push("/"); // Manda para o Dashboard
 
     } catch (err: any) {
-      setError(err.message);
+      console.error("Erro no login:", err);
+      // Traduzindo mensagens comuns de erro
+      if (err.message.includes("Invalid login credentials")) {
+        setError("E-mail ou senha incorretos.");
+      } else if (err.message.includes("Email not confirmed")) {
+        setError("E-mail não confirmado. Verifique sua caixa de entrada.");
+      } else {
+        setError(err.message || "Ocorreu um erro ao tentar entrar.");
+      }
     } finally {
       setLoading(false);
     }
