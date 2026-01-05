@@ -6,25 +6,26 @@ export async function middleware(req: NextRequest) {
   const res = NextResponse.next()
   const supabase = createMiddlewareClient({ req, res })
 
+  // Atualiza a sessão (isso é crucial para o Supabase ver o cookie)
   const {
     data: { session },
   } = await supabase.auth.getSession()
 
-  // PEGA O CAMINHO ATUAL
   const path = req.nextUrl.pathname
 
-  // LÓGICA DE PROTEÇÃO
-  // Se NÃO estiver logado e tentar acessar /admin OU a página inicial (/)
-  if (!session && (path.startsWith('/admin') || path === '/')) {
+  // SE NÃO TIVER LOGADO E NÃO FOR A PÁGINA DE LOGIN
+  if (!session && path !== '/login') {
+    // Manda pro login
     const redirectUrl = req.nextUrl.clone()
     redirectUrl.pathname = '/login'
     return NextResponse.redirect(redirectUrl)
   }
 
-  // Se JÁ estiver logado e tentar acessar /login
+  // SE JÁ TIVER LOGADO E TENTAR ENTRAR NO LOGIN
   if (session && path === '/login') {
+    // Manda pro Dashboard (Home)
     const redirectUrl = req.nextUrl.clone()
-    redirectUrl.pathname = '/' // Redireciona para o Dashboard (Home)
+    redirectUrl.pathname = '/'
     return NextResponse.redirect(redirectUrl)
   }
 
@@ -32,6 +33,16 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // ADICIONAMOS A BARRA '/' AQUI NA LISTA
-  matcher: ['/', '/admin/:path*', '/login'],
+  matcher: [
+    /*
+     * Matcher poderoso:
+     * Protege TODAS as rotas do site, EXCETO:
+     * - api (rotas de api)
+     * - _next/static (arquivos estáticos)
+     * - _next/image (otimização de imagens)
+     * - favicon.ico (ícone do site)
+     * - login (a própria página de login)
+     */
+    '/((?!api|_next/static|_next/image|favicon.ico|login).*)',
+  ],
 }
