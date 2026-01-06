@@ -13,7 +13,7 @@ export default function Dashboard() {
   // --- ESTADOS ---
   const [loading, setLoading] = useState(true);
   const [primeiroNome, setPrimeiroNome] = useState("Dionatan");
-  const [saudacao, setSaudacao] = useState("Olá");
+  const [saudacao, setSaudacao] = useState("OLÁ");
   const [clima, setClima] = useState({ temp: 28, cidade: 'Maringá', condicao: '' });
   const [detalhesClima, setDetalhesClima] = useState<any>(null);
   const [showClimaModal, setShowClimaModal] = useState(false);
