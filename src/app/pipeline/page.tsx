@@ -305,5 +305,21 @@ export default function PipelinePage() {
   // =====================
   // UI (mantida)
   // =====================
-  return <div className="w-full">PIPELINE OK</div>;
-}
+return (
+  <div className="w-full">
+    {/* TOAST */}
+    {toast.show && mounted && createPortal( ... )}
+
+    {/* HEADER */}
+    ...
+
+    {/* KANBAN */}
+    ...
+
+    {/* MODAL */}
+    ...
+
+    {/* CONFIRMAÇÃO */}
+    ...
+  </div>
+);
