@@ -11,7 +11,7 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
-// --- CONFIGURAÇÃO DE ESTÁGIOS OFICIAIS ---
+// --- CONFIGURAÇÃO DE ESTÁGIOS PARA O DASHBOARD ---
 const ESTAGIOS = [
   { id: 'prospeccao', label: 'Prospecção', color: 'border-blue-500', bg: 'bg-blue-50', text: 'text-blue-700' },
   { id: 'qualificacao', label: 'Qualificação', color: 'border-purple-500', bg: 'bg-purple-50', text: 'text-purple-700' },
@@ -22,6 +22,12 @@ const ESTAGIOS = [
 ];
 
 const PRODUTOS_SUGESTAO = ["Allisane®", "Anethin®", "Anidream®", "ArtemiFresh®", "BioCarum®", "Cardasense®", "CarySlim®", "FIThymus®", "GF Slim II®", "Glutaliz®", "GraperLIP®", "Junipure®", "LipoArtich II®", "NobiLIP®", "Noble Skin®", "Nutberry Slim®", "Nutmeg B12®", "OriganLIP®", "Pepper PRO®", "Powder Lymp II®", "Purin 7®", "R-GEN2®", "ReduCINN®", "Reichi UP II ®", "Sinensis Lean II ®", "Sineredux II ®", "SlimHaut®", "TarhunLIP®", "Taurymus®", "TBooster®", "VerumFEM®"];
+
+const DICAS_TECNICAS: Record<string, string> = {
+  "SlimHaut®": "💡 Combo: Ofereça com GF Slim II®.",
+  "Allisane®": "💡 Combo: Associe ao FIThymus®.",
+  "VerumFEM®": "💡 Combo: Combine com Taurymus®."
+};
 
 export default function PipelinePage() {
   const supabase = createClientComponentClient();
@@ -88,7 +94,7 @@ export default function PipelinePage() {
       : await supabase.from('pipeline').insert(payload);
 
     if (!error) { setModalOpen(false); carregarOportunidades(); }
-    else { alert("Erro ao salvar no banco."); }
+    else { alert("Erro ao salvar no banco. Verifique se rodou o comando SQL no Supabase."); }
   };
 
   const deleteOportunidade = async () => {
@@ -117,25 +123,32 @@ export default function PipelinePage() {
 
       {/* QUADRO KANBAN */}
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 h-[calc(100vh-180px)] overflow-x-auto pb-4">
-        {ESTAGIOS.map(est => (
-          <div key={est.id} className="bg-slate-50/50 rounded-2xl border border-slate-200 flex flex-col min-w-[250px] overflow-hidden">
-            <div className={`p-4 border-b-2 ${est.color} bg-white flex justify-between items-center`}>
-              <div><h3 className={`font-black text-xs uppercase ${est.text}`}>{est.label}</h3><p className="text-[10px] text-slate-400 font-bold">{formatMoney(oportunidades.filter(o => o.status === est.id).reduce((a, b) => a + Number(b.valor), 0))}</p></div>
-              <span className="bg-slate-100 text-slate-500 text-[10px] font-bold px-2 py-0.5 rounded-full">{oportunidades.filter(o => o.status === est.id).length}</span>
+        {ESTAGIOS.map(est => {
+          const itensStatus = oportunidades.filter(o => o.status === est.id);
+          const totalValue = itensStatus.reduce((acc, curr) => acc + Number(curr.valor), 0);
+          return (
+            <div key={est.id} className="flex flex-col h-full bg-slate-100/50 rounded-2xl border border-slate-200 min-w-[250px] overflow-hidden">
+              <div className={`p-4 border-b-2 ${est.color} bg-white flex justify-between items-center`}>
+                <div><h3 className={`font-black text-xs uppercase ${est.text}`}>{est.label}</h3><p className="text-[10px] text-slate-400 font-bold">{formatMoney(totalValue)}</p></div>
+                <span className="bg-slate-100 text-slate-500 text-[10px] font-bold px-2 py-0.5 rounded-full">{itensStatus.length}</span>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                {itensStatus.map(op => {
+                  const atraso = isAtrasado(op.data_lembrete) && op.status !== 'fechado';
+                  return (
+                    <div key={op.id} onClick={() => { setEditingOp(op); setFormData({ ...op, estagio: op.status, dataEntrada: op.data_entrada, dataLembrete: op.data_lembrete || '' }); setModalOpen(true); }} 
+                      className={`bg-white p-4 rounded-xl shadow-sm border-2 transition-all cursor-pointer relative ${atraso ? 'border-red-500 animate-pulse' : 'border-slate-50 hover:border-blue-400'}`}>
+                      {atraso && <AlertCircle size={14} className="absolute top-2 right-2 text-red-500" />}
+                      <p className="text-[8px] font-bold text-slate-300 uppercase mb-1">{op.cnpj || 'S/ CNPJ'}</p>
+                      <h4 className="font-bold text-slate-700 text-sm leading-tight mb-2 uppercase truncate">{op.nome_cliente}</h4>
+                      <div className="flex justify-between items-end"><span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg font-bold">{op.produto || 'Geral'}</span><span className="text-xs font-black text-slate-600">{formatMoney(op.valor)}</span></div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-3">
-              {oportunidades.filter(o => o.status === est.id).map(op => (
-                <div key={op.id} onClick={() => { setEditingOp(op); setFormData({ ...op, estagio: op.status, dataEntrada: op.data_entrada, dataLembrete: op.data_lembrete || '' }); setModalOpen(true); }} 
-                  className={`bg-white p-4 rounded-xl shadow-sm border-2 transition-all cursor-pointer relative ${isAtrasado(op.data_lembrete) && op.status !== 'fechado' ? 'border-red-500 animate-pulse' : 'border-slate-50 hover:border-blue-400'}`}>
-                  {isAtrasado(op.data_lembrete) && op.status !== 'fechado' && <AlertCircle size={14} className="absolute top-2 right-2 text-red-500" />}
-                  <p className="text-[8px] font-bold text-slate-300 uppercase mb-1">{op.cnpj || 'S/ CNPJ'}</p>
-                  <h4 className="font-bold text-slate-700 text-sm leading-tight mb-2 uppercase truncate">{op.nome_cliente}</h4>
-                  <div className="flex justify-between items-end"><span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg font-bold">{op.produto || 'Geral'}</span><span className="text-xs font-black text-slate-600">{formatMoney(op.valor)}</span></div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* MODAL OFICIAL */}
@@ -151,6 +164,7 @@ export default function PipelinePage() {
             </div>
 
             <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-5 overflow-y-auto bg-white flex-1">
+              {/* Campos do Modelo Original preservados */}
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">CNPJ (Busca Automática)</label>
               <div className="flex gap-2"><input className="w-full bg-slate-50 border rounded-xl p-3 font-mono text-sm" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} onBlur={buscarDadosCNPJ}/><button onClick={buscarDadosCNPJ} className="bg-blue-50 text-blue-600 p-3 rounded-xl border border-blue-100">{loadingCNPJ ? <Loader2 className="animate-spin"/> : <Search size={20}/>}</button></div></div>
 
@@ -162,6 +176,7 @@ export default function PipelinePage() {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Produto / Ativo</label>
                 <input list="prod-list" className="w-full bg-slate-50 border rounded-xl p-3 font-bold" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})}/>
                 <datalist id="prod-list">{PRODUTOS_SUGESTAO.map(p => <option key={p} value={p}/>)}</datalist>
+                {formData.produto && DICAS_TECNICAS[formData.produto] && <p className="text-[9px] text-green-600 font-bold mt-1">{DICAS_TECNICAS[formData.produto]}</p>}
               </div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Aplicação</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.aplicacao} onChange={e => setFormData({...formData, aplicacao: e.target.value})} placeholder="Ex: Dermato..."/></div>
 
@@ -173,7 +188,7 @@ export default function PipelinePage() {
                 <div><label className="text-[10px] font-bold text-orange-500 uppercase mb-1 block">Lembrete</label><input type="date" className="w-full bg-orange-50 border-orange-200 border rounded-xl p-3 font-bold text-orange-800" value={formData.dataLembrete} onChange={e => setFormData({...formData, dataLembrete: e.target.value})}/></div>
               </div>
 
-              {/* MELHORIA: HISTÓRICO ESTRATÉGICO */}
+              {/* MELHORIA: HISTÓRICO ESTRATÉGICO MANTENDO O PADRÃO */}
               <div className="md:col-span-2 bg-blue-50/30 p-4 rounded-2xl border border-blue-100">
                   <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Histórico Estratégico</label>
                   <textarea rows={3} className="w-full bg-white border border-blue-100 rounded-xl p-3 text-sm outline-none" placeholder="Anote aqui o que conversou com o cliente..." value={formData.observacoes} onChange={e => setFormData({...formData, observacoes: e.target.value})}/>
@@ -181,10 +196,10 @@ export default function PipelinePage() {
             </div>
 
             <div className="p-6 bg-slate-50 border-t flex justify-between items-center">
-              {editingOp ? <button onClick={() => setConfirmDelete(true)} className="text-red-500 font-bold text-xs hover:text-red-700 transition">EXCLUIR</button> : <div/>}
+              {editingOp ? <button onClick={() => setConfirmDelete(true)} className="text-red-500 font-bold text-xs hover:text-red-700 transition uppercase tracking-widest">Excluir</button> : <div/>}
               <div className="flex gap-2">
                 <button onClick={() => setModalOpen(false)} className="px-6 font-bold text-slate-400 hover:text-slate-600">Cancelar</button>
-                <button onClick={handleSave} className="bg-[#2563eb] text-white px-10 py-3 rounded-xl font-bold shadow-lg shadow-blue-100 hover:scale-105 transition">SALVAR</button>
+                <button onClick={handleSave} className="bg-[#2563eb] text-white px-10 py-3 rounded-xl font-bold shadow-lg shadow-blue-100 hover:scale-105 transition uppercase tracking-widest">Salvar</button>
               </div>
             </div>
           </div>
