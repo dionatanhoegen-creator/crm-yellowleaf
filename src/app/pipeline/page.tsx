@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { 
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
-  CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, Mail, Instagram, ShieldCheck
+  CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -28,14 +28,13 @@ export default function PipelinePage() {
   const [editingOp, setEditingOp] = useState<any>(null);
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   
   const [formData, setFormData] = useState({
     cnpj: '', nomeCliente: '', contato: '', telefone: '', email: '', produto: '',
     aplicacao: '', valor: '', dataEntrada: new Date().toISOString().split('T')[0],
     estagio: 'prospeccao', dataLembrete: '', observacoes: '',
     kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45',
-    peso_formula_g: '1', fator_lucro: '5', cidade: '', uf: '', observacoes_proposta: ''
+    peso_formula_g: '13.2', fator_lucro: '5', cidade: '', uf: '', observacoes_proposta: ''
   });
 
   useEffect(() => { setMounted(true); carregarOportunidades(); }, []);
@@ -70,79 +69,97 @@ export default function PipelinePage() {
 
   const gerarPDF = (item: any) => {
     const doc = new jsPDF();
-    const verdeYellow = [20, 83, 45];
-    const dataAtual = new Date();
+    const vY = [20, 83, 45]; // Verde Institucional YellowLeaf
 
-    // 1. Cabeçalho
+    // 1. Cabeçalho Institucional
     doc.setFontSize(22);
-    doc.setTextColor(verdeYellow[0], verdeYellow[1], verdeYellow[2]);
-    doc.text("PROPOSTA COMERCIAL", 20, 25);
+    doc.setTextColor(vY[0], vY[1], vY[2]);
+    doc.text("PROPOSTA COMERCIAL", 20, 25); // Título conforme solicitado
     doc.setFontSize(10);
     doc.setTextColor(100);
     doc.text("YellowLeaf - Nutraceuticals Company", 20, 31);
     doc.line(20, 35, 190, 35);
 
     // 2. Dados do Cliente
-    doc.setFontSize(11); doc.setTextColor(0); doc.text("IDENTIFICAÇÃO DO CLIENTE", 20, 45);
+    doc.setFontSize(11); doc.setTextColor(0); doc.text("DADOS DO CLIENTE", 20, 45); 
     doc.setFontSize(10);
-    doc.text(`Cliente: ${item.nomeCliente}`, 20, 52);
-    doc.text(`Contato: ${item.contato} | Tel: ${item.telefone}`, 20, 57);
-    doc.text(`Localidade: ${item.cidade} / ${item.uf}`, 20, 62);
+    doc.text(`Razão Social: ${item.nomeCliente || 'N/A'}`, 20, 52);
+    doc.text(`Contato: ${item.contato || 'N/A'}  |  Telefone: ${item.telefone || 'N/A'}`, 20, 57);
+    doc.text(`Localidade: ${item.cidade || 'N/A'} / ${item.uf || 'N/A'}`, 20, 62);
 
-    // 3. Tabela de Investimento
-    const totalKG = Number(item.kg_proposto) + Number(item.kg_bonificado);
-    const vGrama = (Number(item.valor) / (totalKG * 1000)).toFixed(2);
-    const vParcela = Number(item.valor) / Number(item.parcelas);
+    // 3. Tabela de Investimento (Fixing NaN/Undefined)
+    const valorTotal = Number(item.valor) || 0;
+    const kgProp = Number(item.kg_proposto) || 0;
+    const kgBonif = Number(item.kg_bonificado) || 0;
+    const totalKG = kgProp + kgBonif;
+    const vGrama = totalKG > 0 ? (valorTotal / (totalKG * 1000)) : 0;
+    const nParc = Number(item.parcelas) || 1;
+    const vParcela = valorTotal / nParc;
 
     autoTable(doc, {
       startY: 70,
-      head: [['ESPECIFICAÇÃO TÉCNICA', 'DADOS']],
+      head: [['ESPECIFICAÇÃO DO INVESTIMENTO', 'DADOS']],
       body: [
-        ['Ativo Proposto', item.produto || 'Geral'],
-        ['Quantidade KG', `${item.kg_proposto} KG + ${item.kg_bonificado} KG Bônus`],
-        ['Investimento Total', `R$ ${Number(item.valor).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`],
-        ['Condição de Pagamento', `${item.parcelas} parcelas de R$ ${vParcela.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`]
+        ['Ativo Selecionado', item.produto || 'Insumo'],
+        ['Quantidade KG', `${kgProp} KG + ${kgBonif} KG Bônus`],
+        ['Investimento Total', `R$ ${valorTotal.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`],
+        ['Condição de Pagamento', `${nParc} parcelas de R$ ${vParcela.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`]
       ],
-      headStyles: { fillColor: verdeYellow }
+      headStyles: { fillColor: vY }
     });
 
-    // 4. Cronograma de Pagamento Automático
+    // 4. Cronograma de Pagamento (Loop de Datas)
     let cronograma = [];
-    for(let i=0; i < Number(item.parcelas); i++) {
-      const dataParc = new Date();
-      dataParc.setDate(dataParc.getDate() + Number(item.dias_primeira_parcela) + (i * 30));
-      cronograma.push([`Parcela ${i+1}`, dataParc.toLocaleDateString('pt-BR'), `R$ ${vParcela.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`]);
+    for(let i=0; i < nParc; i++) {
+      const dataVenc = new Date();
+      dataVenc.setDate(dataVenc.getDate() + Number(item.dias_primeira_parcela) + (i * 30));
+      cronograma.push([`Parcela ${i+1}`, dataVenc.toLocaleDateString('pt-BR'), `R$ ${vParcela.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`]);
     }
 
     autoTable(doc, {
       startY: (doc as any).lastAutoTable.finalY + 10,
-      head: [['PROJEÇÃO DE VENCIMENTOS', 'DATA', 'VALOR']],
+      head: [['CRONOGRAMA DE VENCIMENTOS', 'DATA', 'VALOR']],
       body: cronograma,
       headStyles: { fillColor: [37, 99, 235] }
     });
 
-    // 5. Apresentação YellowLeaf
-    const currentY = (doc as any).lastAutoTable.finalY + 15;
-    doc.setFontSize(11); doc.setTextColor(verdeYellow[0], verdeYellow[1], verdeYellow[2]);
-    doc.text("DIFERENCIAIS YELLOWLEAF", 20, currentY);
-    doc.setFontSize(9); doc.setTextColor(100);
-    doc.text("Nossa especialidade é ser diferente. Insumos com certificação internacional.", 20, currentY + 6);
-    doc.text("SELOS DE QUALIDADE: HACCP | ISO 9001 | GMP | FSSC 22000", 20, currentY + 12);
+    // 5. Payback da Fórmula
+    const custoF = (vGrama * (Number(item.peso_formula_g) || 13.2)).toFixed(2);
+    const precoV = (Number(custoF) * (Number(item.fator_lucro) || 5)).toFixed(2);
+    const formulasDia = ((vParcela / Number(precoV)) / 22).toFixed(2);
 
-    // 6. Observações da Proposta
+    autoTable(doc, {
+      startY: (doc as any).lastAutoTable.finalY + 10,
+      head: [['ANÁLISE DE PAYBACK (RETORNO)', 'RESULTADO']],
+      body: [
+        ['Custo por fórmula (Manipulado)', `R$ ${custoF}`],
+        ['Sugestão de Venda (Consumidor)', `R$ ${precoV}`],
+        ['Vendas necessárias/dia para pagar parcela', `${formulasDia} fórmulas/dia`]
+      ],
+      headStyles: { fillColor: vY }
+    });
+
+    // 6. Institucional e Selos
+    const currentY = (doc as any).lastAutoTable.finalY + 15;
+    doc.setFontSize(11); doc.setTextColor(vY[0], vY[1], vY[2]);
+    doc.text("A NOSSA ESPECIALIDADE É SER DIFERENTE", 20, currentY);
+    doc.setFontSize(9); doc.setTextColor(100);
+    doc.text("Insumos com certificação mundial de qualidade e pureza comprovada.", 20, currentY + 6);
+    doc.text("CERTIFICAÇÕES: HACCP | ISO 9001 | GMP | FSSC 22000", 20, currentY + 12);
+
     if (item.observacoes_proposta) {
       doc.text("OBSERVAÇÕES:", 20, currentY + 22);
       doc.text(doc.splitTextToSize(item.observacoes_proposta, 170), 20, currentY + 27);
     }
 
     // 7. Rodapé Assimétrico
-    const fY = 275; doc.setFontSize(7); doc.setTextColor(150);
+    const fY = 282; doc.setFontSize(7); doc.setTextColor(150);
     doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
-    doc.text("Av. Moaci, 395 - CJ 132 - São Paulo/SP | www.yellowleaf.com.br", 20, fY + 4);
-    doc.text("Dionatan Hoegen - Representante Comercial", 190, fY, { align: 'right' });
-    doc.text("WhatsApp: (44) 99102-7642 | @dionatan.magistral", 190, fY + 4, { align: 'right' });
+    doc.text("Av. Moaci, 395 - CJ 132 - Planalto Paulista, São Paulo/SP | www.yellowleaf.com.br", 20, fY + 4);
+    doc.text(`${item.responsavel || 'Dionatan Hoegen'} - Representante Comercial`, 190, fY, { align: 'right' });
+    doc.text("WhatsApp: (44) 99102-7642 | Instagram: @yellowleafnutraceuticals", 190, fY + 4, { align: 'right' });
 
-    doc.save(`Proposta Comercial YellowLeaf - ${item.produto} - ${dataAtual.toLocaleDateString('pt-BR').replace(/\//g, '-')}.pdf`);
+    doc.save(`Proposta Comercial YellowLeaf - ${item.produto} - ${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.pdf`);
   };
 
   const handleSave = async () => {
@@ -161,16 +178,18 @@ export default function PipelinePage() {
     };
 
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
-    if (!error) { setModalOpen(false); carregarOportunidades(); } else { alert("Erro ao salvar. Verifique se rodou o SQL."); }
+    if (!error) { setModalOpen(false); carregarOportunidades(); } else { alert("Erro ao salvar no banco. Verifique as colunas."); }
   };
 
   return (
     <div className="w-full p-4">
+      {/* Kanban Header */}
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-2xl font-black text-[#1e293b] italic uppercase tracking-tighter">Pipeline YellowLeaf</h1>
         <button onClick={() => { setEditingOp(null); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg transition active:scale-95">+ Nova Oportunidade</button>
       </div>
 
+      {/* Kanban Grid */}
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 h-[calc(100vh-180px)] overflow-x-auto pb-4">
         {ESTAGIOS.map(est => (
           <div key={est.id} className="bg-slate-50/50 rounded-2xl border border-slate-200 flex flex-col min-w-[250px] overflow-hidden">
@@ -187,9 +206,10 @@ export default function PipelinePage() {
         ))}
       </div>
 
+      {/* Modal */}
       {modalOpen && mounted && createPortal(
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-4xl rounded-[2.5rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95">
+          <div className="bg-white w-full max-w-4xl rounded-[2.5rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden">
             <div className="bg-[#242f3e] p-6 flex justify-between items-center text-white shrink-0">
               <h2 className="text-lg font-bold flex items-center gap-2">✨ {editingOp ? 'Editar Proposta Comercial' : 'Nova Oportunidade'}</h2>
               <div className="flex gap-2">
@@ -199,37 +219,35 @@ export default function PipelinePage() {
             </div>
 
             <div className="p-8 grid grid-cols-1 md:grid-cols-4 gap-5 overflow-y-auto bg-white flex-1">
-              <div className="md:col-span-4 border-b pb-2"><h3 className="text-[10px] font-black text-blue-600 uppercase">1. Identificação Comercial</h3></div>
+              {/* Identificação */}
+              <div className="md:col-span-4 border-b pb-2"><h3 className="text-[10px] font-black text-blue-600 uppercase">1. Dados do Cliente</h3></div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">CNPJ</label><div className="flex gap-2"><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} onBlur={buscarDadosCNPJ}/><button onClick={buscarDadosCNPJ} className="bg-blue-50 text-blue-600 p-3 rounded-xl border"><Search size={20}/></button></div></div>
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Razão / Fantasia</label><input className="w-full bg-slate-50 border rounded-xl p-3 font-bold uppercase" value={formData.nomeCliente} onChange={e => setFormData({...formData, nomeCliente: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Cidade</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.cidade} readOnly/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">UF</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.uf} readOnly/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Contato (A/C)</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">WhatsApp</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})}/></div>
+              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Razão Social</label><input className="w-full bg-slate-50 border rounded-xl p-3 font-bold uppercase" value={formData.nomeCliente} onChange={e => setFormData({...formData, nomeCliente: e.target.value})}/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Cidade</label><input className="w-full bg-slate-100 border rounded-xl p-3" value={formData.cidade} readOnly/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">UF</label><input className="w-full bg-slate-100 border rounded-xl p-3" value={formData.uf} readOnly/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Contato</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value})}/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Telefone</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})}/></div>
 
-              <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Condições da Proposta</h3></div>
+              {/* Proposta */}
+              <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta de Investimento</h3></div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Ativo</label><input className="w-full bg-slate-50 border rounded-xl p-3 font-bold" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Proposto</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Bônus</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
               
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor Total R$</label><input type="number" className="w-full bg-green-50 border rounded-xl p-3 font-black text-green-700" value={formData.valor} onChange={e => setFormData({...formData, valor: e.target.value})}/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento R$</label><input type="number" className="w-full bg-green-50 border rounded-xl p-3 font-black text-green-700" value={formData.valor} onChange={e => setFormData({...formData, valor: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Parcelas</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Início (Dias)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª (Dias)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Fator Lucro</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.fator_lucro} onChange={e => setFormData({...formData, fator_lucro: e.target.value})}/></div>
 
-              <div className="md:col-span-4 bg-slate-50 p-4 rounded-2xl border">
-                  <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Observações Internas</label>
-                  <textarea rows={2} className="w-full bg-white border rounded-xl p-3 text-sm" value={formData.observacoes} onChange={e => setFormData({...formData, observacoes: e.target.value})}/>
-              </div>
               <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100">
-                  <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><FileText size={14}/> Condições que saem no PDF</label>
-                  <textarea rows={2} className="w-full bg-white border border-blue-100 rounded-xl p-3 text-sm" value={formData.observacoes_proposta} onChange={e => setFormData({...formData, observacoes_proposta: e.target.value})} placeholder="Ex: Prazo de entrega de 5 dias úteis..."/>
+                  <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Observações da Proposta (PDF)</label>
+                  <textarea rows={2} className="w-full bg-white border border-blue-100 rounded-xl p-3 text-sm outline-none" value={formData.observacoes_proposta} onChange={e => setFormData({...formData, observacoes_proposta: e.target.value})} placeholder="Ex: Prazo de entrega imediato..."/>
               </div>
             </div>
 
             <div className="p-6 bg-slate-50 border-t flex justify-between items-center">
-              {editingOp ? <button onClick={() => { if(confirm('Excluir?')) { supabase.from('pipeline').delete().eq('id', editingOp.id); carregarOportunidades(); setModalOpen(false); }}} className="text-red-500 font-bold text-xs uppercase">Excluir</button> : <div/>}
-              <div className="flex gap-2"><button onClick={() => setModalOpen(false)} className="px-6 font-bold text-slate-400">CANCELAR</button><button onClick={handleSave} className="bg-[#2563eb] text-white px-12 py-3 rounded-xl font-bold shadow-lg uppercase tracking-widest active:scale-95 transition">Salvar</button></div>
+              {editingOp ? <button onClick={() => { if(confirm('Excluir?')) { supabase.from('pipeline').delete().eq('id', editingOp.id); carregarOportunidades(); setModalOpen(false); }}} className="text-red-500 font-bold text-xs uppercase tracking-widest">Excluir</button> : <div/>}
+              <div className="flex gap-2"><button onClick={() => setModalOpen(false)} className="px-6 font-bold text-slate-400">CANCELAR</button><button onClick={handleSave} className="bg-[#2563eb] text-white px-12 py-3 rounded-xl font-bold shadow-lg uppercase tracking-widest active:scale-95 transition">Salvar Proposta</button></div>
             </div>
           </div>
         </div>, document.body
