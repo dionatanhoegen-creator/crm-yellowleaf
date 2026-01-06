@@ -1,13 +1,12 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Plus,
   Search,
   Calendar,
   User,
-  X,
   Beaker,
   Tag,
   MessageCircle,
@@ -17,6 +16,7 @@ import {
   ShieldAlert,
   AlertTriangle,
   Loader2,
+  X,
 } from "lucide-react";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
@@ -46,48 +46,19 @@ interface Oportunidade {
     | "perdido";
   motivoPerda?: string;
   responsavel: string;
-
-  // ENRIQUECIMENTO
-  origemOportunidade?: "prospect" | "carteira_propria";
-  bloqueadoPorCarteira?: boolean;
   clienteJaCadastrado?: boolean;
 }
 
 // =====================
 // CONSTANTES
 // =====================
-const PRODUTOS_SUGESTAO = [
-  "Allisane®",
-  "Anethin®",
-  "Anidream®",
-  "ArtemiFresh®",
-  "BioCarum®",
-  "Cardasense®",
-  "CarySlim®",
-  "FIThymus®",
-  "GF Slim II®",
-  "Glutaliz®",
-  "GraperLIP®",
-  "Junipure®",
-  "LipoArtich II®",
-  "NobiLIP®",
-  "Noble Skin®",
-  "Nutberry Slim®",
-  "Nutmeg B12®",
-  "OriganLIP®",
-  "Pepper PRO®",
-  "Powder Lymp II®",
-  "Purin 7®",
-  "R-GEN2®",
-  "ReduCINN®",
-  "Reichi UP II ®",
-  "Sinensis Lean II ®",
-  "Sineredux II ®",
-  "SlimHaut®",
-  "TarhunLIP®",
-  "Taurymus®",
-  "TBooster®",
-  "VerumFEM®",
+const ESTAGIOS = [
+  { id: "prospeccao", label: "Prospecção", color: "border-blue-500" },
+  { id: "qualificacao", label: "Qualificação", color: "border-purple-500" },
+  { id: "apresentacao", label: "Apresentação", color: "border-pink-500" },
+  { id: "negociacao", label: "Negociação", color: "border-yellow-500" },
+  { id: "fechado", label: "Fechado", color: "border-green-500" },
+  { id: "perdido", label: "Perdido", color: "border-red-500" },
 ];
 
 const MOTIVOS_PERDA = [
@@ -99,15 +70,6 @@ const MOTIVOS_PERDA = [
   "Outros",
 ];
 
-const ESTAGIOS = [
-  { id: "prospeccao", label: "Prospecção", color: "border-blue-500" },
-  { id: "qualificacao", label: "Qualificação", color: "border-purple-500" },
-  { id: "apresentacao", label: "Apresentação", color: "border-pink-500" },
-  { id: "negociacao", label: "Negociação", color: "border-yellow-500" },
-  { id: "fechado", label: "Fechado", color: "border-green-500" },
-  { id: "perdido", label: "Perdido", color: "border-red-500" },
-];
-
 // =====================
 // COMPONENTE
 // =====================
@@ -116,15 +78,13 @@ export default function PipelinePage() {
 
   const [oportunidades, setOportunidades] = useState<Oportunidade[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<Oportunidade | null>(null);
-  const [loadingCNPJ, setLoadingCNPJ] = useState(false);
-  const [baseClientes, setBaseClientes] = useState<any[]>([]);
-  const [mounted, setMounted] = useState(false);
-  const [usuarioLogadoNome, setUsuarioLogadoNome] = useState("Vendedor");
-
-  const [erroBloqueio, setErroBloqueio] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [formData, setFormData] = useState<Partial<Oportunidade>>({
+    estagio: "prospeccao",
+    dataEntrada: new Date().toISOString().split("T")[0],
+  });
 
   const [toast, setToast] = useState<{
     show: boolean;
@@ -132,35 +92,23 @@ export default function PipelinePage() {
     type: "success" | "error" | "warning";
   }>({ show: false, msg: "", type: "success" });
 
-  const [formData, setFormData] = useState<Partial<Oportunidade>>({
-    estagio: "prospeccao",
-    dataEntrada: new Date().toISOString().split("T")[0],
-  });
+  const [erroBloqueio, setErroBloqueio] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // =====================
-  // EFEITOS
+  // LOAD
   // =====================
   useEffect(() => {
     setMounted(true);
-    carregarUsuario();
     carregarOportunidades();
-    carregarBaseClientes();
   }, []);
-
-  const carregarUsuario = async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (user?.email) {
-      setUsuarioLogadoNome(user.email.split("@")[0]);
-    }
-  };
 
   const carregarOportunidades = async () => {
     setLoading(true);
     const {
       data: { user },
     } = await supabase.auth.getUser();
+
     if (!user) return;
 
     const { data } = await supabase
@@ -171,7 +119,7 @@ export default function PipelinePage() {
 
     if (data) {
       setOportunidades(
-        data.map((item) => ({
+        data.map((item: any) => ({
           id: item.id,
           cnpj: item.cnpj,
           nomeCliente: item.nome_cliente,
@@ -184,21 +132,12 @@ export default function PipelinePage() {
           dataLembrete: item.data_lembrete,
           estagio: item.status,
           motivoPerda: item.motivo_perda,
-          responsavel: usuarioLogadoNome,
-          origemOportunidade: item.origem_oportunidade,
-          bloqueadoPorCarteira: item.bloqueado_por_carteira,
+          responsavel: "",
         }))
       );
     }
-    setLoading(false);
-  };
 
-  const carregarBaseClientes = async () => {
-    try {
-      const res = await fetch(`${API_URL}?path=clientes`);
-      const json = await res.json();
-      if (json.success) setBaseClientes(json.data);
-    } catch {}
+    setLoading(false);
   };
 
   const showToast = (
@@ -206,46 +145,15 @@ export default function PipelinePage() {
     type: "success" | "error" | "warning" = "success"
   ) => {
     setToast({ show: true, msg, type });
-    setTimeout(() => setToast({ ...toast, show: false }), 4000);
+    setTimeout(() => setToast((t) => ({ ...t, show: false })), 4000);
   };
 
   // =====================
-  // BUSCA CNPJ
-  // =====================
-  const buscarDadosCNPJ = async () => {
-    const cnpjLimpo = formData.cnpj?.replace(/\D/g, "");
-    if (!cnpjLimpo || cnpjLimpo.length !== 14) return;
-
-    setLoadingCNPJ(true);
-    setErroBloqueio(null);
-
-    try {
-      const response = await fetch(
-        `https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`
-      );
-      if (!response.ok) throw new Error();
-      const data = await response.json();
-
-      setFormData((prev) => ({
-        ...prev,
-        nomeCliente: data.nome_fantasia || data.razao_social,
-        clienteJaCadastrado: false,
-      }));
-    } catch {
-      showToast("CNPJ não encontrado", "error");
-    } finally {
-      setLoadingCNPJ(false);
-    }
-  };
-
-  // =====================
-  // SALVAR
+  // SAVE
   // =====================
   const handleSave = async () => {
-    setErroBloqueio(null);
-
-    if (!formData.cnpj || !formData.nomeCliente) {
-      showToast("Preencha CNPJ e Nome", "warning");
+    if (!formData.nomeCliente) {
+      showToast("Nome do cliente obrigatório", "warning");
       return;
     }
 
@@ -254,25 +162,9 @@ export default function PipelinePage() {
     } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data: validacao } = await supabase.rpc(
-      "verificar_cnpj_pipeline",
-      {
-        p_cnpj: formData.cnpj.replace(/\D/g, ""),
-        p_representante_nome: usuarioLogadoNome,
-      }
-    );
-
-    if (!validacao?.permitido) {
-      setErroBloqueio(
-        `Cliente pertence à carteira de ${validacao.representante}`
-      );
-      showToast("Cliente bloqueado", "error");
-      return;
-    }
-
     const payload = {
       user_id: user.id,
-      cnpj: formData.cnpj.replace(/\D/g, ""),
+      cnpj: formData.cnpj,
       nome_cliente: formData.nomeCliente,
       contato: formData.contato,
       telefone: formData.telefone,
@@ -283,11 +175,6 @@ export default function PipelinePage() {
       data_entrada: formData.dataEntrada,
       data_lembrete: formData.dataLembrete,
       motivo_perda: formData.motivoPerda,
-      origem_oportunidade:
-        validacao.tipo === "carteira_propria"
-          ? "carteira_propria"
-          : "prospect",
-      bloqueado_por_carteira: false,
     };
 
     if (editingOp) {
@@ -303,21 +190,55 @@ export default function PipelinePage() {
   };
 
   // =====================
-  // UI (mantida)
+  // UI
   // =====================
-return (
-  <div className="w-full">
-    {/* TOAST */}
-    {toast.show && mounted && createPortal( ... )}
+  return (
+    <div className="w-full p-4">
+      {toast.show &&
+        mounted &&
+        createPortal(
+          <div className="fixed top-5 right-5 z-[100000] bg-green-600 text-white px-6 py-4 rounded-xl shadow-2xl flex gap-3">
+            <CheckCircle2 />
+            <div>
+              <p className="font-bold">Aviso</p>
+              <p className="text-sm">{toast.msg}</p>
+            </div>
+          </div>,
+          document.body
+        )}
 
-    {/* HEADER */}
-    ...
+      <h1 className="text-2xl font-black mb-4">Pipeline de Vendas</h1>
 
-    {/* KANBAN */}
-    ...
+      {loading ? (
+        <div className="flex items-center gap-2 text-slate-400">
+          <Loader2 className="animate-spin" /> Carregando...
+        </div>
+      ) : (
+        <div className="grid grid-cols-6 gap-2">
+          {ESTAGIOS.map((estagio) => (
+            <div key={estagio.id} className="bg-slate-100 rounded p-2">
+              <h3 className="font-bold text-sm mb-2">{estagio.label}</h3>
+              {oportunidades
+                .filter((o) => o.estagio === estagio.id)
+                .map((item) => (
+                  <div
+                    key={item.id}
+                    className="bg-white p-2 rounded mb-2 cursor-pointer"
+                    onClick={() => {
+                      setEditingOp(item);
+                      setFormData(item);
+                      setModalOpen(true);
+                    }}
+                  >
+                    <p className="font-bold text-sm">{item.nomeCliente}</p>
+                    <p className="text-xs text-slate-500">{item.produto}</p>
+                  </div>
+                ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
-    {/* MODAL */}
-    ...
-
-  </div>
-);
