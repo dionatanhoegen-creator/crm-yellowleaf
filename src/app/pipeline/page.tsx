@@ -11,7 +11,7 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// --- TABELA TÉCNICA OFICIAL (Baseada na imagem 055738) ---
+// --- TABELA TÉCNICA OFICIAL ATUALIZADA (Imagem 055738) ---
 const TABELA_PRODUTOS: Record<string, any> = {
   "Allisane®": { preco_g: 2.50, peso: 15.0 },
   "Anethin®": { preco_g: 2.50, peso: 12.0 },
@@ -57,7 +57,7 @@ export default function PipelinePage() {
 
   useEffect(() => { setMounted(true); carregarOportunidades(); }, []);
 
-  // Preenchimento de preços e pesos baseado na planilha
+  // Sincronização de Valores (Imagem 055738)
   useEffect(() => {
     if (TABELA_PRODUTOS[formData.produto]) {
       const p = TABELA_PRODUTOS[formData.produto];
@@ -88,8 +88,6 @@ export default function PipelinePage() {
       const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`);
       const data = await res.json();
       const telFound = data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : "";
-      
-      // Fixando as informações de localidade e cliente
       setFormData(prev => ({ 
         ...prev, 
         nomeCliente: data.nome_fantasia || data.razao_social || '',
@@ -101,26 +99,31 @@ export default function PipelinePage() {
     setLoadingCNPJ(false);
   };
 
+  const formatCurrency = (val: any) => {
+    const num = Number(val) || 0;
+    return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  };
+
   const gerarPDF = (item: any) => {
     const doc = new jsPDF();
     const vY = [20, 83, 45]; // Verde YellowLeaf
     const dataDoc = new Date().toLocaleDateString('pt-BR');
 
-    // Cabeçalho Oficial
+    // 1. Cabeçalho
     doc.setFontSize(22); doc.setTextColor(vY[0], vY[1], vY[2]);
     doc.text("PROPOSTA COMERCIAL", 20, 25);
     doc.setFontSize(10); doc.setTextColor(100);
     doc.text("YellowLeaf - Nutraceuticals Company", 20, 31);
     doc.line(20, 35, 190, 35);
 
-    // Dados do Cliente
+    // 2. Dados do Cliente
     doc.setFontSize(11); doc.setTextColor(0); doc.text("DADOS DO CLIENTE", 20, 45);
     doc.setFontSize(10);
-    doc.text(`Razão Social: ${item.nomeCliente}`, 20, 52);
-    doc.text(`Contato: ${item.contato}  |  Telefone: ${item.telefone}`, 20, 57);
-    doc.text(`Cidade/UF: ${item.cidade} / ${item.uf}`, 20, 62);
+    doc.text(`Razão Social: ${item.nomeCliente || 'Não informado'}`, 20, 52);
+    doc.text(`Contato: ${item.contato || 'Não informado'}  |  Telefone: ${item.telefone || 'Não informado'}`, 20, 57);
+    doc.text(`Cidade/UF: ${item.cidade || 'Não informado'} / ${item.uf || ''}`, 20, 62);
 
-    // Investimento
+    // 3. Investimento Customizado
     const totalKG = Number(item.kg_proposto) + Number(item.kg_bonificado);
     const vGramaReal = (Number(item.valor) / (totalKG * 1000)) || 0;
     const vParc = (Number(item.valor) / Number(item.parcelas)) || 0;
@@ -129,16 +132,18 @@ export default function PipelinePage() {
       startY: 70,
       head: [['ESPECIFICAÇÃO DO INVESTIMENTO', 'VALORES']],
       body: [
-        ['Ativo Selecionado', item.produto || 'Insumo'],
-        ['Preço por Grama (Tabela)', `R$ ${Number(item.valor_g_tabela).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`],
-        ['Quantidade Contratada', `${item.kg_proposto} KG + ${item.kg_bonificado} KG Bonificação`],
-        ['Investimento Total', `R$ ${Number(item.valor).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`],
-        ['Forma de Pagamento', `${item.parcelas} parcelas de R$ ${vParc.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`]
+        ['Ativo Selecionado', item.produto || 'Insumo/Ativo'],
+        ['Preço por Grama (Tabela)', formatCurrency(item.valor_g_tabela)],
+        ['Quantidade proposta (kg)', `${item.kg_proposto} KG`],
+        ['Quantidade bonificada (kg)', `${item.kg_bonificado} KG`],
+        ['Investimento Total', formatCurrency(item.valor)],
+        ['Valor do grama com bonificação aplicada (R$/g)', formatCurrency(vGramaReal)],
+        ['Forma de Pagamento', `${item.parcelas} parcelas de ${formatCurrency(vParc)}`]
       ],
       headStyles: { fillColor: vY }
     });
 
-    // Payback Estratégico
+    // 4. Payback
     const custoF = (vGramaReal * Number(item.peso_formula_g));
     const precoV = (custoF * Number(item.fator_lucro));
     const formulasDia = vParc > 0 ? ((vParc / precoV) / 22) : 0;
@@ -147,19 +152,19 @@ export default function PipelinePage() {
       startY: (doc as any).lastAutoTable.finalY + 10,
       head: [['ANÁLISE TÉCNICA DE RETORNO (PAYBACK)', 'VALOR']],
       body: [
-        ['Custo por fórmula (Manipulado)', `R$ ${custoF.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`],
-        ['Sugestão de Venda (Fator 5x)', `R$ ${precoV.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`],
-        ['Fórmulas necessárias/dia para pagar parcela', `${formulasDia.toFixed(2)} fórmulas/dia`]
+        ['Custo por fórmula (Manipulado)', formatCurrency(custoF)],
+        ['Sugestão de Venda (Fator 5x)', formatCurrency(precoV)],
+        ['Vendas necessárias/dia para pagar parcela', `${formulasDia.toFixed(2)} fórmulas/dia`]
       ],
       headStyles: { fillColor: [37, 99, 235] }
     });
 
-    // Institucional e Selos
+    // 5. Institucional
     const curY = (doc as any).lastAutoTable.finalY + 15;
     doc.setFontSize(11); doc.setTextColor(vY[0], vY[1], vY[2]);
     doc.text("DIFERENCIAIS YELLOWLEAF", 20, curY);
     doc.setFontSize(9); doc.setTextColor(100);
-    doc.text("Insumos com certificação mundial. Segurança e eficácia magistral.", 20, curY + 6);
+    doc.text("A nossa especialidade é ser diferente. Insumos com certificação mundial.", 20, curY + 6);
     doc.text("CERTIFICAÇÕES: HACCP | ISO 9001 | GMP | FSSC 22000", 20, curY + 12);
 
     if (item.observacoes_proposta) {
@@ -167,7 +172,7 @@ export default function PipelinePage() {
       doc.text(doc.splitTextToSize(item.observacoes_proposta, 170), 20, curY + 27);
     }
 
-    // Rodapé Assimétrico
+    // 6. Rodapé
     const fY = 282; doc.setFontSize(7); doc.setTextColor(150);
     doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
     doc.text("Av. Moaci, 395 - CJ 132 - São Paulo/SP | 0800 000 1560", 20, fY + 4);
@@ -181,7 +186,6 @@ export default function PipelinePage() {
     if (!formData.nomeCliente || !formData.valor) return alert("Preencha Nome e Valor.");
     const { data: { user } } = await supabase.auth.getUser();
     
-    // Payload limpo para evitar erros de tipo no Supabase
     const payload = {
       user_id: user?.id, cnpj: formData.cnpj, nome_cliente: formData.nomeCliente, contato: formData.contato,
       telefone: formData.telefone, email: formData.email, produto: formData.produto, aplicacao: formData.aplicacao,
@@ -189,15 +193,13 @@ export default function PipelinePage() {
       data_lembrete: formData.dataLembrete || null, observacoes: formData.observacoes,
       kg_proposto: Number(formData.kg_proposto) || 0, kg_bonificado: Number(formData.kg_bonificado) || 0,
       parcelas: Number(formData.parcelas) || 1, dias_primeira_parcela: Number(formData.dias_primeira_parcela) || 45,
-      peso_formula_g: Number(formData.peso_formula_g) || 1, fator_lucro: Number(formData.fator_lucro) || 5,
+      peso_formula_g: Number(formData.peso_formula_g) || 13.2, fator_lucro: Number(formData.fator_lucro) || 5,
       cidade_exclusividade: formData.cidade, uf_exclusividade: formData.uf, 
       observacoes_proposta: formData.observacoes_proposta, valor_g_tabela: Number(formData.valor_g_tabela) || 0
     };
 
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
-    
-    if (!error) { setModalOpen(false); carregarOportunidades(); } 
-    else { console.error(error); alert("Erro ao salvar. Verifique se o SQL foi executado."); }
+    if (!error) { setModalOpen(false); carregarOportunidades(); } else { alert("Erro ao salvar no banco."); }
   };
 
   return (
@@ -216,7 +218,7 @@ export default function PipelinePage() {
               {oportunidades.filter(o => o.status === est.id).map(op => (
                 <div key={op.id} onClick={() => { setEditingOp(op); setFormData({...op, estagio: op.status, cidade: op.cidade_exclusividade, uf: op.uf_exclusividade}); setModalOpen(true); }} className="bg-white p-4 rounded-xl border border-slate-100 cursor-pointer hover:border-blue-400">
                   <h4 className="font-bold text-slate-700 text-sm uppercase truncate">{op.nome_cliente}</h4>
-                  <div className="flex justify-between items-end mt-2"><span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg font-bold">{op.produto}</span><span className="text-xs font-black text-slate-600">R$ {Number(op.valor).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span></div>
+                  <div className="flex justify-between items-end mt-2"><span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg font-bold">{op.produto}</span><span className="text-xs font-black text-slate-600">{formatCurrency(op.valor)}</span></div>
                 </div>
               ))}
             </div>
@@ -228,7 +230,7 @@ export default function PipelinePage() {
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-5xl rounded-[2.5rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95">
             <div className="bg-[#242f3e] p-6 flex justify-between items-center text-white shrink-0">
-              <h2 className="text-lg font-bold flex items-center gap-2">✨ {editingOp ? 'Editar Proposta Técnica' : 'Nova Oportunidade'}</h2>
+              <h2 className="text-lg font-bold flex items-center gap-2">✨ {editingOp ? 'Editar Proposta Comercial' : 'Nova Oportunidade'}</h2>
               <div className="flex gap-2">
                 {editingOp && <button onClick={() => gerarPDF(formData)} className="bg-green-600 px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase shadow-md"><Download size={14}/> Gerar Relatório</button>}
                 <button onClick={() => setModalOpen(false)} className="hover:bg-white/10 p-1 rounded-full"><X/></button>
@@ -264,7 +266,7 @@ export default function PipelinePage() {
               {editingOp && <button onClick={() => { if(confirm('Excluir?')) { supabase.from('pipeline').delete().eq('id', editingOp.id); carregarOportunidades(); setModalOpen(false); }}} className="text-red-500 font-bold text-xs uppercase">Excluir</button>}
               <div className="flex gap-2">
                 <button onClick={() => setModalOpen(false)} className="px-6 font-bold text-slate-400">CANCELAR</button>
-                <button onClick={handleSave} className="bg-[#2563eb] text-white px-12 py-3 rounded-xl font-bold shadow-lg uppercase tracking-widest active:scale-95 transition">Salvar Proposta</button>
+                <button onClick={handleSave} className="bg-[#2563eb] text-white px-12 py-3 rounded-xl font-bold shadow-lg uppercase tracking-widest transition active:scale-95">Salvar Proposta</button>
               </div>
             </div>
           </div>
