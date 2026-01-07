@@ -11,13 +11,21 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// --- BASE TÉCNICA DE PRODUTOS ---
+// --- TABELA TÉCNICA OFICIAL (Baseada na imagem 055738) ---
 const TABELA_PRODUTOS: Record<string, any> = {
-  "SlimHaut®": { preco_g: 2.50, peso: 13.2 },
-  "Allisane®": { preco_g: 1.80, peso: 30.0 },
-  "ArtemiFresh®": { preco_g: 3.20, peso: 6.0 },
-  "VerumFEM®": { preco_g: 2.10, peso: 15.0 },
-  "Sineredux®": { preco_g: 2.50, peso: 13.2 }
+  "Allisane®": { preco_g: 2.50, peso: 15.0 },
+  "Anethin®": { preco_g: 2.50, peso: 12.0 },
+  "Anidream®": { preco_g: 12.00, peso: 1.5 },
+  "ArtemiFresh®": { preco_g: 2.50, peso: 15.0 },
+  "BioCarum®": { preco_g: 2.50, peso: 15.0 },
+  "Cardasense®": { preco_g: 2.50, peso: 12.0 },
+  "CarySlim®": { preco_g: 2.50, peso: 12.0 },
+  "FIThymus®": { preco_g: 2.50, peso: 12.0 },
+  "GF Slim II®": { preco_g: 2.50, peso: 27.0 },
+  "Glutaliz®": { preco_g: 3.00, peso: 15.0 },
+  "Sineredux II ®": { preco_g: 2.50, peso: 13.2 },
+  "SlimHaut®": { preco_g: 2.50, peso: 15.0 },
+  "VerumFEM®": { preco_g: 3.00, peso: 12.0 }
 };
 
 const ESTAGIOS = [
@@ -49,15 +57,15 @@ export default function PipelinePage() {
 
   useEffect(() => { setMounted(true); carregarOportunidades(); }, []);
 
-  // Busca automática de dados do produto
+  // Preenchimento de preços e pesos baseado na planilha
   useEffect(() => {
     if (TABELA_PRODUTOS[formData.produto]) {
       const p = TABELA_PRODUTOS[formData.produto];
       setFormData(prev => ({ 
         ...prev, 
-        valor_g_tabela: p.preco_g.toString(),
+        valor_g_tabela: p.preco_g.toFixed(2),
         peso_formula_g: p.peso.toString(),
-        valor: (p.preco_g * 1000 * Number(prev.kg_proposto)).toString()
+        valor: (p.preco_g * 1000 * Number(prev.kg_proposto)).toFixed(2)
       }));
     }
   }, [formData.produto]);
@@ -79,12 +87,15 @@ export default function PipelinePage() {
     try {
       const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`);
       const data = await res.json();
+      const telFound = data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : "";
+      
+      // Fixando as informações de localidade e cliente
       setFormData(prev => ({ 
         ...prev, 
         nomeCliente: data.nome_fantasia || data.razao_social || '',
         cidade: data.municipio || '',
         uf: data.uf || '',
-        telefone: data.ddd_telefone_1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : prev.telefone
+        telefone: telFound || prev.telefone
       }));
     } catch (e) { console.error("Erro CNPJ"); }
     setLoadingCNPJ(false);
@@ -92,105 +103,109 @@ export default function PipelinePage() {
 
   const gerarPDF = (item: any) => {
     const doc = new jsPDF();
-    const vY = [20, 83, 45]; // Verde Oficial
+    const vY = [20, 83, 45]; // Verde YellowLeaf
+    const dataDoc = new Date().toLocaleDateString('pt-BR');
 
-    // 1. Cabeçalho
+    // Cabeçalho Oficial
     doc.setFontSize(22); doc.setTextColor(vY[0], vY[1], vY[2]);
     doc.text("PROPOSTA COMERCIAL", 20, 25);
     doc.setFontSize(10); doc.setTextColor(100);
     doc.text("YellowLeaf - Nutraceuticals Company", 20, 31);
     doc.line(20, 35, 190, 35);
 
-    // 2. Dados do Cliente
+    // Dados do Cliente
     doc.setFontSize(11); doc.setTextColor(0); doc.text("DADOS DO CLIENTE", 20, 45);
     doc.setFontSize(10);
     doc.text(`Razão Social: ${item.nomeCliente}`, 20, 52);
     doc.text(`Contato: ${item.contato}  |  Telefone: ${item.telefone}`, 20, 57);
-    doc.text(`Localidade: ${item.cidade} / ${item.uf}`, 20, 62);
+    doc.text(`Cidade/UF: ${item.cidade} / ${item.uf}`, 20, 62);
 
-    // 3. Tabela de Investimento
+    // Investimento
     const totalKG = Number(item.kg_proposto) + Number(item.kg_bonificado);
-    const vGramaReal = (Number(item.valor) / (totalKG * 1000));
-    const vParc = Number(item.valor) / Number(item.parcelas);
+    const vGramaReal = (Number(item.valor) / (totalKG * 1000)) || 0;
+    const vParc = (Number(item.valor) / Number(item.parcelas)) || 0;
 
     autoTable(doc, {
       startY: 70,
       head: [['ESPECIFICAÇÃO DO INVESTIMENTO', 'VALORES']],
       body: [
-        ['Ativo Proposto', item.produto || 'Insumo'],
-        ['Valor de Tabela (Grama)', `R$ ${Number(item.valor_g_tabela).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`],
-        ['Quantidade Total', `${item.kg_proposto} KG + ${item.kg_bonificado} KG Bônus`],
+        ['Ativo Selecionado', item.produto || 'Insumo'],
+        ['Preço por Grama (Tabela)', `R$ ${Number(item.valor_g_tabela).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`],
+        ['Quantidade Contratada', `${item.kg_proposto} KG + ${item.kg_bonificado} KG Bonificação`],
         ['Investimento Total', `R$ ${Number(item.valor).toLocaleString('pt-BR', {minimumFractionDigits: 2})}`],
-        ['Condição de Pagamento', `${item.parcelas} parcelas de R$ ${vParc.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`],
-        ['Valor por Grama (Efetivo)', `R$ ${vGramaReal.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`]
+        ['Forma de Pagamento', `${item.parcelas} parcelas de R$ ${vParc.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`]
       ],
       headStyles: { fillColor: vY }
     });
 
-    // 4. Payback
+    // Payback Estratégico
     const custoF = (vGramaReal * Number(item.peso_formula_g));
     const precoV = (custoF * Number(item.fator_lucro));
-    const payback = ((vParc / precoV) / 22);
+    const formulasDia = vParc > 0 ? ((vParc / precoV) / 22) : 0;
 
     autoTable(doc, {
       startY: (doc as any).lastAutoTable.finalY + 10,
-      head: [['ANÁLISE DE RETORNO (PAYBACK)', 'VALOR']],
+      head: [['ANÁLISE TÉCNICA DE RETORNO (PAYBACK)', 'VALOR']],
       body: [
-        ['Custo estimado da fórmula pronta', `R$ ${custoF.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`],
-        ['Sugestão de preço ao consumidor', `R$ ${precoV.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`],
-        ['Fórmulas necessárias/dia para pagar parcela', `${payback.toFixed(2)} fórmulas/dia`]
+        ['Custo por fórmula (Manipulado)', `R$ ${custoF.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`],
+        ['Sugestão de Venda (Fator 5x)', `R$ ${precoV.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`],
+        ['Fórmulas necessárias/dia para pagar parcela', `${formulasDia.toFixed(2)} fórmulas/dia`]
       ],
       headStyles: { fillColor: [37, 99, 235] }
     });
 
-    // 5. Apresentação e Selos
+    // Institucional e Selos
     const curY = (doc as any).lastAutoTable.finalY + 15;
     doc.setFontSize(11); doc.setTextColor(vY[0], vY[1], vY[2]);
     doc.text("DIFERENCIAIS YELLOWLEAF", 20, curY);
     doc.setFontSize(9); doc.setTextColor(100);
-    doc.text("A nossa especialidade é ser diferente. Insumos com certificação mundial.", 20, curY + 6);
-    doc.text("SELOS: HACCP | ISO 9001 | GMP | FSSC 22000", 20, curY + 12);
+    doc.text("Insumos com certificação mundial. Segurança e eficácia magistral.", 20, curY + 6);
+    doc.text("CERTIFICAÇÕES: HACCP | ISO 9001 | GMP | FSSC 22000", 20, curY + 12);
 
     if (item.observacoes_proposta) {
       doc.text("NOTAS:", 20, curY + 22);
       doc.text(doc.splitTextToSize(item.observacoes_proposta, 170), 20, curY + 27);
     }
 
-    // 6. Rodapé Oficial Assimétrico
+    // Rodapé Assimétrico
     const fY = 282; doc.setFontSize(7); doc.setTextColor(150);
     doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
     doc.text("Av. Moaci, 395 - CJ 132 - São Paulo/SP | 0800 000 1560", 20, fY + 4);
     doc.text("Dionatan Hoegen - Representante Comercial", 190, fY, { align: 'right' });
-    doc.text("WhatsApp: (44) 99102-7642 | @dionatan.magistral", 190, fY + 4, { align: 'right' });
+    doc.text("WhatsApp: (44) 99102-7642 | www.yellowleaf.com.br", 190, fY + 4, { align: 'right' });
 
-    doc.save(`Proposta Comercial YellowLeaf - ${item.produto}.pdf`);
+    doc.save(`Proposta Comercial YellowLeaf - ${item.produto} - ${dataDoc.replace(/\//g, '-')}.pdf`);
   };
 
   const handleSave = async () => {
     if (!formData.nomeCliente || !formData.valor) return alert("Preencha Nome e Valor.");
     const { data: { user } } = await supabase.auth.getUser();
     
+    // Payload limpo para evitar erros de tipo no Supabase
     const payload = {
       user_id: user?.id, cnpj: formData.cnpj, nome_cliente: formData.nomeCliente, contato: formData.contato,
       telefone: formData.telefone, email: formData.email, produto: formData.produto, aplicacao: formData.aplicacao,
-      valor: parseFloat(String(formData.valor)), status: formData.estagio, data_entrada: formData.dataEntrada,
+      valor: parseFloat(String(formData.valor).replace(',', '.')), status: formData.estagio, data_entrada: formData.dataEntrada,
       data_lembrete: formData.dataLembrete || null, observacoes: formData.observacoes,
-      kg_proposto: Number(formData.kg_proposto), kg_bonificado: Number(formData.kg_bonificado),
-      parcelas: Number(formData.parcelas), dias_primeira_parcela: Number(formData.dias_primeira_parcela),
-      peso_formula_g: Number(formData.peso_formula_g), fator_lucro: Number(formData.fator_lucro),
+      kg_proposto: Number(formData.kg_proposto) || 0, kg_bonificado: Number(formData.kg_bonificado) || 0,
+      parcelas: Number(formData.parcelas) || 1, dias_primeira_parcela: Number(formData.dias_primeira_parcela) || 45,
+      peso_formula_g: Number(formData.peso_formula_g) || 1, fator_lucro: Number(formData.fator_lucro) || 5,
       cidade_exclusividade: formData.cidade, uf_exclusividade: formData.uf, 
-      observacoes_proposta: formData.observacoes_proposta, valor_g_tabela: Number(formData.valor_g_tabela)
+      observacoes_proposta: formData.observacoes_proposta, valor_g_tabela: Number(formData.valor_g_tabela) || 0
     };
 
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
-    if (!error) { setModalOpen(false); carregarOportunidades(); } else { alert("Erro ao salvar. Rode o comando SQL no Supabase."); }
+    
+    if (!error) { setModalOpen(false); carregarOportunidades(); } 
+    else { console.error(error); alert("Erro ao salvar. Verifique se o SQL foi executado."); }
   };
 
   return (
     <div className="w-full p-4">
+      {/* Header oficial */}
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-2xl font-black text-[#1e293b] italic uppercase tracking-tighter">Pipeline YellowLeaf</h1>
-        <button onClick={() => { setEditingOp(null); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg transition active:scale-95">+ Nova Oportunidade</button>
+        <button onClick={() => { setEditingOp(null); setFormData({...formData, cnpj: '', nomeCliente: '', contato: '', telefone: '', email: '', produto: '', valor: '', estagio: 'prospeccao', dataLembrete: '', observacoes: '' }); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg transition">+ Nova Oportunidade</button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 h-[calc(100vh-180px)] overflow-x-auto pb-4">
@@ -199,9 +214,9 @@ export default function PipelinePage() {
             <div className={`p-4 border-b-2 ${est.color} bg-white flex justify-between items-center`}><h3 className={`font-black text-xs uppercase ${est.text}`}>{est.label}</h3></div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
               {oportunidades.filter(o => o.status === est.id).map(op => (
-                <div key={op.id} onClick={() => { setEditingOp(op); setFormData({...op, estagio: op.status, cidade: op.cidade_exclusividade, uf: op.uf_exclusividade}); setModalOpen(true); }} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 cursor-pointer hover:border-blue-400">
+                <div key={op.id} onClick={() => { setEditingOp(op); setFormData({...op, estagio: op.status, cidade: op.cidade_exclusividade, uf: op.uf_exclusividade}); setModalOpen(true); }} className="bg-white p-4 rounded-xl border border-slate-100 cursor-pointer hover:border-blue-400">
                   <h4 className="font-bold text-slate-700 text-sm uppercase truncate">{op.nome_cliente}</h4>
-                  <div className="flex justify-between items-end mt-2"><span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg font-bold">{op.produto}</span><span className="text-xs font-black text-slate-600">R$ {Number(op.valor).toLocaleString('pt-BR')}</span></div>
+                  <div className="flex justify-between items-end mt-2"><span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg font-bold">{op.produto}</span><span className="text-xs font-black text-slate-600">R$ {Number(op.valor).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span></div>
                 </div>
               ))}
             </div>
@@ -213,15 +228,15 @@ export default function PipelinePage() {
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-5xl rounded-[2.5rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95">
             <div className="bg-[#242f3e] p-6 flex justify-between items-center text-white shrink-0">
-              <h2 className="text-lg font-bold flex items-center gap-2">✨ {editingOp ? 'Editar Proposta Comercial' : 'Nova Oportunidade'}</h2>
+              <h2 className="text-lg font-bold flex items-center gap-2">✨ {editingOp ? 'Editar Proposta Técnica' : 'Nova Oportunidade'}</h2>
               <div className="flex gap-2">
-                {editingOp && <button onClick={() => gerarPDF(formData)} className="bg-green-600 px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase shadow-md"><Download size={14}/> PDF</button>}
+                {editingOp && <button onClick={() => gerarPDF(formData)} className="bg-green-600 px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase shadow-md"><Download size={14}/> Gerar Relatório</button>}
                 <button onClick={() => setModalOpen(false)} className="hover:bg-white/10 p-1 rounded-full"><X/></button>
               </div>
             </div>
 
             <div className="p-8 grid grid-cols-1 md:grid-cols-4 gap-5 overflow-y-auto bg-white flex-1">
-              <div className="md:col-span-4 border-b pb-2"><h3 className="text-[10px] font-black text-blue-600 uppercase">1. Identificação Técnica</h3></div>
+              <div className="md:col-span-4 border-b pb-2"><h3 className="text-[10px] font-black text-blue-600 uppercase">1. Dados do Cliente</h3></div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">CNPJ</label><div className="flex gap-2"><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} onBlur={buscarDadosCNPJ}/><button onClick={buscarDadosCNPJ} className="bg-blue-50 text-blue-600 p-3 rounded-xl border"><Search size={20}/></button></div></div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Razão Social</label><input className="w-full bg-slate-50 border rounded-xl p-3 font-bold uppercase" value={formData.nomeCliente} onChange={e => setFormData({...formData, nomeCliente: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Cidade</label><input className="w-full bg-slate-100 border rounded-xl p-3" value={formData.cidade} readOnly/></div>
@@ -230,23 +245,23 @@ export default function PipelinePage() {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Telefone</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})}/></div>
 
               <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta de Investimento</h3></div>
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Ativo</label><input list="ativos" className="w-full bg-slate-50 border rounded-xl p-3 font-bold" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})}/><datalist id="ativos">{Object.keys(TABELA_PRODUTOS).map(p => <option key={p} value={p}/>)}</datalist></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor do G (Tabela)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})}/></div>
+              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Ativo</label><select className="w-full bg-slate-50 border rounded-xl p-3 font-bold" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})}><option value="">Selecione...</option>{Object.keys(TABELA_PRODUTOS).map(p => <option key={p} value={p}>{p}</option>)}</select></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor do G (R$)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Proposto</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
+              
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento Total R$</label><input className="w-full bg-green-50 border-green-200 border rounded-xl p-3 font-black text-green-700" value={formData.valor} onChange={e => setFormData({...formData, valor: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Bônus</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento R$</label><input type="number" className="w-full bg-green-50 border rounded-xl p-3 font-black text-green-700" value={formData.valor} onChange={e => setFormData({...formData, valor: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Parcelas</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Peso Fórmula (g)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.peso_formula_g} onChange={e => setFormData({...formData, peso_formula_g: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Fator Lucro</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.fator_lucro} onChange={e => setFormData({...formData, fator_lucro: e.target.value})}/></div>
 
               <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100">
-                  <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Notas Estratégicas (Saem no PDF)</label>
-                  <textarea rows={2} className="w-full bg-white border border-blue-100 rounded-xl p-3 text-sm outline-none" value={formData.observacoes_proposta} onChange={e => setFormData({...formData, observacoes_proposta: e.target.value})} placeholder="Ex: Prazo de entrega de 5 dias..."/>
+                  <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Notas Estratégicas (PDF)</label>
+                  <textarea rows={2} className="w-full bg-white border border-blue-100 rounded-xl p-3 text-sm outline-none" value={formData.observacoes_proposta} onChange={e => setFormData({...formData, observacoes_proposta: e.target.value})}/>
               </div>
             </div>
 
             <div className="p-6 bg-slate-50 border-t flex justify-between items-center">
-              {editingOp && <button onClick={() => { if(confirm('Excluir?')) { supabase.from('pipeline').delete().eq('id', editingOp.id); carregarOportunidades(); setModalOpen(false); }}} className="text-red-500 font-bold text-xs uppercase tracking-widest">Excluir</button>}
+              {editingOp && <button onClick={() => { if(confirm('Excluir?')) { supabase.from('pipeline').delete().eq('id', editingOp.id); carregarOportunidades(); setModalOpen(false); }}} className="text-red-500 font-bold text-xs uppercase">Excluir</button>}
               <div className="flex gap-2">
                 <button onClick={() => setModalOpen(false)} className="px-6 font-bold text-slate-400">CANCELAR</button>
                 <button onClick={handleSave} className="bg-[#2563eb] text-white px-12 py-3 rounded-xl font-bold shadow-lg uppercase tracking-widest active:scale-95 transition">Salvar Proposta</button>
