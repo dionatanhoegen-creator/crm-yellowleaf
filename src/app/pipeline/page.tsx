@@ -11,13 +11,18 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// --- TABELA TÉCNICA ATUALIZADA (Imagem 055738) ---
+// --- TABELA TÉCNICA OFICIAL ATUALIZADA (Baseada na imagem 055738) ---
 const TABELA_PRODUTOS: Record<string, any> = {
   "Allisane®": { preco_g: 2.50, peso: 15.0 },
   "Anethin®": { preco_g: 2.50, peso: 12.0 },
+  "Anidream®": { preco_g: 12.00, peso: 1.5 },
   "ArtemiFresh®": { preco_g: 2.50, peso: 15.0 },
   "BioCarum®": { preco_g: 2.50, peso: 15.0 },
   "Cardasense®": { preco_g: 2.50, peso: 12.0 },
+  "CarySlim®": { preco_g: 2.50, peso: 12.0 },
+  "FIThymus®": { preco_g: 2.50, peso: 12.0 },
+  "GF Slim II®": { preco_g: 2.50, peso: 27.0 },
+  "Glutaliz®": { preco_g: 3.00, peso: 15.0 },
   "Sineredux II ®": { preco_g: 2.50, peso: 13.2 },
   "SlimHaut®": { preco_g: 2.50, peso: 15.0 },
   "VerumFEM®": { preco_g: 3.00, peso: 12.0 }
@@ -52,7 +57,7 @@ export default function PipelinePage() {
 
   useEffect(() => { setMounted(true); carregarOportunidades(); }, []);
 
-  // Sincronização automática de Valores
+  // Sincronização automática de Valores (Corrigindo ArtemiFresh p/ 2,50)
   useEffect(() => {
     if (TABELA_PRODUTOS[formData.produto]) {
       const p = TABELA_PRODUTOS[formData.produto];
@@ -82,13 +87,15 @@ export default function PipelinePage() {
     try {
       const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`);
       const data = await res.json();
-      const tel = data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : "";
+      const telFound = data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : "";
+      
+      // Fixando dados do cliente para o PDF
       setFormData(prev => ({ 
         ...prev, 
         nome_cliente: data.nome_fantasia || data.razao_social || '',
         cidade_exclusividade: data.municipio || '',
         uf_exclusividade: data.uf || '',
-        telefone: tel || prev.telefone
+        telefone: telFound || prev.telefone
       }));
     } catch (e) { console.error("Erro CNPJ"); }
     setLoadingCNPJ(false);
@@ -102,21 +109,21 @@ export default function PipelinePage() {
     const doc = new jsPDF();
     const vY = [20, 83, 45]; // Verde YellowLeaf
 
-    // Cabeçalho
+    // Cabeçalho Oficial
     doc.setFontSize(22); doc.setTextColor(vY[0], vY[1], vY[2]);
     doc.text("PROPOSTA COMERCIAL", 20, 25);
     doc.setFontSize(10); doc.setTextColor(100);
     doc.text("YellowLeaf - Nutraceuticals Company", 20, 31);
     doc.line(20, 35, 190, 35);
 
-    // DADOS DO CLIENTE
+    // DADOS DO CLIENTE (Corrigindo Título e undefined)
     doc.setFontSize(11); doc.setTextColor(0); doc.text("DADOS DO CLIENTE", 20, 45);
     doc.setFontSize(10);
     doc.text(`Razão Social: ${item.nome_cliente || 'N/A'}`, 20, 52);
     doc.text(`Contato: ${item.contato || 'N/A'}  |  Telefone: ${item.telefone || 'N/A'}`, 20, 57);
     doc.text(`Cidade/UF: ${item.cidade_exclusividade || 'N/A'} / ${item.uf_exclusividade || ''}`, 20, 62);
 
-    // ESPECIFICAÇÃO DO INVESTIMENTO
+    // ESPECIFICAÇÃO DO INVESTIMENTO (Novas Linhas Separadas)
     const totalKG = Number(item.kg_proposto) + Number(item.kg_bonificado);
     const vGramaReal = (Number(item.valor) / (totalKG * 1000)) || 0;
     const vParc = (Number(item.valor) / Number(item.parcelas)) || 0;
@@ -136,7 +143,7 @@ export default function PipelinePage() {
       headStyles: { fillColor: vY }
     });
 
-    // PAYBACK
+    // PAYBACK DA FÓRMULA
     const custoF = (vGramaReal * (Number(item.peso_formula_g) || 13.2));
     const precoV = (custoF * (Number(item.fator_lucro) || 5));
     const formulasDia = vParc > 0 ? ((vParc / precoV) / 22) : 0;
@@ -152,20 +159,20 @@ export default function PipelinePage() {
       headStyles: { fillColor: [37, 99, 235] }
     });
 
-    // DIFERENCIAIS
+    // DIFERENCIAIS INSTITUCIONAIS
     const curY = (doc as any).lastAutoTable.finalY + 15;
     doc.setFontSize(11); doc.setTextColor(vY[0], vY[1], vY[2]);
-    doc.text("DIFERENCIAIS YELLOWLEAF", 20, curY);
+    doc.text("A NOSSA ESPECIALIDADE É SER DIFERENTE", 20, curY);
     doc.setFontSize(9); doc.setTextColor(100);
-    doc.text("Especialista em insumos de alta tecnologia e pureza internacional.", 20, curY + 6);
+    doc.text("Insumos com certificação mundial de pureza e eficácia magistral.", 20, curY + 6);
     doc.text("CERTIFICAÇÕES: HACCP | ISO 9001 | GMP | FSSC 22000", 20, curY + 12);
 
     if (item.observacoes_proposta) {
-      doc.text("NOTAS:", 20, curY + 22);
+      doc.text("NOTAS E CONDIÇÕES:", 20, curY + 22);
       doc.text(doc.splitTextToSize(item.observacoes_proposta, 170), 20, curY + 27);
     }
 
-    // Rodapé
+    // Rodapé Assimétrico
     const fY = 282; doc.setFontSize(7); doc.setTextColor(150);
     doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
     doc.text("Dionatan Hoegen - Representante Comercial | WhatsApp: (44) 99102-7642", 190, fY, { align: 'right' });
@@ -177,39 +184,30 @@ export default function PipelinePage() {
     if (!formData.nome_cliente || !formData.valor) return alert("Preencha Razão Social e Valor.");
     const { data: { user } } = await supabase.auth.getUser();
     
-    // Mapeamento forçado para colunas do banco
     const payload = {
       ...formData,
       user_id: user?.id,
       valor: parseFloat(String(formData.valor).replace(',', '.')),
-      valor_g_tabela: parseFloat(String(formData.valor_g_tabela)),
       kg_proposto: Number(formData.kg_proposto),
       kg_bonificado: Number(formData.kg_bonificado),
       parcelas: Number(formData.parcelas)
     };
 
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
-    if (!error) { setModalOpen(false); carregarOportunidades(); } else { console.error(error); alert("Erro ao salvar."); }
-  };
-
-  const deleteOp = async () => {
-    if (editingOp) {
-      const { error } = await supabase.from('pipeline').delete().eq('id', editingOp.id);
-      if (!error) { setModalOpen(false); carregarOportunidades(); }
-    }
+    if (!error) { setModalOpen(false); carregarOportunidades(); } else { alert("Erro ao salvar."); }
   };
 
   return (
     <div className="w-full p-4">
-      {/* Kanban */}
+      {/* Kanban Header */}
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-2xl font-black text-[#1e293b] italic uppercase tracking-tighter">Pipeline YellowLeaf</h1>
-        <button onClick={() => { setEditingOp(null); setFormData({...formData, cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', valor: '', status: 'prospeccao'}); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold">+ Nova Oportunidade</button>
+        <button onClick={() => { setEditingOp(null); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold">+ Nova Oportunidade</button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 h-[calc(100vh-180px)] overflow-x-auto">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 h-[calc(100vh-180px)] overflow-x-auto pb-4">
         {ESTAGIOS.map(est => (
-          <div key={est.id} className="bg-slate-50/50 rounded-2xl border flex flex-col min-w-[250px]">
+          <div key={est.id} className="bg-slate-50/50 rounded-2xl border flex flex-col min-w-[250px] overflow-hidden">
             <div className={`p-4 border-b-2 ${est.color} bg-white`}><h3 className="font-black text-xs uppercase">{est.label}</h3></div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
               {oportunidades.filter(o => o.status === est.id).map(op => (
@@ -230,13 +228,13 @@ export default function PipelinePage() {
             <div className="bg-[#242f3e] p-6 flex justify-between items-center text-white">
               <h2 className="text-lg font-bold">✨ {editingOp ? 'Editar Proposta' : 'Nova Oportunidade'}</h2>
               <div className="flex gap-2">
-                {editingOp && <button onClick={() => gerarPDF(formData)} className="bg-green-600 px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2"><Download size={14}/> PDF</button>}
+                {editingOp && <button onClick={() => gerarPDF(formData)} className="bg-green-600 px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase"><Download size={14}/> PDF</button>}
                 <button onClick={() => setModalOpen(false)}><X/></button>
               </div>
             </div>
 
             <div className="p-8 grid grid-cols-1 md:grid-cols-4 gap-5 overflow-y-auto bg-white flex-1">
-              <div className="md:col-span-4 border-b pb-2"><h3 className="text-[10px] font-black text-blue-600 uppercase">1. Identificação</h3></div>
+              <div className="md:col-span-4 border-b pb-2"><h3 className="text-[10px] font-black text-blue-600 uppercase">1. Identificação Técnica</h3></div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">CNPJ</label><div className="flex gap-2"><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} onBlur={buscarDadosCNPJ}/><button onClick={buscarDadosCNPJ} className="bg-blue-50 text-blue-600 p-3 rounded-xl border"><Search size={20}/></button></div></div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Razão Social</label><input className="w-full bg-slate-50 border rounded-xl p-3 font-bold uppercase" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value})}/></div>
               
@@ -245,11 +243,12 @@ export default function PipelinePage() {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Contato</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">WhatsApp</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})}/></div>
 
-              <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta Técnica</h3></div>
+              <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta de Investimento</h3></div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Ativo</label><select className="w-full bg-slate-50 border rounded-xl p-3 font-bold" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})}><option value="">Selecione...</option>{Object.keys(TABELA_PRODUTOS).map(p => <option key={p} value={p}>{p}</option>)}</select></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor do G (R$)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})}/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor do G (Tabela)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Proposto</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento R$</label><input className="w-full bg-green-50 border rounded-xl p-3 font-black text-green-700" value={formData.valor} onChange={e => setFormData({...formData, valor: e.target.value})}/></div>
+              
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento Total R$</label><input className="w-full bg-green-50 border-green-200 border rounded-xl p-3 font-black text-green-700" value={formData.valor} onChange={e => setFormData({...formData, valor: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Bônus</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Parcelas</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Fator Lucro</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.fator_lucro} onChange={e => setFormData({...formData, fator_lucro: e.target.value})}/></div>
@@ -261,7 +260,7 @@ export default function PipelinePage() {
             </div>
 
             <div className="p-6 bg-slate-50 border-t flex justify-between items-center">
-              {editingOp && <button onClick={() => { if(confirm('Excluir?')) deleteOp(); }} className="text-red-500 font-bold text-xs uppercase">Excluir</button>}
+              {editingOp ? <button onClick={() => { if(confirm('Excluir?')) { supabase.from('pipeline').delete().eq('id', editingOp.id); carregarOportunidades(); setModalOpen(false); }}} className="text-red-500 font-bold text-xs uppercase">Excluir</button> : <div/>}
               <div className="flex gap-2">
                 <button onClick={() => setModalOpen(false)} className="px-6 font-bold text-slate-400">CANCELAR</button>
                 <button onClick={handleSave} className="bg-[#2563eb] text-white px-12 py-3 rounded-xl font-bold shadow-lg uppercase tracking-widest transition">Salvar</button>
