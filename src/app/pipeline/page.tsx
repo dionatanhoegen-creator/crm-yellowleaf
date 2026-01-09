@@ -155,12 +155,12 @@ export default function PipelinePage() {
       startY: 88,
       margin: { left: 20, right: 20 },
       body: [
-        ['Ativo Selecionado', item.produto || 'Insumo'],
-        ['Preço por grama (Tabela)', formatCurrency(item.valor_g_tabela)],
-        ['Quantidade proposta', `${item.kg_proposto} kg`],
-        ['Quantidade bonificada', `${item.kg_bonificado} kg`],
-        ['Investimento Total', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold', textColor: verdeEscuro } }],
-        ['Valor do grama c/ bonificação', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold', textColor: [37, 99, 235] } }],
+        ['Ativo/Insumo', item.produto || 'Insumo'],
+        ['Preço por grama (R$)', formatCurrency(item.valor_g_tabela)],
+        ['Quantidade proposta (kg)', `${item.kg_proposto} kg`],
+        ['Quantidade bonificada (kg)', `${item.kg_bonificado} kg`],
+        ['Investimento Total (R$)', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold', textColor: verdeEscuro } }],
+        ['Valor do grama c/ bonificação (R$)', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold', textColor: [37, 99, 235] } }],
         ['Condição de Pagamento', `${item.parcelas} parcelas de ${formatCurrency(vParc)}`],
         ['Vencimento 1ª Parcela', `${item.dias_primeira_parcela} dias`]
       ],
@@ -193,7 +193,7 @@ export default function PipelinePage() {
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
     
     doc.setFontSize(9); doc.setTextColor(100); doc.setFont("helvetica", "normal");
-    const certText = "Corpo técnico capacitado na validação de ativos fitoterápicos e extratos vegetais, assegurando segurança, rastreabilidade e alto desempenho sob os mais rigorosos padrões internacionais.";
+    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção certificada e processos auditados, assegurando segurança, rastreabilidade e alto desempenho dos ativos fornecidos.";
     doc.text(doc.splitTextToSize(certText, 160), 105, certY + 7, { align: 'center' });
     
     doc.setFont("helvetica", "bold");
