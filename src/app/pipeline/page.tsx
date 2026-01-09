@@ -11,7 +11,7 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// --- TABELA TÉCNICA OFICIAL ATUALIZADA (Baseada na imagem 055738) ---
+// --- TABELA TÉCNICA OFICIAL ATUALIZADA (Imagem 055738) ---
 const TABELA_PRODUTOS: Record<string, any> = {
   "Allisane®": { preco_g: 2.50, peso: 15.0 },
   "Anethin®": { preco_g: 2.50, peso: 12.0 },
@@ -57,7 +57,6 @@ export default function PipelinePage() {
 
   useEffect(() => { setMounted(true); carregarOportunidades(); }, []);
 
-  // Sincronização automática de Valores (Corrigindo ArtemiFresh p/ 2,50)
   useEffect(() => {
     if (TABELA_PRODUTOS[formData.produto]) {
       const p = TABELA_PRODUTOS[formData.produto];
@@ -87,15 +86,12 @@ export default function PipelinePage() {
     try {
       const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`);
       const data = await res.json();
-      const telFound = data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : "";
-      
-      // Fixando dados do cliente para o PDF
       setFormData(prev => ({ 
         ...prev, 
         nome_cliente: data.nome_fantasia || data.razao_social || '',
         cidade_exclusividade: data.municipio || '',
         uf_exclusividade: data.uf || '',
-        telefone: telFound || prev.telefone
+        telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : prev.telefone
       }));
     } catch (e) { console.error("Erro CNPJ"); }
     setLoadingCNPJ(false);
@@ -108,22 +104,29 @@ export default function PipelinePage() {
   const gerarPDF = (item: any) => {
     const doc = new jsPDF();
     const vY = [20, 83, 45]; // Verde YellowLeaf
+    doc.setFont("helvetica");
 
-    // Cabeçalho Oficial
-    doc.setFontSize(22); doc.setTextColor(vY[0], vY[1], vY[2]);
+    // 1. Cabeçalho com Logo (puxando public/logo.jpg)
+    try {
+      doc.addImage("/logo.jpg", "JPEG", 150, 10, 40, 20);
+    } catch (e) { console.warn("Logo não encontrada na pasta public"); }
+
+    doc.setFontSize(22);
+    doc.setTextColor(vY[0], vY[1], vY[2]);
     doc.text("PROPOSTA COMERCIAL", 20, 25);
-    doc.setFontSize(10); doc.setTextColor(100);
+    doc.setFontSize(10);
+    doc.setTextColor(100);
     doc.text("YellowLeaf - Nutraceuticals Company", 20, 31);
     doc.line(20, 35, 190, 35);
 
-    // DADOS DO CLIENTE (Corrigindo Título e undefined)
+    // 2. DADOS DO CLIENTE
     doc.setFontSize(11); doc.setTextColor(0); doc.text("DADOS DO CLIENTE", 20, 45);
     doc.setFontSize(10);
     doc.text(`Razão Social: ${item.nome_cliente || 'N/A'}`, 20, 52);
     doc.text(`Contato: ${item.contato || 'N/A'}  |  Telefone: ${item.telefone || 'N/A'}`, 20, 57);
-    doc.text(`Cidade/UF: ${item.cidade_exclusividade || 'N/A'} / ${item.uf_exclusividade || ''}`, 20, 62);
+    doc.text(`Localidade: ${item.cidade_exclusividade || 'N/A'} / ${item.uf_exclusividade || ''}`, 20, 62);
 
-    // ESPECIFICAÇÃO DO INVESTIMENTO (Novas Linhas Separadas)
+    // 3. ESPECIFICAÇÃO DO INVESTIMENTO (Tabela separada conforme Imagem 3)
     const totalKG = Number(item.kg_proposto) + Number(item.kg_bonificado);
     const vGramaReal = (Number(item.valor) / (totalKG * 1000)) || 0;
     const vParc = (Number(item.valor) / Number(item.parcelas)) || 0;
@@ -132,18 +135,20 @@ export default function PipelinePage() {
       startY: 70,
       head: [['ESPECIFICAÇÃO DO INVESTIMENTO', 'VALORES']],
       body: [
-        ['Ativo Selecionado', item.produto || 'Ativo'],
-        ['Preço por Grama (Tabela)', formatCurrency(item.valor_g_tabela)],
-        ['Quantidade proposta (kg)', `${item.kg_proposto} KG`],
-        ['Quantidade bonificada (kg)', `${item.kg_bonificado} KG`],
+        ['Ativo/Insumo', item.produto || 'Ativo'],
+        ['Preço por grama (Tabela)', formatCurrency(item.valor_g_tabela)],
+        ['Quantidade proposta (kg)', `${item.kg_proposto} kg`],
+        ['Quantidade bonificada (kg)', `${item.kg_bonificado} kg`],
         ['Investimento Total', formatCurrency(item.valor)],
         ['Valor do grama com bonificação aplicada (R$/g)', formatCurrency(vGramaReal)],
-        ['Forma de Pagamento', `${item.parcelas} parcelas de ${formatCurrency(vParc)}`]
+        ['Condição de Pagamento', `${item.parcelas} parcelas de ${formatCurrency(vParc)}`],
+        ['Vencimento do primeiro pagamento', `${item.dias_primeira_parcela} dias`]
       ],
-      headStyles: { fillColor: vY }
+      headStyles: { fillColor: vY, fontStyle: 'bold' },
+      theme: 'striped'
     });
 
-    // PAYBACK DA FÓRMULA
+    // 4. PAYBACK DA FÓRMULA
     const custoF = (vGramaReal * (Number(item.peso_formula_g) || 13.2));
     const precoV = (custoF * (Number(item.fator_lucro) || 5));
     const formulasDia = vParc > 0 ? ((vParc / precoV) / 22) : 0;
@@ -153,29 +158,37 @@ export default function PipelinePage() {
       head: [['ANÁLISE TÉCNICA DE RETORNO (PAYBACK)', 'VALOR']],
       body: [
         ['Custo por fórmula (Manipulado)', formatCurrency(custoF)],
-        ['Sugestão de Venda (Fator 5x)', formatCurrency(precoV)],
+        ['Sugestão de Venda (Fator 5)', formatCurrency(precoV)],
         ['Vendas necessárias/dia para pagar parcela', `${formulasDia.toFixed(2)} fórmulas/dia`]
       ],
       headStyles: { fillColor: [37, 99, 235] }
     });
 
-    // DIFERENCIAIS INSTITUCIONAIS
+    // 5. DIFERENCIAIS INSTITUCIONAIS
     const curY = (doc as any).lastAutoTable.finalY + 15;
     doc.setFontSize(11); doc.setTextColor(vY[0], vY[1], vY[2]);
-    doc.text("A NOSSA ESPECIALIDADE É SER DIFERENTE", 20, curY);
-    doc.setFontSize(9); doc.setTextColor(100);
-    doc.text("Insumos com certificação mundial de pureza e eficácia magistral.", 20, curY + 6);
-    doc.text("CERTIFICAÇÕES: HACCP | ISO 9001 | GMP | FSSC 22000", 20, curY + 12);
+    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 20, curY);
+    doc.setFontSize(9); doc.setTextColor(80);
+    const desc = "Contamos com um corpo técnico capacitado na validação de ativos fitoterápicos e extratos vegetais, com foco em pureza e eficácia. Nossos parceiros operam sob os mais rigorosos padrões internacionais.";
+    doc.text(doc.splitTextToSize(desc, 170), 20, curY + 6);
+    doc.setFontSize(9); doc.setTextColor(vY[0], vY[1], vY[2]);
+    doc.text("CERTIFICAÇÕES: HACCP • ISO • FSSC 22000 • GMP", 20, curY + 20);
 
     if (item.observacoes_proposta) {
-      doc.text("NOTAS E CONDIÇÕES:", 20, curY + 22);
-      doc.text(doc.splitTextToSize(item.observacoes_proposta, 170), 20, curY + 27);
+      doc.setTextColor(0);
+      doc.text("NOTAS E CONDIÇÕES:", 20, curY + 30);
+      doc.setFontSize(8); doc.setTextColor(100);
+      doc.text(doc.splitTextToSize(item.observacoes_proposta, 170), 20, curY + 35);
     }
 
-    // Rodapé Assimétrico
+    // 6. Rodapé Assimétrico
     const fY = 282; doc.setFontSize(7); doc.setTextColor(150);
+    // Esquerda: YellowLeaf
     doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
-    doc.text("Dionatan Hoegen - Representante Comercial | WhatsApp: (44) 99102-7642", 190, fY, { align: 'right' });
+    doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 20, fY + 4);
+    // Direita: Dionatan
+    doc.text("Dionatan Hoegen - Representante Comercial", 190, fY, { align: 'right' });
+    doc.text("WhatsApp: (44) 99102-7642 | @dionatan.magistral", 190, fY + 4, { align: 'right' });
 
     doc.save(`Proposta Comercial YellowLeaf - ${item.produto}.pdf`);
   };
@@ -183,7 +196,6 @@ export default function PipelinePage() {
   const handleSave = async () => {
     if (!formData.nome_cliente || !formData.valor) return alert("Preencha Razão Social e Valor.");
     const { data: { user } } = await supabase.auth.getUser();
-    
     const payload = {
       ...formData,
       user_id: user?.id,
@@ -192,23 +204,22 @@ export default function PipelinePage() {
       kg_bonificado: Number(formData.kg_bonificado),
       parcelas: Number(formData.parcelas)
     };
-
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
     if (!error) { setModalOpen(false); carregarOportunidades(); } else { alert("Erro ao salvar."); }
   };
 
   return (
     <div className="w-full p-4">
-      {/* Kanban Header */}
+      {/* Header oficial */}
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-2xl font-black text-[#1e293b] italic uppercase tracking-tighter">Pipeline YellowLeaf</h1>
-        <button onClick={() => { setEditingOp(null); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold">+ Nova Oportunidade</button>
+        <button onClick={() => { setEditingOp(null); setFormData({...formData, cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', valor: '', status: 'prospeccao'}); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold">+ Nova Oportunidade</button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 h-[calc(100vh-180px)] overflow-x-auto pb-4">
         {ESTAGIOS.map(est => (
           <div key={est.id} className="bg-slate-50/50 rounded-2xl border flex flex-col min-w-[250px] overflow-hidden">
-            <div className={`p-4 border-b-2 ${est.color} bg-white`}><h3 className="font-black text-xs uppercase">{est.label}</h3></div>
+            <div className={`p-4 border-b-2 ${est.color} bg-white flex justify-between items-center`}><h3 className={`font-black text-xs uppercase ${est.text}`}>{est.label}</h3></div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
               {oportunidades.filter(o => o.status === est.id).map(op => (
                 <div key={op.id} onClick={() => { setEditingOp(op); setFormData(op); setModalOpen(true); }} className="bg-white p-4 rounded-xl border hover:border-blue-400 cursor-pointer shadow-sm">
@@ -221,14 +232,13 @@ export default function PipelinePage() {
         ))}
       </div>
 
-      {/* Modal */}
       {modalOpen && createPortal(
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-4xl rounded-[2.5rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden">
-            <div className="bg-[#242f3e] p-6 flex justify-between items-center text-white">
-              <h2 className="text-lg font-bold">✨ {editingOp ? 'Editar Proposta' : 'Nova Oportunidade'}</h2>
+          <div className="bg-white w-full max-w-5xl rounded-[2.5rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden">
+            <div className="bg-[#242f3e] p-6 flex justify-between items-center text-white shrink-0">
+              <h2 className="text-lg font-bold flex items-center gap-2">✨ {editingOp ? 'Editar Proposta' : 'Nova Oportunidade'}</h2>
               <div className="flex gap-2">
-                {editingOp && <button onClick={() => gerarPDF(formData)} className="bg-green-600 px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase"><Download size={14}/> PDF</button>}
+                {editingOp && <button onClick={() => gerarPDF(formData)} className="bg-green-600 px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase shadow-md"><Download size={14}/> PDF</button>}
                 <button onClick={() => setModalOpen(false)}><X/></button>
               </div>
             </div>
@@ -251,7 +261,7 @@ export default function PipelinePage() {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento Total R$</label><input className="w-full bg-green-50 border-green-200 border rounded-xl p-3 font-black text-green-700" value={formData.valor} onChange={e => setFormData({...formData, valor: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Bônus</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Parcelas</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Fator Lucro</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.fator_lucro} onChange={e => setFormData({...formData, fator_lucro: e.target.value})}/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª Parcela (Dias)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
 
               <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100">
                   <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Notas Estratégicas (PDF)</label>
