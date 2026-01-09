@@ -11,6 +11,11 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
+// --- IMPORTAÇÃO DO EDITOR DE TEXTO (DYNAMIC) ---
+import dynamic from 'next/dynamic';
+const ReactQuill = dynamic(() => import('react-quill'), { ssr: false });
+import 'react-quill/dist/quill.snow.css'; // Estilo obrigatório do editor
+
 // --- TABELA TÉCNICA OFICIAL ATUALIZADA ---
 const TABELA_PRODUTOS: Record<string, any> = {
   "Allisane®": { preco_g: 2.50, peso: 15.0 },
@@ -101,36 +106,44 @@ export default function PipelinePage() {
     return (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
 
+  // --- FUNÇÃO INTELIGENTE PARA LIMPAR HTML PARA PDF ---
+  const cleanHtmlForPdf = (html: string) => {
+    if (!html) return "";
+    // Troca tags de parágrafo e quebra de linha por "enter"
+    let text = html.replace(/<p>/g, "").replace(/<\/p>/g, "\n").replace(/<br>/g, "\n");
+    // Troca itens de lista por bolinhas visíveis
+    text = text.replace(/<li>/g, "• ").replace(/<\/li>/g, "\n");
+    // Remove qualquer outra tag HTML restante
+    text = text.replace(/<[^>]*>?/gm, "");
+    // Remove espaços HTML extras
+    text = text.replace(/&nbsp;/g, " ");
+    return text.trim();
+  };
+
   const gerarPDFPremium = (item: any) => {
     const doc = new jsPDF();
     const verdeEscuro = [20, 83, 45];
     const verdeClaro = [167, 243, 208];
     const cinzaSuave = [243, 244, 246];
 
-    // 1. Cabeçalho (Logo à esquerda conforme prompt)
-    try {
-      doc.addImage("/logo.jpg", "JPEG", 20, 10, 40, 20);
-    } catch (e) { console.warn("Logo public/logo.jpg não encontrada"); }
+    // Cabeçalho
+    try { doc.addImage("/logo.jpg", "JPEG", 20, 10, 40, 20); } catch (e) {}
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(24);
     doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
     doc.text("PROPOSTA COMERCIAL", 190, 22, { align: 'right' });
     
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(120);
+    doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(120);
     doc.text("YellowLeaf – Nutraceuticals Company", 190, 28, { align: 'right' });
 
-    // Faixa Horizontal Verde
     doc.setFillColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
     doc.rect(0, 35, 210, 2, 'F');
 
-    // 2. Bloco: Dados do Cliente
+    // DADOS DO CLIENTE
     doc.setFillColor(cinzaSuave[0], cinzaSuave[1], cinzaSuave[2]);
     doc.rect(20, 45, 170, 25, 'F');
-    doc.setDrawColor(220);
-    doc.rect(20, 45, 170, 25, 'S');
+    doc.setDrawColor(220); doc.rect(20, 45, 170, 25, 'S');
     
     doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
     doc.setFont("helvetica", "bold");
@@ -141,7 +154,7 @@ export default function PipelinePage() {
     doc.text(`Contato: ${item.contato || 'N/A'}  |  Tel: ${item.telefone || 'N/A'}`, 25, 63);
     doc.text(`Cidade/UF: ${item.cidade_exclusividade || 'N/A'} / ${item.uf_exclusividade || ''}`, 25, 68);
 
-    // 3. Bloco Principal: Especificação do Investimento
+    // ESPECIFICAÇÃO DO INVESTIMENTO
     doc.setFillColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
     doc.rect(20, 80, 170, 8, 'F');
     doc.setTextColor(255); doc.setFontSize(11);
@@ -156,11 +169,11 @@ export default function PipelinePage() {
       margin: { left: 20, right: 20 },
       body: [
         ['Ativo/Insumo', item.produto || 'Insumo'],
-        ['Preço por grama (R$)', formatCurrency(item.valor_g_tabela)],
+        ['Preço por grama (Tabela)', formatCurrency(item.valor_g_tabela)],
         ['Quantidade proposta (kg)', `${item.kg_proposto} kg`],
         ['Quantidade bonificada (kg)', `${item.kg_bonificado} kg`],
-        ['Investimento Total (R$)', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold', textColor: verdeEscuro } }],
-        ['Valor do grama c/ bonificação (R$)', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold', textColor: [37, 99, 235] } }],
+        ['Investimento Total', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold', textColor: verdeEscuro } }],
+        ['Valor do grama c/ bonificação', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold', textColor: [37, 99, 235] } }],
         ['Condição de Pagamento', `${item.parcelas} parcelas de ${formatCurrency(vParc)}`],
         ['Vencimento 1ª Parcela', `${item.dias_primeira_parcela} dias`]
       ],
@@ -169,11 +182,9 @@ export default function PipelinePage() {
       columnStyles: { 0: { cellWidth: 100 }, 1: { halign: 'right' } }
     });
 
-    // 4. Bloco: Payback (Fundo Azul/Verde Escuro)
+    // PAYBACK
     const paybackY = (doc as any).lastAutoTable.finalY + 10;
-    doc.setFillColor(30, 41, 59); // Cinza azulado escuro para contraste
-    doc.rect(20, paybackY, 170, 28, 'F');
-    
+    doc.setFillColor(30, 41, 59); doc.rect(20, paybackY, 170, 28, 'F');
     doc.setTextColor(255); doc.setFontSize(11); doc.text("ANÁLISE TÉCNICA DE RETORNO (PAYBACK)", 25, paybackY + 8);
     
     const custoF = (vGramaReal * (Number(item.peso_formula_g) || 13.2));
@@ -182,33 +193,46 @@ export default function PipelinePage() {
 
     doc.setFontSize(9); doc.setTextColor(200);
     doc.text(`Custo por fórmula: ${formatCurrency(custoF)}  |  Sugestão de Venda: ${formatCurrency(precoV)}`, 25, paybackY + 16);
-    
     doc.setFontSize(11); doc.setTextColor(verdeClaro[0], verdeClaro[1], verdeClaro[2]);
     doc.setFont("helvetica", "bold");
     doc.text(`META DE VIABILIDADE: ${formulasDia.toFixed(2)} fórmulas/dia`, 25, paybackY + 23);
 
-    // 5. Qualidade e Produção Certificada
+    // QUALIDADE
     const certY = paybackY + 45;
     doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
     
     doc.setFontSize(9); doc.setTextColor(100); doc.setFont("helvetica", "normal");
-    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção certificada e processos auditados, assegurando segurança, rastreabilidade e alto desempenho dos ativos fornecidos.";
+    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção certificada e processos auditados, assegurando segurança, rastreabilidade e alto desempenho.";
     doc.text(doc.splitTextToSize(certText, 160), 105, certY + 7, { align: 'center' });
     
-    doc.setFont("helvetica", "bold");
-    doc.text("SELOS: HACCP • ISO • FSSC 22000 • GMP", 105, certY + 22, { align: 'center' });
+    try {
+      const imgWidth = 80; const imgHeight = 15; const xPos = (210 - imgWidth) / 2;
+      doc.addImage("/selo.jpg", "JPEG", xPos, certY + 14, imgWidth, imgHeight);
+    } catch (e) { 
+      doc.setFont("helvetica", "bold"); doc.text("SELOS: HACCP • ISO • FSSC 22000 • GMP", 105, certY + 22, { align: 'center' });
+    }
 
-    // 6. Rodapé Assimétrico
+    // OBSERVAÇÕES (Com conversão de HTML para Texto Limpo)
+    if (item.observacoes_proposta) {
+      const notasY = certY + 35;
+      doc.setFontSize(10); doc.setTextColor(0); doc.setFont("helvetica", "bold");
+      doc.text("NOTAS E CONDIÇÕES:", 20, notasY);
+      
+      doc.setFontSize(9); doc.setTextColor(80); doc.setFont("helvetica", "normal");
+      // Aqui usamos a função de limpeza
+      const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
+      doc.text(doc.splitTextToSize(notasTexto, 170), 20, notasY + 5);
+    }
+
+    // Rodapé
     const fY = 282; doc.setFontSize(7); doc.setTextColor(150);
-    // Esquerda: YellowLeaf
     doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
     doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 20, fY + 4);
-    // Direita: Dionatan
     doc.text("Dionatan Hoegen - Representante Comercial", 190, fY, { align: 'right' });
     doc.text(`WhatsApp: (44) 99102-7642 | @dionatan.magistral`, 190, fY + 4, { align: 'right' });
 
-    doc.save(`Proposta Comercial - ${item.nome_cliente} - ${item.produto}.pdf`);
+    doc.save(`Proposta Comercial - ${item.nome_cliente}.pdf`);
   };
 
   const handleSave = async () => {
@@ -237,7 +261,6 @@ export default function PipelinePage() {
         <button onClick={() => { setEditingOp(null); setFormData({...formData, cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', valor: '', status: 'prospeccao'}); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95">+ Nova Oportunidade</button>
       </div>
 
-      {/* Grid de Estágios */}
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 h-[calc(100vh-180px)] overflow-x-auto pb-4">
         {ESTAGIOS.map(est => (
           <div key={est.id} className="bg-slate-50/50 rounded-2xl border flex flex-col min-w-[250px] overflow-hidden">
@@ -246,7 +269,7 @@ export default function PipelinePage() {
               {oportunidades.filter(o => o.status === est.id).map(op => (
                 <div key={op.id} onClick={() => { setEditingOp(op); setFormData(op); setModalOpen(true); }} className="bg-white p-4 rounded-xl border border-slate-100 cursor-pointer hover:border-blue-400 shadow-sm transition">
                   <h4 className="font-bold text-slate-700 text-sm uppercase truncate">{op.nome_cliente}</h4>
-                  <div className="flex justify-between items-end mt-2">
+                  <div className="flex justify-between mt-2">
                     <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg font-bold">{op.produto}</span>
                     <span className="text-xs font-black text-slate-600">{formatCurrency(op.valor)}</span>
                   </div>
@@ -257,7 +280,6 @@ export default function PipelinePage() {
         ))}
       </div>
 
-      {/* Modal Expandido para Proposta Técnica */}
       {modalOpen && mounted && createPortal(
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-5xl rounded-[2.5rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95">
@@ -289,8 +311,23 @@ export default function PipelinePage() {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª Parcela (Dias)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
 
               <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100">
-                  <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Notas e Condições (Saem no PDF)</label>
-                  <textarea rows={2} className="w-full bg-white border border-blue-100 rounded-xl p-3 text-sm outline-none" value={formData.observacoes_proposta} onChange={e => setFormData({...formData, observacoes_proposta: e.target.value})} placeholder="Ex: Frete Grátis / Prazo de entrega imediato..."/>
+                  <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Notas e Condições (Editor Personalizável)</label>
+                  
+                  {/* EDITOR RICHTEXT - TIPO WORD */}
+                  <div className="bg-white rounded-xl overflow-hidden border border-blue-100 text-slate-700">
+                    <ReactQuill 
+                      theme="snow" 
+                      value={formData.observacoes_proposta} 
+                      onChange={(val) => setFormData({...formData, observacoes_proposta: val})} 
+                      modules={{ 
+                        toolbar: [
+                          ['bold', 'italic', 'underline'], 
+                          [{'list': 'ordered'}, {'list': 'bullet'}], 
+                          ['clean']
+                        ] 
+                      }}
+                    />
+                  </div>
               </div>
             </div>
 
