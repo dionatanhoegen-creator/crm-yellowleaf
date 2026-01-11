@@ -62,7 +62,7 @@ export default function PipelinePage() {
 
   useEffect(() => { setMounted(true); carregarOportunidades(); }, []);
 
-  // --- LÓGICA DE CÁLCULO AUTOMÁTICO (IMAGEM 1) ---
+  // --- LÓGICA DE CÁLCULO AUTOMÁTICO ---
   useEffect(() => {
     if (TABELA_PRODUTOS[formData.produto]) {
       const p = TABELA_PRODUTOS[formData.produto];
@@ -155,7 +155,7 @@ export default function PipelinePage() {
     doc.text(`Contato: ${item.contato || 'N/A'}  |  Tel: ${item.telefone || 'N/A'}`, 25, 63);
     doc.text(`Cidade/UF: ${item.cidade_exclusividade || 'N/A'} / ${item.uf_exclusividade || ''}`, 25, 68);
 
-    // --- 3. TABELA PRINCIPAL ---
+    // --- 3. TABELA PRINCIPAL (COMPACTA E CENTRALIZADA) ---
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 20, 85);
 
@@ -173,19 +173,19 @@ export default function PipelinePage() {
         ['Quantidade proposta', `${item.kg_proposto} kg`],
         ['Quantidade bonificada', `${item.kg_bonificado} kg`],
         ['Investimento Total', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold' } }],
-        // IMAGEM 2: CORRIGIDO (TEXTO PRETO/CINZA PADRÃO)
         ['Valor do grama c/ bonificação', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold', textColor: textoCinza } }],
         ['Condição de Pagamento', `${item.parcelas} parcelas de ${formatCurrency(vParc)}`],
         ['Vencimento 1ª Parcela', `${item.dias_primeira_parcela} dias`]
       ],
       theme: 'grid',
-      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold' },
-      styles: { fontSize: 10, cellPadding: 4, textColor: textoCinza },
+      // AJUSTE: padding 2.5 (compacto) e halign 'center' (centralizado)
+      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
+      styles: { fontSize: 10, cellPadding: 2.5, textColor: textoCinza },
       columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right', fontStyle: 'bold' } }
     });
 
-    // --- 4. NOVA TABELA: PAYBACK (Visual Limpo) ---
-    const paybackY = (doc as any).lastAutoTable.finalY + 15;
+    // --- 4. PAYBACK (COMPACTO E CENTRALIZADO) ---
+    const paybackY = (doc as any).lastAutoTable.finalY + 10; // Espaçamento reduzido
 
     const custoF = (vGramaReal * (Number(item.peso_formula_g) || 13.2));
     const precoV = (custoF * (Number(item.fator_lucro) || 5));
@@ -204,14 +204,14 @@ export default function PipelinePage() {
         ]
       ],
       theme: 'grid',
-      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'left' },
-      styles: { fontSize: 10, cellPadding: 4, textColor: textoCinza },
+      // AJUSTE: padding 2.5 e halign 'center'
+      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
+      styles: { fontSize: 10, cellPadding: 2.5, textColor: textoCinza },
       columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right' } }
     });
 
-    // --- 5. REPOSICIONAMENTO: NOTAS E CONDIÇÕES (IMAGEM 3) ---
-    // Agora fica logo abaixo do Payback
-    let currentY = (doc as any).lastAutoTable.finalY + 20; 
+    // --- 5. NOTAS E CONDIÇÕES (Abaixo do Payback) ---
+    let currentY = (doc as any).lastAutoTable.finalY + 15; 
 
     if (item.observacoes_proposta) {
       doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
@@ -224,27 +224,34 @@ export default function PipelinePage() {
       const splitText = doc.splitTextToSize(notasTexto, 170);
       doc.text(splitText, 20, currentY);
       
-      currentY = currentY + (splitText.length * 4) + 15; 
+      currentY = currentY + (splitText.length * 4) + 10; 
     } else {
       currentY += 5;
     }
 
-    // --- 6. QUALIDADE E CERTIFICAÇÕES (Fica abaixo das notas) ---
-    const certY = currentY;
+    // --- 6. SPLIT VIEW: QUALIDADE (ESQUERDA) + SELOS (DIREITA) ---
+    const sectionY = currentY + 5; // Posição do bloco dividido
     
+    // LADO ESQUERDO (Texto)
     doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
     doc.setFont("helvetica", "bold");
-    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
+    doc.text("QUALIDADE E PRODUÇÃO", 20, sectionY);
     
-    doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção certificada e processos auditados, assegurando segurança, rastreabilidade e alto desempenho.";
-    doc.text(doc.splitTextToSize(certText, 160), 105, certY + 7, { align: 'center' });
-    
+    doc.setFontSize(8); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
+    const certText = "Parceiros industriais com rigorosos padrões internacionais, produção certificada e processos auditados, assegurando segurança, rastreabilidade e alto desempenho.";
+    // Largura limitada a 100mm para não bater na imagem
+    doc.text(doc.splitTextToSize(certText, 100), 20, sectionY + 6);
+
+    // LADO DIREITO (Imagem Selos)
     try {
-      const imgWidth = 80; const imgHeight = 15; const xPos = (210 - imgWidth) / 2;
-      doc.addImage("/selo.jpg", "JPEG", xPos, certY + 16, imgWidth, imgHeight);
+      // Posiciona a imagem à direita (x=130) e alinhada com o título da seção
+      const imgWidth = 70; 
+      const imgHeight = 15; 
+      doc.addImage("/selo.jpg", "JPEG", 130, sectionY, imgWidth, imgHeight);
     } catch (e) { 
-      doc.setFont("helvetica", "bold"); doc.text("SELOS: HACCP • ISO • FSSC 22000 • GMP", 105, certY + 22, { align: 'center' });
+      // Fallback se não tiver imagem
+      doc.setFontSize(9); doc.setFont("helvetica", "bold");
+      doc.text("SELOS: HACCP • ISO • GMP", 130, sectionY + 5);
     }
 
     // --- 7. RODAPÉ ---
