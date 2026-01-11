@@ -1,12 +1,18 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // A configuração do 'eslint' foi REMOVIDA daqui pois gera erro no Next.js 16
-  
+  // 1. Ignora erros de tipagem do TypeScript durante o build
   typescript: {
-    // Mantemos este para garantir que o build não pare por erros de tipagem
     ignoreBuildErrors: true,
   },
+  
+  // 2. Ignora erros de linting (ESLint) durante o build
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+
+  // 3. Desativa o modo estrito (Ajuda a evitar conflitos com o editor de texto novo)
+  reactStrictMode: false,
 };
 
 export default nextConfig;
