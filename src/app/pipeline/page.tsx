@@ -62,7 +62,6 @@ export default function PipelinePage() {
 
   useEffect(() => { setMounted(true); carregarOportunidades(); }, []);
 
-  // --- LÓGICA DE CÁLCULO AUTOMÁTICO ---
   useEffect(() => {
     if (TABELA_PRODUTOS[formData.produto]) {
       const p = TABELA_PRODUTOS[formData.produto];
@@ -155,16 +154,16 @@ export default function PipelinePage() {
     doc.text(`Contato: ${item.contato || 'N/A'}  |  Tel: ${item.telefone || 'N/A'}`, 25, 63);
     doc.text(`Cidade/UF: ${item.cidade_exclusividade || 'N/A'} / ${item.uf_exclusividade || ''}`, 25, 68);
 
-    // --- 3. TABELA PRINCIPAL (COMPACTA E CENTRALIZADA) ---
+    // --- 3. TABELA PRINCIPAL (TOTALMENTE CENTRALIZADA E COMPACTA) ---
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
-    doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 20, 85);
+    doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 20, 83);
 
     const totalKG = Number(item.kg_proposto) + Number(item.kg_bonificado);
     const vGramaReal = (Number(item.valor) / (totalKG * 1000)) || 0;
     const vParc = (Number(item.valor) / Number(item.parcelas)) || 0;
 
     autoTable(doc, {
-      startY: 90,
+      startY: 88,
       margin: { left: 20, right: 20 },
       head: [['DESCRIÇÃO', 'VALORES']],
       body: [
@@ -178,14 +177,13 @@ export default function PipelinePage() {
         ['Vencimento 1ª Parcela', `${item.dias_primeira_parcela} dias`]
       ],
       theme: 'grid',
-      // AJUSTE: padding 2.5 (compacto) e halign 'center' (centralizado)
       headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
-      styles: { fontSize: 10, cellPadding: 2.5, textColor: textoCinza },
+      styles: { fontSize: 10, cellPadding: 2, textColor: textoCinza },
       columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right', fontStyle: 'bold' } }
     });
 
-    // --- 4. PAYBACK (COMPACTO E CENTRALIZADO) ---
-    const paybackY = (doc as any).lastAutoTable.finalY + 10; // Espaçamento reduzido
+    // --- 4. TABELA PAYBACK (CENTRALIZADA E COMPACTA) ---
+    const paybackY = (doc as any).lastAutoTable.finalY + 8;
 
     const custoF = (vGramaReal * (Number(item.peso_formula_g) || 13.2));
     const precoV = (custoF * (Number(item.fator_lucro) || 5));
@@ -204,58 +202,50 @@ export default function PipelinePage() {
         ]
       ],
       theme: 'grid',
-      // AJUSTE: padding 2.5 e halign 'center'
       headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
-      styles: { fontSize: 10, cellPadding: 2.5, textColor: textoCinza },
+      styles: { fontSize: 10, cellPadding: 2, textColor: textoCinza },
       columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right' } }
     });
 
-    // --- 5. NOTAS E CONDIÇÕES (Abaixo do Payback) ---
-    let currentY = (doc as any).lastAutoTable.finalY + 15; 
+    // --- 5. NOTAS E CONDIÇÕES ---
+    let currentY = (doc as any).lastAutoTable.finalY + 12; 
 
     if (item.observacoes_proposta) {
       doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
       doc.text("NOTAS E CONDIÇÕES COMERCIAIS:", 20, currentY);
       
-      currentY += 7;
+      currentY += 6;
       doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
       const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
       
       const splitText = doc.splitTextToSize(notasTexto, 170);
       doc.text(splitText, 20, currentY);
       
-      currentY = currentY + (splitText.length * 4) + 10; 
-    } else {
-      currentY += 5;
+      currentY = currentY + (splitText.length * 4) + 8; 
     }
 
-    // --- 6. SPLIT VIEW: QUALIDADE (ESQUERDA) + SELOS (DIREITA) ---
-    const sectionY = currentY + 5; // Posição do bloco dividido
+    // --- 6. SPLIT VIEW: QUALIDADE + SELOS ---
+    if (currentY > 240) doc.addPage(); // Adiciona página se o espaço for pouco
+    const sectionY = currentY > 240 ? 40 : currentY;
     
-    // LADO ESQUERDO (Texto)
-    doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
-    doc.setFont("helvetica", "bold");
+    // LADO ESQUERDO: Texto de Qualidade
+    doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO", 20, sectionY);
     
     doc.setFontSize(8); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
     const certText = "Parceiros industriais com rigorosos padrões internacionais, produção certificada e processos auditados, assegurando segurança, rastreabilidade e alto desempenho.";
-    // Largura limitada a 100mm para não bater na imagem
-    doc.text(doc.splitTextToSize(certText, 100), 20, sectionY + 6);
+    doc.text(doc.splitTextToSize(certText, 100), 20, sectionY + 5);
 
-    // LADO DIREITO (Imagem Selos)
+    // LADO DIREITO: Imagem dos Selos
     try {
-      // Posiciona a imagem à direita (x=130) e alinhada com o título da seção
-      const imgWidth = 70; 
-      const imgHeight = 15; 
-      doc.addImage("/selo.jpg", "JPEG", 130, sectionY, imgWidth, imgHeight);
+      doc.addImage("/selo.jpg", "JPEG", 130, sectionY - 2, 60, 15);
     } catch (e) { 
-      // Fallback se não tiver imagem
       doc.setFontSize(9); doc.setFont("helvetica", "bold");
       doc.text("SELOS: HACCP • ISO • GMP", 130, sectionY + 5);
     }
 
-    // --- 7. RODAPÉ ---
-    const fY = 282; doc.setFontSize(7); doc.setTextColor(150);
+    // --- 7. RODAPÉ FIXO ---
+    const fY = 285; doc.setFontSize(7); doc.setTextColor(150);
     doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
     doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 20, fY + 4);
     doc.text("Dionatan Hoegen - Representante Comercial", 190, fY, { align: 'right' });
@@ -284,7 +274,6 @@ export default function PipelinePage() {
 
   return (
     <div className="w-full p-4">
-      {/* Kanban Header */}
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-2xl font-black text-[#1e293b] italic uppercase tracking-tighter">Pipeline YellowLeaf</h1>
         <button onClick={() => { setEditingOp(null); setFormData({...formData, cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', valor: '', status: 'prospeccao'}); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95">+ Nova Oportunidade</button>
@@ -335,7 +324,6 @@ export default function PipelinePage() {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Proposto</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
               
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento Total R$</label>
-              {/* CAMPO TRAVADO (READONLY) COM COR CINZA PARA INDICAR CÁLCULO AUTOMÁTICO */}
               <input className="w-full bg-slate-100 border border-slate-200 text-slate-600 rounded-xl p-3 font-bold cursor-not-allowed" value={formData.valor} readOnly />
               </div>
               
@@ -345,8 +333,6 @@ export default function PipelinePage() {
 
               <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100">
                   <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Notas e Condições</label>
-                  
-                  {/* EDITOR SEGURO (REACT-QUILL-NEW) */}
                   <div className="bg-white rounded-xl overflow-hidden border border-blue-100 text-slate-700">
                     <ReactQuill 
                       theme="snow" 
