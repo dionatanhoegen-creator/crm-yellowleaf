@@ -63,24 +63,18 @@ export default function PipelinePage() {
   useEffect(() => { setMounted(true); carregarOportunidades(); }, []);
 
   // --- LÓGICA DE CÁLCULO AUTOMÁTICO (IMAGEM 1) ---
-  // Atualiza sempre que muda o Produto OU o KG Proposto
   useEffect(() => {
     if (TABELA_PRODUTOS[formData.produto]) {
       const p = TABELA_PRODUTOS[formData.produto];
-      
-      // Pega o valor do grama da tabela
       const valorG = p.preco_g;
-      // Pega o KG digitado (ou 0 se vazio)
       const kgDigitado = Number(formData.kg_proposto) || 0;
-      
-      // Cálculo: Preço do G * 1000 * KG
       const novoInvestimentoTotal = (valorG * 1000 * kgDigitado).toFixed(2);
 
       setFormData(prev => ({ 
         ...prev, 
         valor_g_tabela: valorG.toFixed(2),
         peso_formula_g: p.peso.toString(),
-        valor: novoInvestimentoTotal // Atualiza o campo de valor automaticamente
+        valor: novoInvestimentoTotal 
       }));
     }
   }, [formData.produto, formData.kg_proposto]);
@@ -128,11 +122,12 @@ export default function PipelinePage() {
 
   const gerarPDFPremium = (item: any) => {
     const doc = new jsPDF();
-    const verdeEscuro = [20, 83, 45];
-    const verdeClaro = [167, 243, 208];
-    const cinzaSuave = [243, 244, 246];
+    const verdeEscuro: [number, number, number] = [20, 83, 45];
+    const verdeMedio: [number, number, number] = [34, 139, 34];
+    const cinzaSuave: [number, number, number] = [243, 244, 246];
+    const textoCinza: [number, number, number] = [60, 60, 60];
 
-    // Cabeçalho
+    // --- 1. CABEÇALHO ---
     try { doc.addImage("/logo.jpg", "JPEG", 20, 10, 40, 20); } catch (e) {}
 
     doc.setFont("helvetica", "bold");
@@ -146,7 +141,7 @@ export default function PipelinePage() {
     doc.setFillColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
     doc.rect(0, 35, 210, 2, 'F');
 
-    // DADOS DO CLIENTE
+    // --- 2. DADOS DO CLIENTE ---
     doc.setFillColor(cinzaSuave[0], cinzaSuave[1], cinzaSuave[2]);
     doc.rect(20, 45, 170, 25, 'F');
     doc.setDrawColor(220); doc.rect(20, 45, 170, 25, 'S');
@@ -155,94 +150,104 @@ export default function PipelinePage() {
     doc.setFont("helvetica", "bold");
     doc.text("DADOS DO CLIENTE", 25, 52);
     
-    doc.setFontSize(10); doc.setTextColor(60); doc.setFont("helvetica", "normal");
+    doc.setFontSize(10); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
     doc.text(`Razão Social: ${item.nome_cliente || 'N/A'}`, 25, 58);
     doc.text(`Contato: ${item.contato || 'N/A'}  |  Tel: ${item.telefone || 'N/A'}`, 25, 63);
     doc.text(`Cidade/UF: ${item.cidade_exclusividade || 'N/A'} / ${item.uf_exclusividade || ''}`, 25, 68);
 
-    // ESPECIFICAÇÃO DO INVESTIMENTO
-    doc.setFillColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
-    doc.rect(20, 80, 170, 8, 'F');
-    doc.setTextColor(255); doc.setFontSize(11);
-    doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 105, 86, { align: 'center' });
+    // --- 3. TABELA PRINCIPAL ---
+    doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
+    doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 20, 85);
 
     const totalKG = Number(item.kg_proposto) + Number(item.kg_bonificado);
     const vGramaReal = (Number(item.valor) / (totalKG * 1000)) || 0;
     const vParc = (Number(item.valor) / Number(item.parcelas)) || 0;
 
     autoTable(doc, {
-      startY: 88,
+      startY: 90,
       margin: { left: 20, right: 20 },
+      head: [['DESCRIÇÃO', 'VALORES']],
       body: [
         ['Ativo/Insumo', item.produto || 'Insumo'],
         ['Preço por grama (Tabela)', formatCurrency(item.valor_g_tabela)],
-        ['Quantidade proposta (kg)', `${item.kg_proposto} kg`],
-        ['Quantidade bonificada (kg)', `${item.kg_bonificado} kg`],
-        ['Investimento Total', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold', textColor: verdeEscuro } }],
-        // CORRIGIDO: Retirada a cor azul, agora usa textColor: 0 (preto/padrão) [IMAGEM 2]
-        ['Valor do grama c/ bonificação', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold', textColor: 0 } }],
+        ['Quantidade proposta', `${item.kg_proposto} kg`],
+        ['Quantidade bonificada', `${item.kg_bonificado} kg`],
+        ['Investimento Total', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold' } }],
+        // IMAGEM 2: CORRIGIDO (TEXTO PRETO/CINZA PADRÃO)
+        ['Valor do grama c/ bonificação', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold', textColor: textoCinza } }],
         ['Condição de Pagamento', `${item.parcelas} parcelas de ${formatCurrency(vParc)}`],
         ['Vencimento 1ª Parcela', `${item.dias_primeira_parcela} dias`]
       ],
       theme: 'grid',
-      styles: { fontSize: 10, cellPadding: 3 },
-      columnStyles: { 0: { cellWidth: 100 }, 1: { halign: 'right' } }
+      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold' },
+      styles: { fontSize: 10, cellPadding: 4, textColor: textoCinza },
+      columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right', fontStyle: 'bold' } }
     });
 
-    // PAYBACK
-    const paybackY = (doc as any).lastAutoTable.finalY + 10;
-    doc.setFillColor(30, 41, 59); doc.rect(20, paybackY, 170, 28, 'F');
-    doc.setTextColor(255); doc.setFontSize(11); doc.text("ANÁLISE TÉCNICA DE RETORNO (PAYBACK)", 25, paybackY + 8);
-    
+    // --- 4. NOVA TABELA: PAYBACK (Visual Limpo) ---
+    const paybackY = (doc as any).lastAutoTable.finalY + 15;
+
     const custoF = (vGramaReal * (Number(item.peso_formula_g) || 13.2));
     const precoV = (custoF * (Number(item.fator_lucro) || 5));
     const formulasDia = vParc > 0 ? ((vParc / precoV) / 22) : 0;
 
-    doc.setFontSize(9); doc.setTextColor(200);
-    doc.text(`Custo por fórmula: ${formatCurrency(custoF)}  |  Sugestão de Venda: ${formatCurrency(precoV)}`, 25, paybackY + 16);
-    doc.setFontSize(11); doc.setTextColor(verdeClaro[0], verdeClaro[1], verdeClaro[2]);
-    doc.setFont("helvetica", "bold");
-    doc.text(`META DE VIABILIDADE: ${formulasDia.toFixed(2)} fórmulas/dia`, 25, paybackY + 23);
+    autoTable(doc, {
+      startY: paybackY,
+      margin: { left: 20, right: 20 },
+      head: [['ANÁLISE TÉCNICA DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
+      body: [
+        ['Custo por fórmula (Manipulado)', formatCurrency(custoF)],
+        ['Sugestão de Venda (Fator 5)', formatCurrency(precoV)],
+        [
+            { content: 'META DE VIABILIDADE (Ponto de Equilíbrio)', styles: { fontStyle: 'bold', fontSize: 11 } },
+            { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: verdeMedio, fontSize: 12, halign: 'right' } }
+        ]
+      ],
+      theme: 'grid',
+      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'left' },
+      styles: { fontSize: 10, cellPadding: 4, textColor: textoCinza },
+      columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right' } }
+    });
 
-    // --- REPOSICIONAMENTO: NOTAS E CONDIÇÕES (IMAGEM 3) ---
-    // Agora as notas ficam logo abaixo do Payback
-    let currentY = paybackY + 35; // Ponto de partida inicial abaixo do payback
+    // --- 5. REPOSICIONAMENTO: NOTAS E CONDIÇÕES (IMAGEM 3) ---
+    // Agora fica logo abaixo do Payback
+    let currentY = (doc as any).lastAutoTable.finalY + 20; 
 
     if (item.observacoes_proposta) {
-      doc.setFontSize(10); doc.setTextColor(0); doc.setFont("helvetica", "bold");
-      doc.text("NOTAS E CONDIÇÕES:", 20, currentY);
+      doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
+      doc.text("NOTAS E CONDIÇÕES COMERCIAIS:", 20, currentY);
       
-      doc.setFontSize(9); doc.setTextColor(80); doc.setFont("helvetica", "normal");
+      currentY += 7;
+      doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
       const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
       
-      // Divide o texto para caber na largura e calcula quantas linhas ocupou
       const splitText = doc.splitTextToSize(notasTexto, 170);
-      doc.text(splitText, 20, currentY + 5);
+      doc.text(splitText, 20, currentY);
       
-      // Atualiza a posição Y baseado no tamanho do texto das notas
-      const textHeight = splitText.length * 4; // Aproximadamente 4mm por linha
-      currentY = currentY + textHeight + 10; // Adiciona margem após as notas
+      currentY = currentY + (splitText.length * 4) + 15; 
+    } else {
+      currentY += 5;
     }
 
-    // --- QUALIDADE E PRODUÇÃO (Agora fica DEPOIS das Notas) ---
-    const certY = currentY; // Usa a posição dinâmica calculada acima
+    // --- 6. QUALIDADE E CERTIFICAÇÕES (Fica abaixo das notas) ---
+    const certY = currentY;
     
     doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
     doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
     
-    doc.setFontSize(9); doc.setTextColor(100); doc.setFont("helvetica", "normal");
+    doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
     const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção certificada e processos auditados, assegurando segurança, rastreabilidade e alto desempenho.";
     doc.text(doc.splitTextToSize(certText, 160), 105, certY + 7, { align: 'center' });
     
     try {
       const imgWidth = 80; const imgHeight = 15; const xPos = (210 - imgWidth) / 2;
-      doc.addImage("/selo.jpg", "JPEG", xPos, certY + 14, imgWidth, imgHeight);
+      doc.addImage("/selo.jpg", "JPEG", xPos, certY + 16, imgWidth, imgHeight);
     } catch (e) { 
       doc.setFont("helvetica", "bold"); doc.text("SELOS: HACCP • ISO • FSSC 22000 • GMP", 105, certY + 22, { align: 'center' });
     }
 
-    // Rodapé
+    // --- 7. RODAPÉ ---
     const fY = 282; doc.setFontSize(7); doc.setTextColor(150);
     doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
     doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 20, fY + 4);
