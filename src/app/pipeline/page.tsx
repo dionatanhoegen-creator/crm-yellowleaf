@@ -11,6 +11,12 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
+// --- IMPORTAÇÃO DO EDITOR COMPATÍVEL (REACT-QUILL-NEW) ---
+import dynamic from 'next/dynamic';
+// Usamos o 'react-quill-new' que é compatível com React 19
+const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
+import 'react-quill-new/dist/quill.snow.css';
+
 // --- TABELA TÉCNICA OFICIAL ATUALIZADA ---
 const TABELA_PRODUTOS: Record<string, any> = {
   "Allisane®": { preco_g: 2.50, peso: 15.0 },
@@ -99,6 +105,22 @@ export default function PipelinePage() {
 
   const formatCurrency = (val: any) => {
     return (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  };
+
+  // --- CONVERSOR DE HTML PARA PDF ---
+  // Essa função garante que o que você editar no Rich Text saia bonito no PDF
+  const cleanHtmlForPdf = (html: string) => {
+    if (!html) return "";
+    // Substitui tags de lista por quebras de linha e bolinhas
+    let text = html.replace(/<ul>/g, "").replace(/<\/ul>/g, "");
+    text = text.replace(/<li>/g, "  • ").replace(/<\/li>/g, "\n");
+    // Substitui parágrafos
+    text = text.replace(/<p>/g, "").replace(/<\/p>/g, "\n");
+    // Remove tags restantes
+    text = text.replace(/<[^>]*>?/gm, "");
+    // Decodifica caracteres especiais
+    text = text.replace(/&nbsp;/g, " ");
+    return text.trim();
   };
 
   const gerarPDFPremium = (item: any) => {
@@ -194,13 +216,15 @@ export default function PipelinePage() {
       doc.setFont("helvetica", "bold"); doc.text("SELOS: HACCP • ISO • FSSC 22000 • GMP", 105, certY + 22, { align: 'center' });
     }
 
-    // OBSERVAÇÕES
+    // OBSERVAÇÕES (Com conversão de HTML para Texto Limpo)
     if (item.observacoes_proposta) {
       const notasY = certY + 35;
       doc.setFontSize(10); doc.setTextColor(0); doc.setFont("helvetica", "bold");
       doc.text("NOTAS E CONDIÇÕES:", 20, notasY);
+      
       doc.setFontSize(9); doc.setTextColor(80); doc.setFont("helvetica", "normal");
-      doc.text(doc.splitTextToSize(item.observacoes_proposta, 170), 20, notasY + 5);
+      const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
+      doc.text(doc.splitTextToSize(notasTexto, 170), 20, notasY + 5);
     }
 
     // Rodapé
@@ -233,6 +257,7 @@ export default function PipelinePage() {
 
   return (
     <div className="w-full p-4">
+      {/* Kanban Header */}
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-2xl font-black text-[#1e293b] italic uppercase tracking-tighter">Pipeline YellowLeaf</h1>
         <button onClick={() => { setEditingOp(null); setFormData({...formData, cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', valor: '', status: 'prospeccao'}); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95">+ Nova Oportunidade</button>
@@ -288,8 +313,23 @@ export default function PipelinePage() {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª Parcela (Dias)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
 
               <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100">
-                  <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Notas e Condições (Texto Simples)</label>
-                  <textarea rows={4} className="w-full bg-white border border-blue-100 rounded-xl p-3 text-sm outline-none resize-none font-sans" value={formData.observacoes_proposta} onChange={e => setFormData({...formData, observacoes_proposta: e.target.value})} placeholder="Escreva aqui suas notas (Pressione Enter para pular linha)..."/>
+                  <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Notas e Condições</label>
+                  
+                  {/* EDITOR SEGURO (REACT-QUILL-NEW) */}
+                  <div className="bg-white rounded-xl overflow-hidden border border-blue-100 text-slate-700">
+                    <ReactQuill 
+                      theme="snow" 
+                      value={formData.observacoes_proposta} 
+                      onChange={(val) => setFormData({...formData, observacoes_proposta: val})} 
+                      modules={{ 
+                        toolbar: [
+                          ['bold', 'italic', 'underline'], 
+                          [{'list': 'ordered'}, {'list': 'bullet'}], 
+                          ['clean']
+                        ] 
+                      }}
+                    />
+                  </div>
               </div>
             </div>
 
