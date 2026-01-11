@@ -11,13 +11,12 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// --- IMPORTAÇÃO DO EDITOR COMPATÍVEL (REACT-QUILL-NEW) ---
+// --- IMPORTAÇÃO DO EDITOR COMPATÍVEL ---
 import dynamic from 'next/dynamic';
-// Usamos o 'react-quill-new' que é compatível com React 19
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 import 'react-quill-new/dist/quill.snow.css';
 
-// --- TABELA TÉCNICA OFICIAL ATUALIZADA ---
+// --- TABELA TÉCNICA OFICIAL ---
 const TABELA_PRODUTOS: Record<string, any> = {
   "Allisane®": { preco_g: 2.50, peso: 15.0 },
   "Anethin®": { preco_g: 2.50, peso: 12.0 },
@@ -63,17 +62,28 @@ export default function PipelinePage() {
 
   useEffect(() => { setMounted(true); carregarOportunidades(); }, []);
 
+  // --- LÓGICA DE CÁLCULO AUTOMÁTICO (IMAGEM 1) ---
+  // Atualiza sempre que muda o Produto OU o KG Proposto
   useEffect(() => {
     if (TABELA_PRODUTOS[formData.produto]) {
       const p = TABELA_PRODUTOS[formData.produto];
+      
+      // Pega o valor do grama da tabela
+      const valorG = p.preco_g;
+      // Pega o KG digitado (ou 0 se vazio)
+      const kgDigitado = Number(formData.kg_proposto) || 0;
+      
+      // Cálculo: Preço do G * 1000 * KG
+      const novoInvestimentoTotal = (valorG * 1000 * kgDigitado).toFixed(2);
+
       setFormData(prev => ({ 
         ...prev, 
-        valor_g_tabela: p.preco_g.toFixed(2),
+        valor_g_tabela: valorG.toFixed(2),
         peso_formula_g: p.peso.toString(),
-        valor: (p.preco_g * 1000 * Number(prev.kg_proposto)).toFixed(2)
+        valor: novoInvestimentoTotal // Atualiza o campo de valor automaticamente
       }));
     }
-  }, [formData.produto]);
+  }, [formData.produto, formData.kg_proposto]);
 
   const carregarOportunidades = async () => {
     setLoading(true);
@@ -107,18 +117,11 @@ export default function PipelinePage() {
     return (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
 
-  // --- CONVERSOR DE HTML PARA PDF ---
-  // Essa função garante que o que você editar no Rich Text saia bonito no PDF
   const cleanHtmlForPdf = (html: string) => {
     if (!html) return "";
-    // Substitui tags de lista por quebras de linha e bolinhas
-    let text = html.replace(/<ul>/g, "").replace(/<\/ul>/g, "");
+    let text = html.replace(/<p>/g, "").replace(/<\/p>/g, "\n").replace(/<br>/g, "\n");
     text = text.replace(/<li>/g, "  • ").replace(/<\/li>/g, "\n");
-    // Substitui parágrafos
-    text = text.replace(/<p>/g, "").replace(/<\/p>/g, "\n");
-    // Remove tags restantes
     text = text.replace(/<[^>]*>?/gm, "");
-    // Decodifica caracteres especiais
     text = text.replace(/&nbsp;/g, " ");
     return text.trim();
   };
@@ -176,7 +179,8 @@ export default function PipelinePage() {
         ['Quantidade proposta (kg)', `${item.kg_proposto} kg`],
         ['Quantidade bonificada (kg)', `${item.kg_bonificado} kg`],
         ['Investimento Total', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold', textColor: verdeEscuro } }],
-        ['Valor do grama c/ bonificação', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold', textColor: [37, 99, 235] } }],
+        // CORRIGIDO: Retirada a cor azul, agora usa textColor: 0 (preto/padrão) [IMAGEM 2]
+        ['Valor do grama c/ bonificação', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold', textColor: 0 } }],
         ['Condição de Pagamento', `${item.parcelas} parcelas de ${formatCurrency(vParc)}`],
         ['Vencimento 1ª Parcela', `${item.dias_primeira_parcela} dias`]
       ],
@@ -200,9 +204,31 @@ export default function PipelinePage() {
     doc.setFont("helvetica", "bold");
     doc.text(`META DE VIABILIDADE: ${formulasDia.toFixed(2)} fórmulas/dia`, 25, paybackY + 23);
 
-    // QUALIDADE
-    const certY = paybackY + 45;
+    // --- REPOSICIONAMENTO: NOTAS E CONDIÇÕES (IMAGEM 3) ---
+    // Agora as notas ficam logo abaixo do Payback
+    let currentY = paybackY + 35; // Ponto de partida inicial abaixo do payback
+
+    if (item.observacoes_proposta) {
+      doc.setFontSize(10); doc.setTextColor(0); doc.setFont("helvetica", "bold");
+      doc.text("NOTAS E CONDIÇÕES:", 20, currentY);
+      
+      doc.setFontSize(9); doc.setTextColor(80); doc.setFont("helvetica", "normal");
+      const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
+      
+      // Divide o texto para caber na largura e calcula quantas linhas ocupou
+      const splitText = doc.splitTextToSize(notasTexto, 170);
+      doc.text(splitText, 20, currentY + 5);
+      
+      // Atualiza a posição Y baseado no tamanho do texto das notas
+      const textHeight = splitText.length * 4; // Aproximadamente 4mm por linha
+      currentY = currentY + textHeight + 10; // Adiciona margem após as notas
+    }
+
+    // --- QUALIDADE E PRODUÇÃO (Agora fica DEPOIS das Notas) ---
+    const certY = currentY; // Usa a posição dinâmica calculada acima
+    
     doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
+    doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
     
     doc.setFontSize(9); doc.setTextColor(100); doc.setFont("helvetica", "normal");
@@ -214,17 +240,6 @@ export default function PipelinePage() {
       doc.addImage("/selo.jpg", "JPEG", xPos, certY + 14, imgWidth, imgHeight);
     } catch (e) { 
       doc.setFont("helvetica", "bold"); doc.text("SELOS: HACCP • ISO • FSSC 22000 • GMP", 105, certY + 22, { align: 'center' });
-    }
-
-    // OBSERVAÇÕES (Com conversão de HTML para Texto Limpo)
-    if (item.observacoes_proposta) {
-      const notasY = certY + 35;
-      doc.setFontSize(10); doc.setTextColor(0); doc.setFont("helvetica", "bold");
-      doc.text("NOTAS E CONDIÇÕES:", 20, notasY);
-      
-      doc.setFontSize(9); doc.setTextColor(80); doc.setFont("helvetica", "normal");
-      const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
-      doc.text(doc.splitTextToSize(notasTexto, 170), 20, notasY + 5);
     }
 
     // Rodapé
@@ -307,7 +322,11 @@ export default function PipelinePage() {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor do G (Tabela)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Proposto</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
               
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento Total R$</label><input className="w-full bg-green-50 border-green-200 border rounded-xl p-3 font-black text-green-700" value={formData.valor} onChange={e => setFormData({...formData, valor: e.target.value})}/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento Total R$</label>
+              {/* CAMPO TRAVADO (READONLY) COM COR CINZA PARA INDICAR CÁLCULO AUTOMÁTICO */}
+              <input className="w-full bg-slate-100 border border-slate-200 text-slate-600 rounded-xl p-3 font-bold cursor-not-allowed" value={formData.valor} readOnly />
+              </div>
+              
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Bônus</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Parcelas</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª Parcela (Dias)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
