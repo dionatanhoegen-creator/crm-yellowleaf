@@ -3,18 +3,36 @@
 import React, { useState, useEffect } from 'react';
 import { 
   BarChart3, TrendingUp, DollarSign, Users, 
-  Calendar, CheckCircle2, XCircle, AlertCircle, PieChart
+  Calendar, CheckCircle2, XCircle, FileText, PieChart, Download, Filter
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
-// Função para formatar dinheiro
+// --- UTILITÁRIOS ---
 const formatCurrency = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatDate = (dateStr: string) => {
+  if (!dateStr) return '-';
+  return new Date(dateStr).toLocaleDateString('pt-BR');
+};
+
+// Mapeamento de Status para nomes bonitos
+const LABELS_STATUS: Record<string, string> = {
+  'prospeccao': 'Prospecção',
+  'qualificacao': 'Qualificação',
+  'apresentacao': 'Apresentação',
+  'negociacao': 'Negociação',
+  'fechado': 'Venda Fechada',
+  'perdido': 'Perdido'
+};
 
 export default function RelatoriosPage() {
   const supabase = createClientComponentClient();
   const [loading, setLoading] = useState(true);
-  
-  // Estados para métricas
+  const [listaCompleta, setListaCompleta] = useState<any[]>([]);
+  const [filtroStatus, setFiltroStatus] = useState('abertos'); // abertos | todos | fechados
+
+  // Métricas
   const [metrics, setMetrics] = useState({
     totalOportunidades: 0,
     valorTotalPipeline: 0,
@@ -24,7 +42,6 @@ export default function RelatoriosPage() {
     ticketMedio: 0
   });
 
-  // Estado para o Funil
   const [funil, setFunil] = useState<Record<string, { qtd: number, valor: number }>>({});
 
   useEffect(() => {
@@ -33,10 +50,13 @@ export default function RelatoriosPage() {
 
   const carregarDados = async () => {
     setLoading(true);
-    const { data: pipeline } = await supabase.from('pipeline').select('*');
+    // Busca tudo ordenado por data mais recente
+    const { data: pipeline } = await supabase.from('pipeline').select('*').order('created_at', { ascending: false });
 
     if (pipeline) {
-      // 1. Cálculos Gerais
+      setListaCompleta(pipeline);
+
+      // 1. Cálculos de KPI
       const totalOps = pipeline.length;
       const totalValor = pipeline.reduce((acc, item) => acc + (Number(item.valor) || 0), 0);
       
@@ -44,7 +64,7 @@ export default function RelatoriosPage() {
       const qtdFechado = fechados.length;
       const valorFechado = fechados.reduce((acc, item) => acc + (Number(item.valor) || 0), 0);
 
-      // 2. Cálculo do Funil (Agrupamento)
+      // 2. Cálculo do Funil
       const novoFunil: any = {
         'prospeccao': { qtd: 0, valor: 0, label: 'Prospecção', color: 'bg-blue-500' },
         'qualificacao': { qtd: 0, valor: 0, label: 'Qualificação', color: 'bg-purple-500' },
@@ -75,7 +95,67 @@ export default function RelatoriosPage() {
     setLoading(false);
   };
 
-  if (loading) return <div className="p-8 text-center text-slate-400 font-bold animate-pulse">Calculando métricas...</div>;
+  // --- FILTRO DA LISTA ---
+  const listaFiltrada = listaCompleta.filter(item => {
+    if (filtroStatus === 'todos') return true;
+    if (filtroStatus === 'fechados') return item.status === 'fechado';
+    if (filtroStatus === 'abertos') return item.status !== 'fechado' && item.status !== 'perdido';
+    return true;
+  });
+
+  // --- GERADOR DE PDF PAISAGEM ---
+  const gerarRelatorioGerencial = () => {
+    const doc = new jsPDF('l', 'mm', 'a4'); // 'l' = Landscape (Paisagem)
+    
+    // Cabeçalho
+    doc.setFontSize(18);
+    doc.setTextColor(40, 40, 40);
+    doc.text("Relatório Gerencial de Vendas", 14, 15);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')} | Filtro: ${filtroStatus.toUpperCase()}`, 14, 22);
+
+    // Dados da Tabela
+    const tableBody = listaFiltrada.map(item => [
+        item.nome_cliente || 'Sem Nome',
+        item.produto || '-',
+        LABELS_STATUS[item.status] || item.status,
+        formatCurrency(item.valor || 0),
+        formatDate(item.data_entrada),
+        item.canal_contato || 'N/D',
+        item.observacoes ? item.observacoes.substring(0, 50) + '...' : '' // Resumo da Obs
+    ]);
+
+    autoTable(doc, {
+        startY: 28,
+        head: [['Cliente', 'Produto', 'Estágio', 'Valor', 'Entrada', 'Canal', 'Observações Internas']],
+        body: tableBody,
+        theme: 'grid',
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [20, 83, 45], textColor: 255, fontStyle: 'bold' }, // Verde YellowLeaf
+        columnStyles: {
+            0: { cellWidth: 40 }, // Cliente
+            1: { cellWidth: 35 }, // Produto
+            2: { cellWidth: 25 }, // Estágio
+            3: { cellWidth: 25, halign: 'right' }, // Valor
+            4: { cellWidth: 20, halign: 'center' }, // Data
+            5: { cellWidth: 25 }, // Canal
+            6: { cellWidth: 'auto' } // Obs (restante)
+        }
+    });
+
+    // Rodapé com Totais
+    const finalY = (doc as any).lastAutoTable.finalY + 10;
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    const totalDestaPagina = listaFiltrada.reduce((acc, i) => acc + (Number(i.valor)||0), 0);
+    doc.text(`TOTAL LISTADO: ${formatCurrency(totalDestaPagina)}`, 14, finalY);
+
+    doc.save(`Relatorio_Vendas_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  if (loading) return <div className="p-8 text-center text-slate-400 font-bold animate-pulse">Carregando dados...</div>;
 
   return (
     <div className="p-6 md:p-8 bg-slate-50 min-h-screen font-sans text-slate-800">
@@ -97,11 +177,11 @@ export default function RelatoriosPage() {
            </button>
         </div>
 
-        {/* 1. KPIs PRINCIPAIS (CARDS) */}
+        {/* 1. KPIs PRINCIPAIS */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
            <CardMetric 
              icon={<DollarSign size={24}/>} 
-             label="Valor em Pipeline (Total)" 
+             label="Pipeline Total" 
              value={formatCurrency(metrics.valorTotalPipeline)} 
              color="text-blue-600" bg="bg-blue-50" border="border-blue-100"
            />
@@ -109,42 +189,38 @@ export default function RelatoriosPage() {
              icon={<CheckCircle2 size={24}/>} 
              label="Vendas Fechadas" 
              value={formatCurrency(metrics.valorFechado)} 
-             subValue={`${metrics.qtdFechado} contratos assinados`}
+             subValue={`${metrics.qtdFechado} contratos`}
              color="text-green-600" bg="bg-green-50" border="border-green-100"
            />
            <CardMetric 
              icon={<TrendingUp size={24}/>} 
-             label="Taxa de Conversão" 
+             label="Conversão" 
              value={`${metrics.taxaConversao.toFixed(1)}%`} 
-             subValue="Eficiência comercial"
+             subValue="Eficiência"
              color="text-purple-600" bg="bg-purple-50" border="border-purple-100"
            />
            <CardMetric 
              icon={<Users size={24}/>} 
              label="Ticket Médio" 
              value={formatCurrency(metrics.ticketMedio)} 
-             subValue="Por venda fechada"
              color="text-orange-600" bg="bg-orange-50" border="border-orange-100"
            />
         </div>
 
-        {/* 2. FUNIL DE VENDAS E DISTRIBUIÇÃO */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          
-          {/* FUNIL GRÁFICO (BARRAS) */}
+        {/* 2. GRÁFICOS E FUNIL */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-10">
           <div className="lg:col-span-2 bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
             <h3 className="font-bold text-lg text-slate-800 mb-6 flex items-center gap-2">
               <PieChart size={20} className="text-slate-400"/> Funil de Vendas (Volume)
             </h3>
             <div className="space-y-4">
               {Object.values(funil).map((f: any) => {
-                // Calcula largura da barra baseada no total (máx 100%)
                 const percent = metrics.totalOportunidades > 0 ? (f.qtd / metrics.totalOportunidades) * 100 : 0;
                 return (
                   <div key={f.label}>
                     <div className="flex justify-between text-xs font-bold text-slate-600 mb-1 uppercase">
                       <span>{f.label}</span>
-                      <span>{f.qtd} Oportunidades ({percent.toFixed(0)}%)</span>
+                      <span>{f.qtd} ({percent.toFixed(0)}%)</span>
                     </div>
                     <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
                       <div className={`h-full rounded-full ${f.color}`} style={{ width: `${percent}%`, minWidth: percent > 0 ? '5px' : '0' }}></div>
@@ -158,33 +234,83 @@ export default function RelatoriosPage() {
             </div>
           </div>
 
-          {/* RESUMO RÁPIDO (SIDEBAR) */}
+          {/* PAINEL META (ESCURO) */}
           <div className="bg-slate-800 text-white p-6 rounded-3xl shadow-xl flex flex-col justify-between relative overflow-hidden">
              <div className="relative z-10">
-               <h3 className="font-bold text-lg mb-2">Meta Mensal</h3>
-               <p className="text-slate-400 text-sm mb-6">Acompanhe o progresso financeiro.</p>
-               
+               <h3 className="font-bold text-lg mb-2">Meta vs Realizado</h3>
                <div className="text-4xl font-black mb-1">{formatCurrency(metrics.valorFechado)}</div>
                <p className="text-green-400 text-xs font-bold uppercase tracking-wider mb-8">Já Faturado</p>
-
                <div className="p-4 bg-white/10 rounded-xl backdrop-blur-sm border border-white/10">
                  <p className="text-xs text-slate-300 mb-1 font-bold uppercase">Potencial na Mesa</p>
                  <p className="text-xl font-bold">{formatCurrency(metrics.valorTotalPipeline - metrics.valorFechado)}</p>
                </div>
              </div>
-             
-             {/* Decorative Circles */}
              <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-green-500 rounded-full blur-[80px] opacity-20"></div>
-             <div className="absolute top-10 -left-10 w-40 h-40 bg-blue-500 rounded-full blur-[80px] opacity-20"></div>
           </div>
-
         </div>
+
+        {/* 3. RELATÓRIO DETALHADO (NOVA SEÇÃO) */}
+        <div className="bg-white rounded-3xl shadow-lg border border-slate-100 overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-50/50">
+                <div>
+                    <h3 className="font-black text-lg text-slate-800 flex items-center gap-2"><FileText size={20} className="text-blue-600"/> Relatório Detalhado</h3>
+                    <p className="text-xs text-slate-500">Visualize e exporte os dados para apresentar à diretoria.</p>
+                </div>
+                <div className="flex gap-2">
+                    {/* FILTROS */}
+                    <div className="flex bg-white border border-slate-200 rounded-lg p-1">
+                        <button onClick={() => setFiltroStatus('abertos')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${filtroStatus === 'abertos' ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>Abertos</button>
+                        <button onClick={() => setFiltroStatus('fechados')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${filtroStatus === 'fechados' ? 'bg-green-100 text-green-700' : 'text-slate-500 hover:bg-slate-50'}`}>Fechados</button>
+                        <button onClick={() => setFiltroStatus('todos')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${filtroStatus === 'todos' ? 'bg-slate-200 text-slate-700' : 'text-slate-500 hover:bg-slate-50'}`}>Todos</button>
+                    </div>
+                    {/* BOTÃO EXPORTAR */}
+                    <button onClick={gerarRelatorioGerencial} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm transition active:scale-95">
+                        <Download size={14}/> Baixar PDF
+                    </button>
+                </div>
+            </div>
+
+            <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-500 font-bold uppercase border-b border-slate-100">
+                        <tr>
+                            <th className="p-4">Cliente</th>
+                            <th className="p-4">Produto</th>
+                            <th className="p-4">Estágio</th>
+                            <th className="p-4">Valor</th>
+                            <th className="p-4">Data Entrada</th>
+                            <th className="p-4">Canal</th>
+                            <th className="p-4">Obs. Interna</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {listaFiltrada.length === 0 && (
+                            <tr><td colSpan={7} className="p-8 text-center text-slate-400">Nenhum registro encontrado para este filtro.</td></tr>
+                        )}
+                        {listaFiltrada.map(item => (
+                            <tr key={item.id} className="hover:bg-slate-50 transition">
+                                <td className="p-4 font-bold text-slate-700">{item.nome_cliente}</td>
+                                <td className="p-4 text-slate-600"><span className="bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-100">{item.produto}</span></td>
+                                <td className="p-4 font-bold text-slate-500 uppercase">{LABELS_STATUS[item.status]}</td>
+                                <td className="p-4 font-bold text-slate-700">{formatCurrency(item.valor)}</td>
+                                <td className="p-4 text-slate-500">{formatDate(item.data_entrada)}</td>
+                                <td className="p-4 text-slate-500">{item.canal_contato || '-'}</td>
+                                <td className="p-4 text-slate-400 italic max-w-[200px] truncate" title={item.observacoes}>{item.observacoes || '-'}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+            <div className="p-4 bg-slate-50 border-t border-slate-100 text-right text-xs font-bold text-slate-500">
+                Mostrando {listaFiltrada.length} registros
+            </div>
+        </div>
+
       </div>
     </div>
   );
 }
 
-// Componente Auxiliar de Card
 function CardMetric({ icon, label, value, subValue, color, bg, border }: any) {
   return (
     <div className={`bg-white p-6 rounded-2xl border shadow-sm ${border} hover:shadow-md transition`}>
