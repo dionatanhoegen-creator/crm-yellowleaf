@@ -116,18 +116,12 @@ export default function PipelinePage() {
     return !bloqueado; 
   });
 
-  // --- LÓGICA 1: CARREGA DADOS QUANDO SELECIONA PRODUTO ---
+  // LÓGICA: Preenche preço ao selecionar produto
   useEffect(() => {
     if (!formData.produto) return;
-    // Só atualiza o preço pela API se o usuário TROCAR de produto
-    // Isso evita sobrescrever o preço que o usuário editou manualmente
     const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
     if (produtoSelecionado) {
-        // Verifica se o preço já foi editado ou se é uma nova seleção
         const precoAtual = parseMoney(formData.valor_g_tabela);
-        
-        // Se o preço estiver zerado ou for uma nova seleção, puxa da API
-        // Se já tiver valor, mantemos (para edição), a menos que seja troca de produto
         if (precoAtual === 0 || !formData.valor_g_tabela) {
              setFormData(prev => ({ 
                 ...prev, 
@@ -138,17 +132,14 @@ export default function PipelinePage() {
     }
   }, [formData.produto, produtosApi]);
 
-  // --- LÓGICA 2: CALCULADORA EM TEMPO REAL (OFERTA MANUAL) ---
-  // Roda sempre que o usuário digita no "Valor G" ou "KG"
+  // LÓGICA: Calculadora em Tempo Real
   useEffect(() => {
     const precoG = parseMoney(formData.valor_g_tabela);
     const kg = parseMoney(formData.kg_proposto);
-    
     const vTotal = (precoG * 1000 * kg).toFixed(2);
 
-    // Atualiza APENAS o total, respeitando o preço que o usuário digitou
     setFormData(prev => {
-        if (prev.valor === vTotal) return prev; // Evita loop infinito
+        if (prev.valor === vTotal) return prev; 
         return { ...prev, valor: vTotal };
     });
   }, [formData.valor_g_tabela, formData.kg_proposto]);
@@ -214,7 +205,6 @@ export default function PipelinePage() {
     const vGramaReal = (Number(item.valor) / (totalKG * 1000)) || 0;
     const vParc = (Number(item.valor) / Number(item.parcelas)) || 0;
 
-    // Garante que o PDF usa o valor digitado no formulário
     const valorGExibicao = parseMoney(item.valor_g_tabela);
 
     autoTable(doc, {
@@ -222,7 +212,7 @@ export default function PipelinePage() {
       head: [['DESCRIÇÃO', 'VALORES']],
       body: [
         ['Ativo/Insumo', item.produto || 'Insumo'],
-        ['Preço por grama (g)', formatCurrency(valorGExibicao)], // Mostra "Negociado"
+        ['Preço por grama (g)', formatCurrency(valorGExibicao)], 
         ['Quantidade da proposta (kg)', `${item.kg_proposto} kg`],
         ['Quantidade bonificada (kg)', `${item.kg_bonificado} kg`],
         ['Investimento Total (R$)', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold' } }],
@@ -267,17 +257,25 @@ export default function PipelinePage() {
       currentY += (limitedText.length * 5) + 5; 
     }
 
-    const certY = currentY + 5;
+    // --- SEÇÃO QUALIDADE E PRODUÇÃO (AJUSTADA) ---
+    const certY = currentY + 10;
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
+
+    // 1. IMAGEM DOS SELOS (Proporção larga para não deformar)
+    const imgY = certY + 5;
+    try {
+      const imgW = 130; // Mais largo
+      const imgH = 12;  // Mais baixo (proporção de faixa)
+      const xPos = (210 - imgW) / 2;
+      doc.addImage("/selo.jpg", "JPEG", xPos, imgY, imgW, imgH);
+    } catch (e) {}
+
+    // 2. TEXTO (Sob a imagem)
+    const textY = imgY + 18; 
     doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
     const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho dos ativos.";
-    doc.text(doc.splitTextToSize(certText, 160), 105, certY + 6, { align: 'center' });
-
-    try {
-      const imgW = 100; const imgH = 20; const xPos = (210 - imgW) / 2;
-      doc.addImage("/selo.jpg", "JPEG", xPos, certY + 16, imgW, imgH);
-    } catch (e) { doc.setFontSize(9); doc.setFont("helvetica", "bold"); doc.text("SELOS: HACCP • ISO • GMP", 105, certY + 22, { align: 'center' }); }
+    doc.text(doc.splitTextToSize(certText, 170), 105, textY, { align: 'center' });
 
     const fY = 285; doc.setFontSize(7); doc.setTextColor(150);
     doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
@@ -360,7 +358,7 @@ export default function PipelinePage() {
             <div className="bg-[#242f3e] p-6 flex justify-between items-center text-white shrink-0">
               <h2 className="text-lg font-bold flex items-center gap-2">✨ {editingOp ? 'Editar Oportunidade' : 'Nova Oportunidade'}</h2>
               <div className="flex gap-2">
-                {editingOp && <button onClick={() => gerarPDFPremium(formData)} className="bg-green-600 px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase shadow-lg"><Download size={14}/> Gerar PDF</button>}
+                {editingOp && <button onClick={() => gerarPDFPremium(formData)} className="bg-green-600 px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase shadow-lg"><Download size={14}/> PDF Premium</button>}
                 <button onClick={() => setModalOpen(false)} className="hover:bg-white/10 p-1 rounded-full"><X/></button>
               </div>
             </div>
@@ -399,10 +397,10 @@ export default function PipelinePage() {
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase">Valor G (Tabela)</label>
                 <input 
-                  type="text" // Tipo text para permitir vírgula
+                  type="text" 
                   className="w-full bg-slate-50 border rounded-xl p-3 font-bold text-blue-700" 
                   value={formData.valor_g_tabela} 
-                  onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} // Permite digitar
+                  onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} 
                 />
               </div>
               
@@ -420,7 +418,6 @@ export default function PipelinePage() {
               </div>
             </div>
             <div className="p-6 bg-slate-50 border-t flex justify-end items-center shrink-0 gap-2">
-              {/* BOTÃO EXCLUIR RESTAURADO */}
               {editingOp && <button onClick={handleDelete} className="text-red-500 font-bold text-xs uppercase px-4 py-2 hover:bg-red-50 rounded-lg">Excluir</button>}
               
               <button onClick={() => setModalOpen(false)} className="px-6 font-bold text-slate-400">CANCELAR</button>
