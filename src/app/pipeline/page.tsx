@@ -15,7 +15,7 @@ import dynamic from 'next/dynamic';
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 import 'react-quill-new/dist/quill.snow.css';
 
-// --- CONFIGURAÇÃO DA API (MESMA DO PRODUTOS PAGE) ---
+// --- URL DA API (A MESMA DA PÁGINA DE PRODUTOS) ---
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
 const ESTAGIOS = [
@@ -30,12 +30,12 @@ const ESTAGIOS = [
 export default function PipelinePage() {
   const supabase = createClientComponentClient();
   
-  // ESTADOS DE DADOS
+  // DADOS
   const [oportunidades, setOportunidades] = useState<any[]>([]);
-  const [produtosApi, setProdutosApi] = useState<any[]>([]); // Lista vinda da API Google
-  const [exclusividades, setExclusividades] = useState<any[]>([]); // Lista vinda do Supabase
+  const [produtosApi, setProdutosApi] = useState<any[]>([]); // Lista vinda da Planilha
+  const [exclusividades, setExclusividades] = useState<any[]>([]); // Lista vinda do Banco de Dados
   
-  // ESTADOS DE UI
+  // UI
   const [loading, setLoading] = useState(true);
   const [loadingProdutos, setLoadingProdutos] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -57,32 +57,42 @@ export default function PipelinePage() {
     inicializarDados();
   }, []);
 
-  // --- CARREGAMENTO CENTRALIZADO DE DADOS ---
   const inicializarDados = async () => {
     setLoading(true);
-    await Promise.all([
-        carregarOportunidades(),
-        carregarProdutosDaAPI(), // Busca o Purin 7 e outros da API
-        carregarExclusividades() // Busca os bloqueios do Supabase
-    ]);
+    await Promise.all([carregarOportunidades(), carregarProdutosDaAPI(), carregarExclusividades()]);
     setLoading(false);
   };
 
+  // --- TRADUTOR DE DINHEIRO (PLANILHA -> CÓDIGO) ---
+  // Converte "R$ 12,00" para 12.00
+  const parseMoney = (valor: any) => {
+    if (typeof valor === 'number') return valor;
+    if (!valor) return 0;
+    // Remove "R$", espaços e troca vírgula por ponto
+    const limpo = String(valor).replace('R$', '').replace(/\s/g, '').replace(',', '.');
+    return parseFloat(limpo) || 0;
+  };
+
+  // --- BUSCA DADOS DA PLANILHA DO GOOGLE ---
   const carregarProdutosDaAPI = async () => {
     setLoadingProdutos(true);
     try {
         const res = await fetch(`${API_PRODUTOS_URL}?path=produtos`);
         const json = await res.json();
+        
         if (json.success && Array.isArray(json.data)) {
-            // Normaliza os dados para garantir que números sejam números
             const produtosLimpos = json.data.map((p: any) => ({
-                ...p,
-                preco_grama: parseFloat(p.preco_grama) || 0,
-                peso_formula: parseFloat(p.peso_formula) || 13.2 // Valor padrão se a API não tiver
+                ativo: p.ativo ? p.ativo.trim() : 'Sem Nome',
+                // Aqui aplicamos o tradutor de dinheiro
+                preco_grama: parseMoney(p.preco_grama), 
+                // Peso da fórmula geralmente é numérico na planilha, mas garantimos
+                peso_formula: parseFloat(String(p.peso_formula).replace(',', '.')) || 13.2
             }));
-            setProdutosApi(produtosLimpos);
+            
+            // Ordena alfabeticamente
+            setProdutosApi(produtosLimpos.sort((a: any, b: any) => a.ativo.localeCompare(b.ativo)));
         }
-    } catch (e) { console.error("Erro API Produtos:", e); }
+    } catch (e) { console.error("Erro API Planilha:", e); }
     setLoadingProdutos(false);
   };
 
@@ -99,16 +109,16 @@ export default function PipelinePage() {
     }
   };
 
-  // --- LÓGICA DE FILTRO CRUZADO (API PRODUTOS x SUPABASE EXCLUSIVIDADES) ---
+  // --- FILTRO: API PLANILHA x SUPABASE EXCLUSIVIDADES ---
   const produtosDisponiveis = produtosApi.filter(prod => {
     const nomeProduto = prod.ativo;
     const ufAtual = (formData.uf_exclusividade || '').toUpperCase().trim();
     const cidadeAtual = (formData.cidade_exclusividade || '').toUpperCase().trim();
 
-    // Se não tiver UF identificada ainda, mostra TUDO.
+    // Se ainda não preencheu UF, mostra tudo
     if (!ufAtual) return true;
 
-    // Verifica se existe um bloqueio explícito na tabela de exclusividades
+    // Checa se existe bloqueio no Banco de Dados
     const bloqueado = exclusividades.some(ex => 
       ex.produto === nomeProduto && 
       ex.uf === ufAtual && 
@@ -117,17 +127,20 @@ export default function PipelinePage() {
     );
 
     return !bloqueado; 
-  }).sort((a, b) => a.ativo.localeCompare(b.ativo)); // Ordena alfabeticamente
+  });
 
-  // --- CÁLCULO AUTOMÁTICO USANDO DADOS DA API ---
+  // --- CÁLCULO DE VALOR (USANDO PREÇO DA PLANILHA) ---
   useEffect(() => {
-    // Procura o produto selecionado na lista carregada da API
     const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
 
     if (produtoSelecionado) {
-      const precoG = produtoSelecionado.preco_grama;
-      const pesoF = produtoSelecionado.peso_formula || 13.2; // Usa o peso da API ou padrão
-      const vTotal = (precoG * 1000 * Number(formData.kg_proposto || 0)).toFixed(2);
+      const precoG = produtoSelecionado.preco_grama; // Agora virá 12.00 para o Purin 7
+      const pesoF = produtoSelecionado.peso_formula;
+      
+      const kg = parseFloat(String(formData.kg_proposto).replace(',', '.')) || 0;
+      
+      // Cálculo
+      const vTotal = (precoG * 1000 * kg).toFixed(2);
 
       setFormData(prev => ({ 
           ...prev, 
@@ -273,7 +286,6 @@ export default function PipelinePage() {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     const { data: { user } } = await supabase.auth.getUser();
     
-    // TRATAMENTO DE DADOS (FIX DATA ERROR)
     const payload = {
       ...formData,
       user_id: user?.id,
@@ -283,7 +295,6 @@ export default function PipelinePage() {
       kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
       parcelas: parseInt(String(formData.parcelas)) || 1,
       dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45,
-      // Se a data estiver vazia, envia 'null' para não quebrar a sintaxe do banco
       data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null,
       data_entrada: formData.data_entrada || new Date().toISOString().split('T')[0]
     };
@@ -353,7 +364,7 @@ export default function PipelinePage() {
               <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta e Payback</h3></div>
               <div className="md:col-span-2">
                 <label className="text-[10px] font-bold text-slate-400 uppercase flex justify-between">
-                  Ativo {loadingProdutos ? '(Carregando da API...)' : '(Atualizado da API)'}
+                  Ativo {loadingProdutos ? '(Carregando da API...)' : ''}
                 </label>
                 <select 
                   className="w-full bg-slate-50 border rounded-xl p-3 font-bold disabled:opacity-50" 
