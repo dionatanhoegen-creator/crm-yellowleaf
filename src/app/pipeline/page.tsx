@@ -116,7 +116,7 @@ export default function PipelinePage() {
     return !bloqueado; 
   });
 
-  // LÓGICA: Preenche preço ao selecionar produto
+  // LÓGICA 1: CARREGA DADOS QUANDO SELECIONA PRODUTO
   useEffect(() => {
     if (!formData.produto) return;
     const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
@@ -132,7 +132,7 @@ export default function PipelinePage() {
     }
   }, [formData.produto, produtosApi]);
 
-  // LÓGICA: Calculadora em Tempo Real
+  // LÓGICA 2: CALCULADORA EM TEMPO REAL
   useEffect(() => {
     const precoG = parseMoney(formData.valor_g_tabela);
     const kg = parseMoney(formData.kg_proposto);
@@ -257,25 +257,30 @@ export default function PipelinePage() {
       currentY += (limitedText.length * 5) + 5; 
     }
 
-    // --- SEÇÃO QUALIDADE E PRODUÇÃO (AJUSTADA) ---
+    // --- SEÇÃO QUALIDADE E PRODUÇÃO (AJUSTADA: TEXTO EM CIMA) ---
     const certY = currentY + 10;
+    
+    // 1. TÍTULO
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
 
-    // 1. IMAGEM DOS SELOS (Proporção larga para não deformar)
-    const imgY = certY + 5;
+    // 2. TEXTO (AGORA ACIMA DA IMAGEM)
+    const textY = certY + 7;
+    doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
+    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho dos ativos.";
+    const splitCertText = doc.splitTextToSize(certText, 170); // Texto largo
+    doc.text(splitCertText, 105, textY, { align: 'center' });
+
+    // 3. IMAGEM DOS SELOS (AGORA EMBAIXO DO TEXTO E PROPORCIONAL)
+    const imgY = textY + (splitCertText.length * 4) + 5; // Posição dinâmica abaixo do texto
+    
     try {
-      const imgW = 130; // Mais largo
-      const imgH = 12;  // Mais baixo (proporção de faixa)
+      // Ajuste de proporção para não achatar (Proporção ~5:1)
+      const imgW = 140; // Largura boa para a página
+      const imgH = 28;  // Altura suficiente para os círculos não parecerem ovais
       const xPos = (210 - imgW) / 2;
       doc.addImage("/selo.jpg", "JPEG", xPos, imgY, imgW, imgH);
     } catch (e) {}
-
-    // 2. TEXTO (Sob a imagem)
-    const textY = imgY + 18; 
-    doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho dos ativos.";
-    doc.text(doc.splitTextToSize(certText, 170), 105, textY, { align: 'center' });
 
     const fY = 285; doc.setFontSize(7); doc.setTextColor(150);
     doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
