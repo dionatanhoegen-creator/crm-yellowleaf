@@ -179,17 +179,20 @@ export default function PipelinePage() {
     const cinzaSuave: [number, number, number] = [243, 244, 246];
     const textoCinza: [number, number, number] = [60, 60, 60];
 
-    // --- 1. CABEÇALHO (LOGO EXPANDIDO) ---
+    // --- 1. CABEÇALHO (LOGO MENOR E CENTRALIZADO) ---
     try { 
-        // Aumentei o logo para 70x30 (era menor) e ajustei o Y para 5 (centraliza melhor)
-        doc.addImage("/logo.jpg", "JPEG", 20, 5, 70, 30); 
+        // Tamanho reduzido para 50x20 e posicionado em Y=12 para centralizar com o texto
+        doc.addImage("/logo.jpg", "JPEG", 20, 12, 50, 20); 
     } catch (e) {}
 
     doc.setFont("helvetica", "bold"); doc.setFontSize(24);
     doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
-    doc.text("PROPOSTA COMERCIAL", 190, 22, { align: 'right' });
+    // Texto subiu ligeiramente para Y=20
+    doc.text("PROPOSTA COMERCIAL", 190, 20, { align: 'right' });
     doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(120);
-    doc.text("YellowLeaf – Nutraceuticals Company", 190, 28, { align: 'right' });
+    // Texto subiu ligeiramente para Y=26
+    doc.text("YellowLeaf – Nutraceuticals Company", 190, 26, { align: 'right' });
+    
     doc.setFillColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
     doc.rect(0, 35, 210, 2, 'F');
 
@@ -276,15 +279,14 @@ export default function PipelinePage() {
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
 
-    // 2. TEXTO (Corrigido para não quebrar)
+    // 2. TEXTO
     const textY = certY + 5;
     doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-    // Removida a quebra de linha que estava dando erro
     const certText = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e promovemos sua comercialização com responsabilidade e ética.";
     const splitCertText = doc.splitTextToSize(certText, 170);
     doc.text(splitCertText, 105, textY, { align: 'center' });
 
-    // 3. IMAGEM DOS SELOS (REDUZIDA PARA 90x15mm para não bater no rodapé)
+    // 3. IMAGEM DOS SELOS
     const imgY = textY + (splitCertText.length * 4) + 3; 
     
     try {
