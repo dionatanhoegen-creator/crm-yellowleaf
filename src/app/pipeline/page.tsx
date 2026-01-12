@@ -15,24 +15,8 @@ import dynamic from 'next/dynamic';
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 import 'react-quill-new/dist/quill.snow.css';
 
-// --- TABELA DE PRODUTOS (Adicionei o Purin 7 aqui) ---
-// O sistema precisa desta lista para saber o PREÇO e o PESO BASE de cada item.
-const TABELA_PRODUTOS: Record<string, any> = {
-  "Allisane®": { preco_g: 2.50, peso: 15.0 },
-  "Anethin®": { preco_g: 2.50, peso: 12.0 },
-  "Anidream®": { preco_g: 12.00, peso: 1.5 },
-  "ArtemiFresh®": { preco_g: 2.50, peso: 15.0 },
-  "BioCarum®": { preco_g: 2.50, peso: 15.0 },
-  "Cardasense®": { preco_g: 2.50, peso: 12.0 },
-  "CarySlim®": { preco_g: 2.50, peso: 12.0 },
-  "FIThymus®": { preco_g: 2.50, peso: 12.0 },
-  "GF Slim II®": { preco_g: 2.50, peso: 27.0 },
-  "Glutaliz®": { preco_g: 3.00, peso: 15.0 },
-  "Purin 7®": { preco_g: 2.50, peso: 15.0 }, // <--- ADICIONADO (Ajuste o preço se necessário)
-  "Sineredux II ®": { preco_g: 2.50, peso: 13.2 },
-  "SlimHaut®": { preco_g: 2.50, peso: 15.0 },
-  "VerumFEM®": { preco_g: 3.00, peso: 12.0 }
-};
+// --- CONFIGURAÇÃO DA API (MESMA DO PRODUTOS PAGE) ---
+const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
 const ESTAGIOS = [
   { id: 'prospeccao', label: 'Prospecção', color: 'border-blue-500', text: 'text-blue-700' },
@@ -45,9 +29,15 @@ const ESTAGIOS = [
 
 export default function PipelinePage() {
   const supabase = createClientComponentClient();
+  
+  // ESTADOS DE DADOS
   const [oportunidades, setOportunidades] = useState<any[]>([]);
-  const [exclusividades, setExclusividades] = useState<any[]>([]);
+  const [produtosApi, setProdutosApi] = useState<any[]>([]); // Lista vinda da API Google
+  const [exclusividades, setExclusividades] = useState<any[]>([]); // Lista vinda do Supabase
+  
+  // ESTADOS DE UI
   const [loading, setLoading] = useState(true);
+  const [loadingProdutos, setLoadingProdutos] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<any>(null);
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
@@ -64,51 +54,89 @@ export default function PipelinePage() {
 
   useEffect(() => { 
     setMounted(true); 
-    carregarOportunidades();
-    carregarExclusividades(); 
+    inicializarDados();
   }, []);
+
+  // --- CARREGAMENTO CENTRALIZADO DE DADOS ---
+  const inicializarDados = async () => {
+    setLoading(true);
+    await Promise.all([
+        carregarOportunidades(),
+        carregarProdutosDaAPI(), // Busca o Purin 7 e outros da API
+        carregarExclusividades() // Busca os bloqueios do Supabase
+    ]);
+    setLoading(false);
+  };
+
+  const carregarProdutosDaAPI = async () => {
+    setLoadingProdutos(true);
+    try {
+        const res = await fetch(`${API_PRODUTOS_URL}?path=produtos`);
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+            // Normaliza os dados para garantir que números sejam números
+            const produtosLimpos = json.data.map((p: any) => ({
+                ...p,
+                preco_grama: parseFloat(p.preco_grama) || 0,
+                peso_formula: parseFloat(p.peso_formula) || 13.2 // Valor padrão se a API não tiver
+            }));
+            setProdutosApi(produtosLimpos);
+        }
+    } catch (e) { console.error("Erro API Produtos:", e); }
+    setLoadingProdutos(false);
+  };
 
   const carregarExclusividades = async () => {
     const { data } = await supabase.from('exclusividades').select('*');
     setExclusividades(data || []);
   };
 
-  // --- LÓGICA DE FILTRO (Agora mostra o Purin 7 se não estiver bloqueado) ---
-  const produtosFiltrados = Object.keys(TABELA_PRODUTOS).filter(nome => {
+  const carregarOportunidades = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data } = await supabase.from('pipeline').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+      setOportunidades(data || []);
+    }
+  };
+
+  // --- LÓGICA DE FILTRO CRUZADO (API PRODUTOS x SUPABASE EXCLUSIVIDADES) ---
+  const produtosDisponiveis = produtosApi.filter(prod => {
+    const nomeProduto = prod.ativo;
     const ufAtual = (formData.uf_exclusividade || '').toUpperCase().trim();
     const cidadeAtual = (formData.cidade_exclusividade || '').toUpperCase().trim();
 
     // Se não tiver UF identificada ainda, mostra TUDO.
     if (!ufAtual) return true;
 
-    // Verifica se existe um bloqueio explícito para OUTRO cliente nesta cidade/UF
+    // Verifica se existe um bloqueio explícito na tabela de exclusividades
     const bloqueado = exclusividades.some(ex => 
-      ex.produto === nome && 
+      ex.produto === nomeProduto && 
       ex.uf === ufAtual && 
       (ex.cidade === cidadeAtual || ex.cidade === 'TODAS') &&
       ex.nome_cliente !== formData.nome_cliente
     );
 
-    return !bloqueado; // Se não estiver bloqueado, aparece na lista.
-  });
+    return !bloqueado; 
+  }).sort((a, b) => a.ativo.localeCompare(b.ativo)); // Ordena alfabeticamente
 
+  // --- CÁLCULO AUTOMÁTICO USANDO DADOS DA API ---
   useEffect(() => {
-    if (TABELA_PRODUTOS[formData.produto]) {
-      const p = TABELA_PRODUTOS[formData.produto];
-      const vTotal = (p.preco_g * 1000 * Number(formData.kg_proposto || 0)).toFixed(2);
-      setFormData(prev => ({ ...prev, valor_g_tabela: p.preco_g.toFixed(2), peso_formula_g: p.peso.toString(), valor: vTotal }));
-    }
-  }, [formData.produto, formData.kg_proposto]);
+    // Procura o produto selecionado na lista carregada da API
+    const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
 
-  const carregarOportunidades = async () => {
-    setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data } = await supabase.from('pipeline').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
-      setOportunidades(data || []);
+    if (produtoSelecionado) {
+      const precoG = produtoSelecionado.preco_grama;
+      const pesoF = produtoSelecionado.peso_formula || 13.2; // Usa o peso da API ou padrão
+      const vTotal = (precoG * 1000 * Number(formData.kg_proposto || 0)).toFixed(2);
+
+      setFormData(prev => ({ 
+          ...prev, 
+          valor_g_tabela: precoG.toFixed(2), 
+          peso_formula_g: pesoF.toString(), 
+          valor: vTotal 
+      }));
     }
-    setLoading(false);
-  };
+  }, [formData.produto, formData.kg_proposto, produtosApi]);
 
   const buscarDadosCNPJ = async () => {
     const cnpjLimpo = formData.cnpj?.replace(/\D/g, '');
@@ -224,7 +252,7 @@ export default function PipelinePage() {
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
     doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho.";
+    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho dos ativos.";
     doc.text(doc.splitTextToSize(certText, 160), 105, certY + 6, { align: 'center' });
 
     try {
@@ -245,6 +273,7 @@ export default function PipelinePage() {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     const { data: { user } } = await supabase.auth.getUser();
     
+    // TRATAMENTO DE DADOS (FIX DATA ERROR)
     const payload = {
       ...formData,
       user_id: user?.id,
@@ -254,6 +283,7 @@ export default function PipelinePage() {
       kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
       parcelas: parseInt(String(formData.parcelas)) || 1,
       dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45,
+      // Se a data estiver vazia, envia 'null' para não quebrar a sintaxe do banco
       data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null,
       data_entrada: formData.data_entrada || new Date().toISOString().split('T')[0]
     };
@@ -322,10 +352,17 @@ export default function PipelinePage() {
 
               <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta e Payback</h3></div>
               <div className="md:col-span-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Ativo (Sincronizado c/ Exclusividades)</label>
-                <select className="w-full bg-slate-50 border rounded-xl p-3 font-bold" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})}>
-                  <option value="">Selecione um ativo...</option>
-                  {produtosFiltrados.map(p => <option key={p} value={p}>{p}</option>)}
+                <label className="text-[10px] font-bold text-slate-400 uppercase flex justify-between">
+                  Ativo {loadingProdutos ? '(Carregando da API...)' : '(Atualizado da API)'}
+                </label>
+                <select 
+                  className="w-full bg-slate-50 border rounded-xl p-3 font-bold disabled:opacity-50" 
+                  value={formData.produto} 
+                  onChange={e => setFormData({...formData, produto: e.target.value})}
+                  disabled={loadingProdutos}
+                >
+                  <option value="">{loadingProdutos ? 'Carregando lista...' : 'Selecione um ativo...'}</option>
+                  {produtosDisponiveis.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}
                 </select>
               </div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor G (Tabela)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})}/></div>
