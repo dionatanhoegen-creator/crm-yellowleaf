@@ -15,7 +15,8 @@ import dynamic from 'next/dynamic';
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 import 'react-quill-new/dist/quill.snow.css';
 
-// --- TABELA DE PREÇOS BASE ---
+// --- TABELA DE PRODUTOS (Adicionei o Purin 7 aqui) ---
+// O sistema precisa desta lista para saber o PREÇO e o PESO BASE de cada item.
 const TABELA_PRODUTOS: Record<string, any> = {
   "Allisane®": { preco_g: 2.50, peso: 15.0 },
   "Anethin®": { preco_g: 2.50, peso: 12.0 },
@@ -27,6 +28,7 @@ const TABELA_PRODUTOS: Record<string, any> = {
   "FIThymus®": { preco_g: 2.50, peso: 12.0 },
   "GF Slim II®": { preco_g: 2.50, peso: 27.0 },
   "Glutaliz®": { preco_g: 3.00, peso: 15.0 },
+  "Purin 7®": { preco_g: 2.50, peso: 15.0 }, // <--- ADICIONADO (Ajuste o preço se necessário)
   "Sineredux II ®": { preco_g: 2.50, peso: 13.2 },
   "SlimHaut®": { preco_g: 2.50, peso: 15.0 },
   "VerumFEM®": { preco_g: 3.00, peso: 12.0 }
@@ -44,7 +46,7 @@ const ESTAGIOS = [
 export default function PipelinePage() {
   const supabase = createClientComponentClient();
   const [oportunidades, setOportunidades] = useState<any[]>([]);
-  const [exclusividades, setExclusividades] = useState<any[]>([]); // Nova aba integrada
+  const [exclusividades, setExclusividades] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<any>(null);
@@ -63,7 +65,7 @@ export default function PipelinePage() {
   useEffect(() => { 
     setMounted(true); 
     carregarOportunidades();
-    carregarExclusividades(); // Sincroniza com a aba de exclusividades
+    carregarExclusividades(); 
   }, []);
 
   const carregarExclusividades = async () => {
@@ -71,15 +73,15 @@ export default function PipelinePage() {
     setExclusividades(data || []);
   };
 
-  // --- LÓGICA DE FILTRO DE ATIVOS (CRÍTICO) ---
+  // --- LÓGICA DE FILTRO (Agora mostra o Purin 7 se não estiver bloqueado) ---
   const produtosFiltrados = Object.keys(TABELA_PRODUTOS).filter(nome => {
     const ufAtual = (formData.uf_exclusividade || '').toUpperCase().trim();
     const cidadeAtual = (formData.cidade_exclusividade || '').toUpperCase().trim();
 
-    // Se o estado estiver em branco, mostra todos para não travar o preenchimento
+    // Se não tiver UF identificada ainda, mostra TUDO.
     if (!ufAtual) return true;
 
-    // Verifica se esse produto está bloqueado por uma exclusividade de OUTRO cliente
+    // Verifica se existe um bloqueio explícito para OUTRO cliente nesta cidade/UF
     const bloqueado = exclusividades.some(ex => 
       ex.produto === nome && 
       ex.uf === ufAtual && 
@@ -87,7 +89,7 @@ export default function PipelinePage() {
       ex.nome_cliente !== formData.nome_cliente
     );
 
-    return !bloqueado;
+    return !bloqueado; // Se não estiver bloqueado, aparece na lista.
   });
 
   useEffect(() => {
@@ -243,7 +245,6 @@ export default function PipelinePage() {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     const { data: { user } } = await supabase.auth.getUser();
     
-    // --- CORREÇÃO DEFINITIVA DO ERRO DE DATA E SALVAMENTO ---
     const payload = {
       ...formData,
       user_id: user?.id,
@@ -252,7 +253,7 @@ export default function PipelinePage() {
       kg_proposto: parseFloat(String(formData.kg_proposto)) || 0,
       kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
       parcelas: parseInt(String(formData.parcelas)) || 1,
-      // Se a data estiver vazia, envia 'null' para não quebrar a sintaxe do banco
+      dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45,
       data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null,
       data_entrada: formData.data_entrada || new Date().toISOString().split('T')[0]
     };
@@ -321,7 +322,7 @@ export default function PipelinePage() {
 
               <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta e Payback</h3></div>
               <div className="md:col-span-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Ativo (Sincronizado com Exclusividades)</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Ativo (Sincronizado c/ Exclusividades)</label>
                 <select className="w-full bg-slate-50 border rounded-xl p-3 font-bold" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})}>
                   <option value="">Selecione um ativo...</option>
                   {produtosFiltrados.map(p => <option key={p} value={p}>{p}</option>)}
@@ -330,7 +331,10 @@ export default function PipelinePage() {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor G (Tabela)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Proposto</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento Total R$</label><input className="w-full bg-slate-100 border text-slate-600 rounded-xl p-3 font-bold" value={formData.valor} readOnly /></div>
-              
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Bônus</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Parcelas</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª Parc (Dias)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
+
               <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100">
                   <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Notas e Condições (Máx 3 linhas)</label>
                   <div className="bg-white rounded-xl overflow-hidden border border-blue-100 text-slate-700">
