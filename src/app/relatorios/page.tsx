@@ -1,118 +1,199 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  Shield, User, Lock, Edit, Trash2, CheckCircle2, XCircle, Key
+  BarChart3, TrendingUp, DollarSign, Users, 
+  Calendar, CheckCircle2, XCircle, AlertCircle, PieChart
 } from 'lucide-react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
-// USUÁRIO MASTER (Imutável)
-const MASTER_USER = "dionatan@yellowleaf.com.br";
+// Função para formatar dinheiro
+const formatCurrency = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-interface Usuario {
-  id: number;
-  nome: string;
-  email: string;
-  ativo: boolean;
-  permissao: 'admin' | 'user';
-}
+export default function RelatoriosPage() {
+  const supabase = createClientComponentClient();
+  const [loading, setLoading] = useState(true);
+  
+  // Estados para métricas
+  const [metrics, setMetrics] = useState({
+    totalOportunidades: 0,
+    valorTotalPipeline: 0,
+    valorFechado: 0,
+    qtdFechado: 0,
+    taxaConversao: 0,
+    ticketMedio: 0
+  });
 
-export default function AdminPage() {
-  const [usuarios, setUsuarios] = useState<Usuario[]>([
-    { id: 1, nome: "Dionatan Hoegen", email: "dionatan@yellowleaf.com.br", ativo: true, permissao: 'admin' },
-    { id: 2, nome: "João Vendedor", email: "joao@yellowleaf.com.br", ativo: true, permissao: 'user' },
-    { id: 3, nome: "Maria Representante", email: "maria@yellowleaf.com.br", ativo: false, permissao: 'user' },
-  ]);
+  // Estado para o Funil
+  const [funil, setFunil] = useState<Record<string, { qtd: number, valor: number }>>({});
 
-  const toggleStatus = (id: number) => {
-    setUsuarios(prev => prev.map(u => {
-      if (u.email === MASTER_USER) return u; // Não deixa desativar o Master
-      return u.id === id ? { ...u, ativo: !u.ativo } : u;
-    }));
+  useEffect(() => {
+    carregarDados();
+  }, []);
+
+  const carregarDados = async () => {
+    setLoading(true);
+    const { data: pipeline } = await supabase.from('pipeline').select('*');
+
+    if (pipeline) {
+      // 1. Cálculos Gerais
+      const totalOps = pipeline.length;
+      const totalValor = pipeline.reduce((acc, item) => acc + (Number(item.valor) || 0), 0);
+      
+      const fechados = pipeline.filter(i => i.status === 'fechado');
+      const qtdFechado = fechados.length;
+      const valorFechado = fechados.reduce((acc, item) => acc + (Number(item.valor) || 0), 0);
+
+      // 2. Cálculo do Funil (Agrupamento)
+      const novoFunil: any = {
+        'prospeccao': { qtd: 0, valor: 0, label: 'Prospecção', color: 'bg-blue-500' },
+        'qualificacao': { qtd: 0, valor: 0, label: 'Qualificação', color: 'bg-purple-500' },
+        'apresentacao': { qtd: 0, valor: 0, label: 'Apresentação', color: 'bg-pink-500' },
+        'negociacao': { qtd: 0, valor: 0, label: 'Negociação', color: 'bg-yellow-500' },
+        'fechado': { qtd: 0, valor: 0, label: 'Fechado', color: 'bg-green-500' },
+        'perdido': { qtd: 0, valor: 0, label: 'Perdido', color: 'bg-red-500' },
+      };
+
+      pipeline.forEach(item => {
+        if (novoFunil[item.status]) {
+          novoFunil[item.status].qtd += 1;
+          novoFunil[item.status].valor += (Number(item.valor) || 0);
+        }
+      });
+
+      setMetrics({
+        totalOportunidades: totalOps,
+        valorTotalPipeline: totalValor,
+        valorFechado: valorFechado,
+        qtdFechado: qtdFechado,
+        taxaConversao: totalOps > 0 ? (qtdFechado / totalOps) * 100 : 0,
+        ticketMedio: qtdFechado > 0 ? valorFechado / qtdFechado : 0
+      });
+
+      setFunil(novoFunil);
+    }
+    setLoading(false);
   };
 
-  const resetSenha = (email: string) => {
-    alert(`Link de redefinição de senha enviado para: ${email}`);
-  };
+  if (loading) return <div className="p-8 text-center text-slate-400 font-bold animate-pulse">Calculando métricas...</div>;
 
   return (
     <div className="p-6 md:p-8 bg-slate-50 min-h-screen font-sans text-slate-800">
       <div className="max-w-7xl mx-auto">
         
-        <div className="mb-8 flex items-center gap-3">
-           <div className="p-3 bg-slate-800 text-white rounded-xl">
-              <Shield size={32}/>
+        {/* CABEÇALHO */}
+        <div className="mb-8 flex flex-col md:flex-row justify-between items-end gap-4">
+           <div className="flex items-center gap-3">
+             <div className="p-3 bg-slate-800 text-white rounded-xl shadow-lg shadow-slate-200">
+               <BarChart3 size={32}/>
+             </div>
+             <div>
+               <h1 className="text-3xl font-black text-slate-900 tracking-tight">Dashboard Comercial</h1>
+               <p className="text-slate-500">Panorama geral de performance e resultados.</p>
+             </div>
            </div>
-           <div>
-              <h1 className="text-3xl font-black text-slate-900 tracking-tight">Painel Administrativo</h1>
-              <p className="text-slate-500">Gestão de acessos e segurança.</p>
-           </div>
+           <button onClick={carregarDados} className="bg-white text-blue-600 px-4 py-2 rounded-lg text-sm font-bold border border-blue-100 hover:bg-blue-50 transition shadow-sm">
+             Atualizar Dados ↻
+           </button>
         </div>
 
-        {/* LISTA DE USUÁRIOS */}
-        <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-           <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-              <h3 className="font-bold text-lg text-slate-800">Usuários Cadastrados</h3>
-              <button className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition">
-                 + Novo Usuário
-              </button>
-           </div>
-
-           <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-slate-500 font-bold uppercase">
-                 <tr>
-                    <th className="p-4">Nome</th>
-                    <th className="p-4">Login (E-mail)</th>
-                    <th className="p-4 text-center">Perfil</th>
-                    <th className="p-4 text-center">Status</th>
-                    <th className="p-4 text-right">Ações</th>
-                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                 {usuarios.map(user => (
-                    <tr key={user.id} className="hover:bg-slate-50 transition">
-                       <td className="p-4 font-bold text-slate-700 flex items-center gap-3">
-                          <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center text-slate-500">
-                             <User size={16}/>
-                          </div>
-                          {user.nome} 
-                          {user.email === MASTER_USER && <span className="text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full border border-yellow-200">MASTER</span>}
-                       </td>
-                       <td className="p-4 text-slate-500">{user.email}</td>
-                       <td className="p-4 text-center">
-                          <span className={`px-3 py-1 rounded-full text-xs font-bold ${user.permissao === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-50 text-blue-600'}`}>
-                             {user.permissao.toUpperCase()}
-                          </span>
-                       </td>
-                       <td className="p-4 text-center">
-                          <button 
-                             onClick={() => toggleStatus(user.id)}
-                             disabled={user.email === MASTER_USER}
-                             className={`flex items-center gap-1 mx-auto px-3 py-1 rounded-full text-xs font-bold transition ${user.ativo ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}
-                          >
-                             {user.ativo ? <CheckCircle2 size={12}/> : <XCircle size={12}/>}
-                             {user.ativo ? 'ATIVO' : 'BLOQUEADO'}
-                          </button>
-                       </td>
-                       <td className="p-4 text-right">
-                          <div className="flex justify-end gap-2">
-                             <button 
-                                onClick={() => resetSenha(user.email)}
-                                className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Resetar Senha"
-                             >
-                                <Key size={16}/>
-                             </button>
-                             <button className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition" title="Editar">
-                                <Edit size={16}/>
-                             </button>
-                          </div>
-                       </td>
-                    </tr>
-                 ))}
-              </tbody>
-           </table>
+        {/* 1. KPIs PRINCIPAIS (CARDS) */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+           <CardMetric 
+             icon={<DollarSign size={24}/>} 
+             label="Valor em Pipeline (Total)" 
+             value={formatCurrency(metrics.valorTotalPipeline)} 
+             color="text-blue-600" bg="bg-blue-50" border="border-blue-100"
+           />
+           <CardMetric 
+             icon={<CheckCircle2 size={24}/>} 
+             label="Vendas Fechadas" 
+             value={formatCurrency(metrics.valorFechado)} 
+             subValue={`${metrics.qtdFechado} contratos assinados`}
+             color="text-green-600" bg="bg-green-50" border="border-green-100"
+           />
+           <CardMetric 
+             icon={<TrendingUp size={24}/>} 
+             label="Taxa de Conversão" 
+             value={`${metrics.taxaConversao.toFixed(1)}%`} 
+             subValue="Eficiência comercial"
+             color="text-purple-600" bg="bg-purple-50" border="border-purple-100"
+           />
+           <CardMetric 
+             icon={<Users size={24}/>} 
+             label="Ticket Médio" 
+             value={formatCurrency(metrics.ticketMedio)} 
+             subValue="Por venda fechada"
+             color="text-orange-600" bg="bg-orange-50" border="border-orange-100"
+           />
         </div>
 
+        {/* 2. FUNIL DE VENDAS E DISTRIBUIÇÃO */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          
+          {/* FUNIL GRÁFICO (BARRAS) */}
+          <div className="lg:col-span-2 bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+            <h3 className="font-bold text-lg text-slate-800 mb-6 flex items-center gap-2">
+              <PieChart size={20} className="text-slate-400"/> Funil de Vendas (Volume)
+            </h3>
+            <div className="space-y-4">
+              {Object.values(funil).map((f: any) => {
+                // Calcula largura da barra baseada no total (máx 100%)
+                const percent = metrics.totalOportunidades > 0 ? (f.qtd / metrics.totalOportunidades) * 100 : 0;
+                return (
+                  <div key={f.label}>
+                    <div className="flex justify-between text-xs font-bold text-slate-600 mb-1 uppercase">
+                      <span>{f.label}</span>
+                      <span>{f.qtd} Oportunidades ({percent.toFixed(0)}%)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                      <div className={`h-full rounded-full ${f.color}`} style={{ width: `${percent}%`, minWidth: percent > 0 ? '5px' : '0' }}></div>
+                    </div>
+                    <div className="text-right text-[10px] font-bold text-slate-400 mt-1">
+                      {formatCurrency(f.valor)}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* RESUMO RÁPIDO (SIDEBAR) */}
+          <div className="bg-slate-800 text-white p-6 rounded-3xl shadow-xl flex flex-col justify-between relative overflow-hidden">
+             <div className="relative z-10">
+               <h3 className="font-bold text-lg mb-2">Meta Mensal</h3>
+               <p className="text-slate-400 text-sm mb-6">Acompanhe o progresso financeiro.</p>
+               
+               <div className="text-4xl font-black mb-1">{formatCurrency(metrics.valorFechado)}</div>
+               <p className="text-green-400 text-xs font-bold uppercase tracking-wider mb-8">Já Faturado</p>
+
+               <div className="p-4 bg-white/10 rounded-xl backdrop-blur-sm border border-white/10">
+                 <p className="text-xs text-slate-300 mb-1 font-bold uppercase">Potencial na Mesa</p>
+                 <p className="text-xl font-bold">{formatCurrency(metrics.valorTotalPipeline - metrics.valorFechado)}</p>
+               </div>
+             </div>
+             
+             {/* Decorative Circles */}
+             <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-green-500 rounded-full blur-[80px] opacity-20"></div>
+             <div className="absolute top-10 -left-10 w-40 h-40 bg-blue-500 rounded-full blur-[80px] opacity-20"></div>
+          </div>
+
+        </div>
       </div>
+    </div>
+  );
+}
+
+// Componente Auxiliar de Card
+function CardMetric({ icon, label, value, subValue, color, bg, border }: any) {
+  return (
+    <div className={`bg-white p-6 rounded-2xl border shadow-sm ${border} hover:shadow-md transition`}>
+      <div className={`w-10 h-10 ${bg} ${color} rounded-lg flex items-center justify-center mb-4`}>
+        {icon}
+      </div>
+      <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">{label}</p>
+      <h2 className="text-2xl font-black text-slate-800">{value}</h2>
+      {subValue && <p className="text-xs text-slate-400 mt-2 font-medium">{subValue}</p>}
     </div>
   );
 }
