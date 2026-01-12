@@ -62,6 +62,7 @@ export default function PipelinePage() {
 
   useEffect(() => { setMounted(true); carregarOportunidades(); }, []);
 
+  // --- LÓGICA DE CÁLCULO AUTOMÁTICO ---
   useEffect(() => {
     if (TABELA_PRODUTOS[formData.produto]) {
       const p = TABELA_PRODUTOS[formData.produto];
@@ -126,10 +127,9 @@ export default function PipelinePage() {
     const cinzaSuave: [number, number, number] = [243, 244, 246];
     const textoCinza: [number, number, number] = [60, 60, 60];
 
-    // --- 1. CABEÇALHO ---
+    // 1. CABEÇALHO
     try { doc.addImage("/logo.jpg", "JPEG", 20, 10, 40, 20); } catch (e) {}
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(24);
     doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
     doc.text("PROPOSTA COMERCIAL", 190, 22, { align: 'right' });
     doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(120);
@@ -137,19 +137,18 @@ export default function PipelinePage() {
     doc.setFillColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
     doc.rect(0, 35, 210, 2, 'F');
 
-    // --- 2. DADOS DO CLIENTE ---
+    // 2. DADOS DO CLIENTE
     doc.setFillColor(cinzaSuave[0], cinzaSuave[1], cinzaSuave[2]);
     doc.rect(20, 45, 170, 25, 'F');
     doc.setDrawColor(220); doc.rect(20, 45, 170, 25, 'S');
     doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
-    doc.setFont("helvetica", "bold");
-    doc.text("DADOS DO CLIENTE", 25, 52);
+    doc.setFont("helvetica", "bold"); doc.text("DADOS DO CLIENTE", 25, 52);
     doc.setFontSize(10); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
     doc.text(`Razão Social: ${item.nome_cliente || 'N/A'}`, 25, 58);
     doc.text(`Contato: ${item.contato || 'N/A'}  |  Tel: ${item.telefone || 'N/A'}`, 25, 63);
     doc.text(`Cidade/UF: ${item.cidade_exclusividade || 'N/A'} / ${item.uf_exclusividade || ''}`, 25, 68);
 
-    // --- 3. TABELA PRINCIPAL ---
+    // 3. TABELA PRINCIPAL
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 20, 83);
     const totalKG = Number(item.kg_proposto) + Number(item.kg_bonificado);
@@ -176,7 +175,7 @@ export default function PipelinePage() {
       columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right', fontStyle: 'bold' } }
     });
 
-    // --- 4. TABELA PAYBACK ---
+    // 4. TABELA PAYBACK
     const paybackY = (doc as any).lastAutoTable.finalY + 8;
     const custoF = (vGramaReal * (Number(item.peso_formula_g) || 13.2));
     const precoV = (custoF * (Number(item.fator_lucro) || 5));
@@ -200,7 +199,7 @@ export default function PipelinePage() {
       columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right' } }
     });
 
-    // --- 5. NOTAS E CONDIÇÕES (LIMITADO A 3 LINHAS) ---
+    // 5. NOTAS E CONDIÇÕES (MÁX 3 LINHAS)
     let currentY = (doc as any).lastAutoTable.finalY + 12; 
     if (item.observacoes_proposta) {
       doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
@@ -209,24 +208,19 @@ export default function PipelinePage() {
       doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
       const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
       const splitText = doc.splitTextToSize(notasTexto, 170);
-      
-      // LIMITADOR: Pega apenas as primeiras 3 linhas para não empurrar os selos
       const limitedText = splitText.slice(0, 3);
       doc.text(limitedText, 20, currentY);
       currentY += (limitedText.length * 5) + 5; 
     }
 
-    // --- 6. DESTAQUE: QUALIDADE E PRODUÇÃO ---
-    // Posicionamento estratégico para os selos aparecerem com resolução total
+    // 6. QUALIDADE E PRODUÇÃO
     const certY = currentY + 5;
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
-    
     doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho dos ativos.";
+    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho.";
     doc.text(doc.splitTextToSize(certText, 160), 105, certY + 6, { align: 'center' });
 
-    // IMAGEM DOS SELOS (TAMANHO GRANDE E CENTRALIZADO PARA MELHOR RESOLUÇÃO)
     try {
       const imgW = 100; const imgH = 20; const xPos = (210 - imgW) / 2;
       doc.addImage("/selo.jpg", "JPEG", xPos, certY + 16, imgW, imgH);
@@ -235,7 +229,7 @@ export default function PipelinePage() {
       doc.text("SELOS: HACCP • ISO • FSSC 22000 • GMP", 105, certY + 22, { align: 'center' });
     }
 
-    // --- 7. RODAPÉ FIXO NO FINAL DA PÁGINA ---
+    // 7. RODAPÉ FIXO
     const fY = 285; doc.setFontSize(7); doc.setTextColor(150);
     doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
     doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 20, fY + 4);
@@ -246,27 +240,40 @@ export default function PipelinePage() {
   };
 
   const handleSave = async () => {
-    if (!formData.nome_cliente || !formData.valor) return alert("Preencha Razão Social e Valor.");
+    if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     const { data: { user } } = await supabase.auth.getUser();
+    
+    // Preparação blindada dos dados para o Supabase
     const payload = {
       ...formData,
       user_id: user?.id,
+      // Garante que valores numéricos sejam salvos como números reais
       valor: parseFloat(String(formData.valor).replace(',', '.')),
       valor_g_tabela: parseFloat(String(formData.valor_g_tabela)),
-      kg_proposto: Number(formData.kg_proposto),
-      kg_bonificado: Number(formData.kg_bonificado),
-      parcelas: Number(formData.parcelas)
+      kg_proposto: Number(formData.kg_proposto) || 0,
+      kg_bonificado: Number(formData.kg_bonificado) || 0,
+      parcelas: Number(formData.parcelas) || 1,
+      status: formData.status // Garante que o status seja salvo
     };
+
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
-    if (!error) { setModalOpen(false); carregarOportunidades(); } else { alert("Erro ao salvar."); }
+    
+    if (!error) { 
+        setModalOpen(false); 
+        carregarOportunidades(); 
+    } else { 
+        console.error("Erro Supabase:", error);
+        alert("Erro ao salvar no banco de dados."); 
+    }
   };
 
   return (
     <div className="w-full p-4">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-2xl font-black text-[#1e293b] italic uppercase tracking-tighter">Pipeline YellowLeaf</h1>
-        <button onClick={() => { setEditingOp(null); setFormData({...formData, cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', valor: '', status: 'prospeccao'}); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95">+ Nova Oportunidade</button>
+        <button onClick={() => { setEditingOp(null); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: new Date().toISOString().split('T')[0], status: 'prospeccao', data_lembrete: '', observacoes: '', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', cidade_exclusividade: '', uf_exclusividade: '', observacoes_proposta: '', valor_g_tabela: '0'}); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95">+ Nova Oportunidade</button>
       </div>
+
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 h-[calc(100vh-180px)] overflow-x-auto pb-4">
         {ESTAGIOS.map(est => (
           <div key={est.id} className="bg-slate-50/50 rounded-2xl border flex flex-col min-w-[250px] overflow-hidden">
@@ -285,54 +292,52 @@ export default function PipelinePage() {
           </div>
         ))}
       </div>
+
       {modalOpen && mounted && createPortal(
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-5xl rounded-[2.5rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95">
             <div className="bg-[#242f3e] p-6 flex justify-between items-center text-white shrink-0">
-              <h2 className="text-lg font-bold flex items-center gap-2">✨ {editingOp ? 'Editar Proposta Técnica' : 'Nova Oportunidade'}</h2>
+              <h2 className="text-lg font-bold flex items-center gap-2">✨ {editingOp ? 'Editar Oportunidade' : 'Nova Oportunidade'}</h2>
               <div className="flex gap-2">
-                {editingOp && <button onClick={() => gerarPDFPremium(formData)} className="bg-green-600 px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase shadow-lg"><Download size={14}/> Gerar Relatório Premium</button>}
+                {editingOp && <button onClick={() => gerarPDFPremium(formData)} className="bg-green-600 px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase shadow-lg"><Download size={14}/> PDF Premium</button>}
                 <button onClick={() => setModalOpen(false)} className="hover:bg-white/10 p-1 rounded-full"><X/></button>
               </div>
             </div>
+
             <div className="p-8 grid grid-cols-1 md:grid-cols-4 gap-5 overflow-y-auto bg-white flex-1">
-              <div className="md:col-span-4 border-b pb-2"><h3 className="text-[10px] font-black text-blue-600 uppercase">1. Identificação do Cliente</h3></div>
+              <div className="md:col-span-4 border-b pb-2 flex justify-between items-center">
+                  <h3 className="text-[10px] font-black text-blue-600 uppercase">1. Identificação e Status</h3>
+                  {/* RETORNO DA OPÇÃO DE ALTERAR STATUS */}
+                  <select className="bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold px-3 py-1 rounded-lg outline-none" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
+                      {ESTAGIOS.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
+                  </select>
+              </div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">CNPJ</label><div className="flex gap-2"><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} onBlur={buscarDadosCNPJ}/><button onClick={buscarDadosCNPJ} className="bg-blue-50 text-blue-600 p-3 rounded-xl border"><Search size={20}/></button></div></div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Razão Social</label><input className="w-full bg-slate-50 border rounded-xl p-3 font-bold uppercase" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Cidade</label><input className="w-full bg-slate-100 border rounded-xl p-3" value={formData.cidade_exclusividade} readOnly/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">UF</label><input className="w-full bg-slate-100 border rounded-xl p-3" value={formData.uf_exclusividade} readOnly/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Contato</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">WhatsApp</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})}/></div>
-              <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta de Investimento e Payback</h3></div>
+
+              <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta e Payback</h3></div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Ativo</label><select className="w-full bg-slate-50 border rounded-xl p-3 font-bold" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})}><option value="">Selecione...</option>{Object.keys(TABELA_PRODUTOS).map(p => <option key={p} value={p}>{p}</option>)}</select></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor do G (Tabela)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Proposto</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento Total R$</label>
-              <input className="w-full bg-slate-100 border border-slate-200 text-slate-600 rounded-xl p-3 font-bold cursor-not-allowed" value={formData.valor} readOnly />
-              </div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento Total R$</label><input className="w-full bg-slate-100 border border-slate-200 text-slate-600 rounded-xl p-3 font-bold cursor-not-allowed" value={formData.valor} readOnly /></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Bônus</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Parcelas</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª Parcela (Dias)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
+
               <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100">
-                  <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Notas e Condições (Máx. 3 linhas no PDF)</label>
+                  <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Notas e Condições (Máx 3 linhas)</label>
                   <div className="bg-white rounded-xl overflow-hidden border border-blue-100 text-slate-700">
-                    <ReactQuill 
-                      theme="snow" 
-                      value={formData.observacoes_proposta} 
-                      onChange={(val) => setFormData({...formData, observacoes_proposta: val})} 
-                      modules={{ 
-                        toolbar: [
-                          ['bold', 'italic', 'underline'], 
-                          [{'list': 'ordered'}, {'list': 'bullet'}], 
-                          ['clean']
-                        ] 
-                      }}
-                    />
+                    <ReactQuill theme="snow" value={formData.observacoes_proposta} onChange={(val) => setFormData({...formData, observacoes_proposta: val})} modules={{ toolbar: [['bold', 'italic', 'underline'], [{'list': 'ordered'}, {'list': 'bullet'}], ['clean']] }} />
                   </div>
               </div>
             </div>
+
             <div className="p-6 bg-slate-50 border-t flex justify-between items-center shrink-0">
-              {editingOp ? <button onClick={() => { if(confirm('Excluir?')) { supabase.from('pipeline').delete().eq('id', editingOp.id); carregarOportunidades(); setModalOpen(false); }}} className="text-red-500 font-bold text-xs uppercase tracking-widest">Excluir Registro</button> : <div/>}
+              {editingOp ? <button onClick={() => { if(confirm('Deseja excluir este registro permanentemente?')) { supabase.from('pipeline').delete().eq('id', editingOp.id).then(() => { carregarOportunidades(); setModalOpen(false); }); }}} className="text-red-500 font-bold text-xs uppercase tracking-widest hover:bg-red-50 px-4 py-2 rounded-lg">Excluir</button> : <div/>}
               <div className="flex gap-2">
                 <button onClick={() => setModalOpen(false)} className="px-6 font-bold text-slate-400 hover:text-slate-600 transition">CANCELAR</button>
                 <button onClick={handleSave} className="bg-[#2563eb] text-white px-12 py-3 rounded-xl font-bold shadow-lg uppercase tracking-widest active:scale-95 transition">Salvar Dados</button>
