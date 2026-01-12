@@ -15,21 +15,21 @@ import dynamic from 'next/dynamic';
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 import 'react-quill-new/dist/quill.snow.css';
 
-// --- TABELA TÉCNICA COM FILTRO POR UF (AJUSTADA PARA SP/RS) ---
+// --- TABELA DE PREÇOS BASE (Sincronizada com seu catálogo) ---
 const TABELA_PRODUTOS: Record<string, any> = {
-  "Allisane®": { preco_g: 2.50, peso: 15.0, ufs: [] }, 
-  "Anethin®": { preco_g: 2.50, peso: 12.0, ufs: ['RS', 'SC', 'PR', 'SP'] }, 
-  "Anidream®": { preco_g: 12.00, peso: 1.5, ufs: [] },
-  "ArtemiFresh®": { preco_g: 2.50, peso: 15.0, ufs: ['DF', 'SP'] }, 
-  "BioCarum®": { preco_g: 2.50, peso: 15.0, ufs: [] },
-  "Cardasense®": { preco_g: 2.50, peso: 12.0, ufs: [] },
-  "CarySlim®": { preco_g: 2.50, peso: 12.0, ufs: [] },
-  "FIThymus®": { preco_g: 2.50, peso: 12.0, ufs: [] },
-  "GF Slim II®": { preco_g: 2.50, peso: 27.0, ufs: [] },
-  "Glutaliz®": { preco_g: 3.00, peso: 15.0, ufs: [] },
-  "Sineredux II ®": { preco_g: 2.50, peso: 13.2, ufs: [] },
-  "SlimHaut®": { preco_g: 2.50, peso: 15.0, ufs: [] },
-  "VerumFEM®": { preco_g: 3.00, peso: 12.0, ufs: [] }
+  "Allisane®": { preco_g: 2.50, peso: 15.0 },
+  "Anethin®": { preco_g: 2.50, peso: 12.0 },
+  "Anidream®": { preco_g: 12.00, peso: 1.5 },
+  "ArtemiFresh®": { preco_g: 2.50, peso: 15.0 },
+  "BioCarum®": { preco_g: 2.50, peso: 15.0 },
+  "Cardasense®": { preco_g: 2.50, peso: 12.0 },
+  "CarySlim®": { preco_g: 2.50, peso: 12.0 },
+  "FIThymus®": { preco_g: 2.50, peso: 12.0 },
+  "GF Slim II®": { preco_g: 2.50, peso: 27.0 },
+  "Glutaliz®": { preco_g: 3.00, peso: 15.0 },
+  "Sineredux II ®": { preco_g: 2.50, peso: 13.2 },
+  "SlimHaut®": { preco_g: 2.50, peso: 15.0 },
+  "VerumFEM®": { preco_g: 3.00, peso: 12.0 }
 };
 
 const ESTAGIOS = [
@@ -44,6 +44,7 @@ const ESTAGIOS = [
 export default function PipelinePage() {
   const supabase = createClientComponentClient();
   const [oportunidades, setOportunidades] = useState<any[]>([]);
+  const [exclusividades, setExclusividades] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<any>(null);
@@ -59,16 +60,35 @@ export default function PipelinePage() {
     observacoes_proposta: '', valor_g_tabela: '0'
   });
 
-  useEffect(() => { setMounted(true); carregarOportunidades(); }, []);
+  useEffect(() => { 
+    setMounted(true); 
+    carregarOportunidades();
+    carregarExclusividades(); // Puxa os dados da "Aba Exclusividades"
+  }, []);
 
-  // FILTRO DE PRODUTOS PERMISSIVO PARA SP E RS
+  // BUSCA DADOS DA OUTRA ABA (EXCLUSIVIDADES)
+  const carregarExclusividades = async () => {
+    const { data } = await supabase.from('exclusividades').select('*');
+    setExclusividades(data || []);
+  };
+
+  // LÓGICA PARA FORÇAR A LISTA DE ATIVOS DISPONÍVEIS
   const produtosFiltrados = Object.keys(TABELA_PRODUTOS).filter(nome => {
-    const p = TABELA_PRODUTOS[nome];
-    const ufAtual = (formData.uf_exclusividade || '').trim().toUpperCase();
-    return !p.ufs || p.ufs.length === 0 || p.ufs.includes(ufAtual) || ufAtual === '';
+    const ufCliente = (formData.uf_exclusividade || '').toUpperCase();
+    const cidadeCliente = (formData.cidade_exclusividade || '').toUpperCase();
+
+    // Verifica se esse produto tem exclusividade para OUTRA pessoa nessa região
+    const bloqueado = exclusividades.some(ex => 
+      ex.produto === nome && 
+      ex.uf === ufCliente && 
+      (ex.cidade === cidadeCliente || ex.cidade === 'TODAS') &&
+      ex.nome_cliente !== formData.nome_cliente // Se não for o mesmo cliente, bloqueia
+    );
+
+    return !bloqueado; // Só mostra se não estiver bloqueado para outros
   });
 
-  // CÁLCULO AUTOMÁTICO DE INVESTIMENTO
+  // CÁLCULO AUTOMÁTICO
   useEffect(() => {
     if (TABELA_PRODUTOS[formData.produto]) {
       const p = TABELA_PRODUTOS[formData.produto];
@@ -101,7 +121,7 @@ export default function PipelinePage() {
         uf_exclusividade: data.uf || '',
         telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : prev.telefone
       }));
-    } catch (e) {}
+    } catch (e) { console.error("Erro CNPJ"); }
     setLoadingCNPJ(false);
   };
 
@@ -161,7 +181,7 @@ export default function PipelinePage() {
         ['Vencimento 1ª Parcela', `${item.dias_primeira_parcela} dias`]
       ],
       theme: 'grid',
-      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' }, // CENTRALIZADO
+      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
       styles: { fontSize: 10, cellPadding: 2, textColor: textoCinza },
       columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right', fontStyle: 'bold' } }
     });
@@ -180,7 +200,7 @@ export default function PipelinePage() {
         [{ content: 'META DE VIABILIDADE (Ponto de Equilíbrio)', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: verdeMedio, fontSize: 12, halign: 'right' } }]
       ],
       theme: 'grid',
-      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' }, // CENTRALIZADO
+      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
       styles: { fontSize: 10, cellPadding: 2, textColor: textoCinza },
       columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right' } }
     });
@@ -192,7 +212,7 @@ export default function PipelinePage() {
       currentY += 6; doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
       const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
       const splitText = doc.splitTextToSize(notasTexto, 170);
-      const limitedText = splitText.slice(0, 3); // TRAVA DE 3 LINHAS
+      const limitedText = splitText.slice(0, 3);
       doc.text(limitedText, 20, currentY);
       currentY += (limitedText.length * 5) + 5; 
     }
@@ -206,7 +226,7 @@ export default function PipelinePage() {
 
     try {
       const imgW = 100; const imgH = 20; const xPos = (210 - imgW) / 2;
-      doc.addImage("/selo.jpg", "JPEG", xPos, certY + 16, imgW, imgH); // SELOS GRANDES
+      doc.addImage("/selo.jpg", "JPEG", xPos, certY + 16, imgW, imgH);
     } catch (e) { doc.setFontSize(9); doc.setFont("helvetica", "bold"); doc.text("SELOS: HACCP • ISO • GMP", 105, certY + 22, { align: 'center' }); }
 
     const fY = 285; doc.setFontSize(7); doc.setTextColor(150);
@@ -222,7 +242,7 @@ export default function PipelinePage() {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     const { data: { user } } = await supabase.auth.getUser();
     
-    // CORREÇÃO DEFINITIVA DO ERRO DE DATA VAZIA
+    // TRATAMENTO DOS DADOS PARA O BANCO (FIX DATA ERROR)
     const payload = {
       ...formData,
       user_id: user?.id,
@@ -232,15 +252,19 @@ export default function PipelinePage() {
       kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
       parcelas: parseInt(String(formData.parcelas)) || 1,
       dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45,
-      // Se a data estiver vazia, envia 'null' para não quebrar o banco
-      data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== '') ? formData.data_lembrete : null,
-      data_entrada: (formData.data_entrada && formData.data_entrada.trim() !== '') ? formData.data_entrada : new Date().toISOString().split('T')[0]
+      data_lembrete: (formData.data_lembrete && formData.data_lembrete !== "") ? formData.data_lembrete : null,
+      data_entrada: formData.data_entrada || new Date().toISOString().split('T')[0]
     };
 
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
     
-    if (!error) { setModalOpen(false); carregarOportunidades(); } 
-    else { console.error("Erro banco:", error); alert(`Erro ao salvar: ${error.message}`); }
+    if (!error) { 
+      setModalOpen(false); 
+      carregarOportunidades(); 
+    } else { 
+      console.error("Erro banco:", error); 
+      alert(`Erro ao salvar: ${error.message}`); 
+    }
   };
 
   return (
@@ -296,19 +320,16 @@ export default function PipelinePage() {
 
               <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta e Payback</h3></div>
               <div className="md:col-span-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Ativo (Filtro UF: {formData.uf_exclusividade || 'Global'})</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Ativo (Sincronizado com Exclusividades)</label>
                 <select className="w-full bg-slate-50 border rounded-xl p-3 font-bold" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})}>
-                  <option value="">Selecione...</option>
+                  <option value="">Selecione um ativo...</option>
                   {produtosFiltrados.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor G (Tabela)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Proposto</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento Total R$</label><input className="w-full bg-slate-100 border text-slate-600 rounded-xl p-3 font-bold" value={formData.valor} readOnly /></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Bônus</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Parcelas</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª Parc (Dias)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
-
+              
               <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100">
                   <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Notas e Condições (Máx 3 linhas)</label>
                   <div className="bg-white rounded-xl overflow-hidden border border-blue-100 text-slate-700">
@@ -317,7 +338,6 @@ export default function PipelinePage() {
               </div>
             </div>
             <div className="p-6 bg-slate-50 border-t flex justify-end items-center shrink-0 gap-2">
-              {editingOp && <button onClick={() => { if(confirm('Excluir?')) { supabase.from('pipeline').delete().eq('id', editingOp.id).then(() => { carregarOportunidades(); setModalOpen(false); }); }}} className="text-red-500 font-bold text-xs uppercase px-4 py-2">Excluir</button>}
               <button onClick={() => setModalOpen(false)} className="px-6 font-bold text-slate-400">CANCELAR</button>
               <button onClick={handleSave} className="bg-[#2563eb] text-white px-12 py-3 rounded-xl font-bold uppercase active:scale-95 transition">Salvar Dados</button>
             </div>
