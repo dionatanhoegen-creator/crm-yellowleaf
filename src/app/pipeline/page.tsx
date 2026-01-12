@@ -43,16 +43,22 @@ export default function PipelinePage() {
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
   
+  // --- FUNÇÃO PARA PEGAR DATA LOCAL CORRETA (SEM BUG DE FUSO) ---
+  const getLocalData = () => {
+    const now = new Date();
+    const offset = now.getTimezoneOffset() * 60000;
+    return new Date(now.getTime() - offset).toISOString().split('T')[0];
+  };
+
   const [formData, setFormData] = useState({
     cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '',
     aplicacao: '', valor: '', 
-    // NOVOS CAMPOS DE GESTÃO
-    data_entrada: new Date().toISOString().split('T')[0],
+    // Usa a função local para não dar erro de dia anterior
+    data_entrada: getLocalData(),
     data_lembrete: '', 
     canal_contato: 'WhatsApp',
-    observacoes: '', // Interna
-    observacoes_proposta: '', // Externa (PDF)
-    // DADOS TÉCNICOS
+    observacoes: '',
+    observacoes_proposta: '', 
     status: 'prospeccao',
     kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45',
     peso_formula_g: '13.2', fator_lucro: '5', cidade_exclusividade: '', uf_exclusividade: '', 
@@ -309,11 +315,10 @@ export default function PipelinePage() {
       kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
       parcelas: parseInt(String(formData.parcelas)) || 1,
       dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45,
-      // Se data_lembrete vier vazia, vira NULL para não dar erro no banco
       data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null,
-      data_entrada: formData.data_entrada || new Date().toISOString().split('T')[0],
-      canal_contato: formData.canal_contato, // NOVO CAMPO
-      observacoes: formData.observacoes // NOVO CAMPO (INTERNO)
+      data_entrada: formData.data_entrada || getLocalData(), // USA DATA LOCAL
+      canal_contato: formData.canal_contato,
+      observacoes: formData.observacoes 
     };
 
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
@@ -330,24 +335,44 @@ export default function PipelinePage() {
     }
   };
 
-  // --- FUNÇÃO PARA RENDERIZAR CARD NO KANBAN ---
+  // --- RENDER CARD COM PISCA-PISCA PARA HOJE ---
   const renderCard = (op: any) => {
-    const hoje = new Date().toISOString().split('T')[0];
-    const isAtrasado = op.data_lembrete && op.data_lembrete < hoje;
+    const hoje = getLocalData(); // Data local correta
+    const dataLembrete = op.data_lembrete;
+    
+    const isAtrasado = dataLembrete && dataLembrete < hoje;
+    const isHoje = dataLembrete && dataLembrete === hoje; // Verifica se é EXATAMENTE hoje
+    
+    // Classes dinâmicas
+    let borderClass = 'border-slate-100 hover:border-blue-300';
+    let bgClass = 'bg-white';
+    let textClass = 'text-slate-400';
+    let label = 'Ligar: ';
+
+    if (isAtrasado) {
+        borderClass = 'border-red-200';
+        bgClass = 'bg-red-50/30';
+        textClass = 'text-red-500';
+        label = 'Atrasado: ';
+    } else if (isHoje) {
+        // EFEITO PISCANTE PARA HOJE
+        borderClass = 'border-red-500 border-2 animate-pulse'; // Borda vermelha piscando
+        textClass = 'text-red-600 font-bold';
+        label = 'HOJE: ';
+    }
     
     return (
-        <div key={op.id} onClick={() => { setEditingOp(op); setFormData(op); setModalOpen(true); }} className={`bg-white p-4 rounded-xl border cursor-pointer shadow-sm transition hover:-translate-y-1 ${isAtrasado ? 'border-red-200 bg-red-50/30' : 'border-slate-100 hover:border-blue-300'}`}>
+        <div key={op.id} onClick={() => { setEditingOp(op); setFormData(op); setModalOpen(true); }} className={`p-4 rounded-xl border cursor-pointer shadow-sm transition hover:-translate-y-1 ${bgClass} ${borderClass}`}>
             <h4 className="font-bold text-slate-700 text-sm uppercase truncate">{op.nome_cliente}</h4>
             <div className="flex justify-between items-center mt-2">
                 <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg font-bold truncate max-w-[50%]">{op.produto}</span>
                 <span className="text-xs font-black text-slate-600">{formatCurrency(op.valor)}</span>
             </div>
-            {/* Visualização da Data de Lembrete */}
             {op.data_lembrete && (
-                <div className={`mt-3 pt-2 border-t flex items-center gap-1 text-[10px] font-bold ${isAtrasado ? 'text-red-500' : 'text-slate-400'}`}>
+                <div className={`mt-3 pt-2 border-t flex items-center gap-1 text-[10px] font-bold ${textClass}`}>
                     <Clock size={10} />
-                    {isAtrasado ? 'Atrasado: ' : 'Ligar: '}
-                    {new Date(op.data_lembrete).toLocaleDateString('pt-BR')}
+                    {label}
+                    {new Date(op.data_lembrete + 'T12:00:00').toLocaleDateString('pt-BR')} 
                 </div>
             )}
         </div>
@@ -358,7 +383,7 @@ export default function PipelinePage() {
     <div className="w-full p-4">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-2xl font-black text-[#1e293b] italic uppercase tracking-tighter">Pipeline YellowLeaf</h1>
-        <button onClick={() => { setEditingOp(null); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: new Date().toISOString().split('T')[0], status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0'}); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95">+ Nova Oportunidade</button>
+        <button onClick={() => { setEditingOp(null); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0'}); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95">+ Nova Oportunidade</button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 h-[calc(100vh-180px)] overflow-x-auto pb-4">
@@ -384,7 +409,6 @@ export default function PipelinePage() {
             </div>
 
             <div className="p-8 grid grid-cols-1 md:grid-cols-4 gap-5 overflow-y-auto bg-white flex-1">
-              {/* SEÇÃO 1: Identificação */}
               <div className="md:col-span-4 border-b pb-2 flex justify-between items-center">
                   <h3 className="text-[10px] font-black text-blue-600 uppercase">1. Identificação e Status</h3>
                   <select className="bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold px-3 py-1 rounded-lg outline-none" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
@@ -398,7 +422,6 @@ export default function PipelinePage() {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Contato</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">WhatsApp</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})}/></div>
 
-              {/* SEÇÃO 2: Proposta */}
               <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta e Payback</h3></div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase flex justify-between">Ativo {loadingProdutos ? '(Carregando...)' : ''}</label><select className="w-full bg-slate-50 border rounded-xl p-3 font-bold disabled:opacity-50" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})} disabled={loadingProdutos}><option value="">Selecione...</option>{produtosDisponiveis.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}</select></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor G (Tabela)</label><input type="text" className="w-full bg-slate-50 border rounded-xl p-3 font-bold text-blue-700" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} /></div>
@@ -410,7 +433,6 @@ export default function PipelinePage() {
 
               <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100"><label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><FileText size={14}/> Notas e Condições (Para o PDF)</label><div className="bg-white rounded-xl overflow-hidden border border-blue-100 text-slate-700"><ReactQuill theme="snow" value={formData.observacoes_proposta} onChange={(val) => setFormData({...formData, observacoes_proposta: val})} modules={{ toolbar: [['bold', 'italic', 'underline'], [{'list': 'ordered'}, {'list': 'bullet'}], ['clean']] }} /></div></div>
 
-              {/* SEÇÃO 3: Gestão e Acompanhamento (NOVO) */}
               <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-orange-600 uppercase">3. Gestão e Acompanhamento (Interno)</h3></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Data Entrada</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_entrada} onChange={e => setFormData({...formData, data_entrada: e.target.value})} /></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Próximo Contato</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} /></div>
