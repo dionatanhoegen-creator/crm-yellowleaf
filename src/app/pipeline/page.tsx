@@ -32,8 +32,8 @@ export default function PipelinePage() {
   
   // DADOS
   const [oportunidades, setOportunidades] = useState<any[]>([]);
-  const [produtosApi, setProdutosApi] = useState<any[]>([]); // Lista vinda da Planilha
-  const [exclusividades, setExclusividades] = useState<any[]>([]); // Lista vinda do Banco de Dados
+  const [produtosApi, setProdutosApi] = useState<any[]>([]); 
+  const [exclusividades, setExclusividades] = useState<any[]>([]); 
   
   // UI
   const [loading, setLoading] = useState(true);
@@ -63,17 +63,15 @@ export default function PipelinePage() {
     setLoading(false);
   };
 
-  // --- TRADUTOR DE DINHEIRO (PLANILHA -> CÓDIGO) ---
-  // Converte "R$ 12,00" para 12.00
+  // --- FUNÇÃO AUXILIAR PARA TRATAR NÚMEROS (Aceita "2,50" e "2.50") ---
   const parseMoney = (valor: any) => {
     if (typeof valor === 'number') return valor;
     if (!valor) return 0;
-    // Remove "R$", espaços e troca vírgula por ponto
+    // Remove R$, espaços e troca vírgula por ponto
     const limpo = String(valor).replace('R$', '').replace(/\s/g, '').replace(',', '.');
     return parseFloat(limpo) || 0;
   };
 
-  // --- BUSCA DADOS DA PLANILHA DO GOOGLE ---
   const carregarProdutosDaAPI = async () => {
     setLoadingProdutos(true);
     try {
@@ -83,13 +81,10 @@ export default function PipelinePage() {
         if (json.success && Array.isArray(json.data)) {
             const produtosLimpos = json.data.map((p: any) => ({
                 ativo: p.ativo ? p.ativo.trim() : 'Sem Nome',
-                // Aqui aplicamos o tradutor de dinheiro
                 preco_grama: parseMoney(p.preco_grama), 
-                // Peso da fórmula geralmente é numérico na planilha, mas garantimos
-                peso_formula: parseFloat(String(p.peso_formula).replace(',', '.')) || 13.2
+                peso_formula: parseMoney(p.peso_formula) || 13.2
             }));
             
-            // Ordena alfabeticamente
             setProdutosApi(produtosLimpos.sort((a: any, b: any) => a.ativo.localeCompare(b.ativo)));
         }
     } catch (e) { console.error("Erro API Planilha:", e); }
@@ -109,16 +104,14 @@ export default function PipelinePage() {
     }
   };
 
-  // --- FILTRO: API PLANILHA x SUPABASE EXCLUSIVIDADES ---
+  // --- FILTRO INTELIGENTE ---
   const produtosDisponiveis = produtosApi.filter(prod => {
     const nomeProduto = prod.ativo;
     const ufAtual = (formData.uf_exclusividade || '').toUpperCase().trim();
     const cidadeAtual = (formData.cidade_exclusividade || '').toUpperCase().trim();
 
-    // Se ainda não preencheu UF, mostra tudo
     if (!ufAtual) return true;
 
-    // Checa se existe bloqueio no Banco de Dados
     const bloqueado = exclusividades.some(ex => 
       ex.produto === nomeProduto && 
       ex.uf === ufAtual && 
@@ -129,27 +122,36 @@ export default function PipelinePage() {
     return !bloqueado; 
   });
 
-  // --- CÁLCULO DE VALOR (USANDO PREÇO DA PLANILHA) ---
+  // --- EFEITO 1: QUANDO SELECIONA O PRODUTO (Preenche o preço sugerido) ---
   useEffect(() => {
+    // Só roda se o usuário mudou o produto no dropdown
+    if (!formData.produto) return;
+
     const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
 
     if (produtoSelecionado) {
-      const precoG = produtoSelecionado.preco_grama; // Agora virá 12.00 para o Purin 7
-      const pesoF = produtoSelecionado.peso_formula;
-      
-      const kg = parseFloat(String(formData.kg_proposto).replace(',', '.')) || 0;
-      
-      // Cálculo
-      const vTotal = (precoG * 1000 * kg).toFixed(2);
-
       setFormData(prev => ({ 
           ...prev, 
-          valor_g_tabela: precoG.toFixed(2), 
-          peso_formula_g: pesoF.toString(), 
-          valor: vTotal 
+          // Preenche o valor do G com o da tabela, mas permite edição depois
+          valor_g_tabela: produtoSelecionado.preco_grama.toFixed(2).replace('.', ','), 
+          peso_formula_g: produtoSelecionado.peso_formula.toString()
       }));
     }
-  }, [formData.produto, formData.kg_proposto, produtosApi]);
+  }, [formData.produto, produtosApi]);
+
+  // --- EFEITO 2: A CALCULADORA (Onde a mágica acontece) ---
+  // Roda sempre que o PREÇO DO G (editado ou não) ou o KG mudam
+  useEffect(() => {
+    const precoG = parseMoney(formData.valor_g_tabela); // Pega o que está digitado no campo
+    const kg = parseMoney(formData.kg_proposto);
+    
+    // Calcula: Preço Digitado * 1000 * KG Digitado
+    const vTotal = (precoG * 1000 * kg).toFixed(2);
+
+    // Atualiza o Total (sem mexer no preço do G, para não travar a digitação)
+    setFormData(prev => ({ ...prev, valor: vTotal }));
+    
+  }, [formData.valor_g_tabela, formData.kg_proposto]);
 
   const buscarDadosCNPJ = async () => {
     const cnpjLimpo = formData.cnpj?.replace(/\D/g, '');
@@ -211,12 +213,15 @@ export default function PipelinePage() {
     const vGramaReal = (Number(item.valor) / (totalKG * 1000)) || 0;
     const vParc = (Number(item.valor) / Number(item.parcelas)) || 0;
 
+    // Converte o valor do G para formatação correta
+    const valorGExibicao = parseMoney(item.valor_g_tabela);
+
     autoTable(doc, {
       startY: 88, margin: { left: 20, right: 20 },
       head: [['DESCRIÇÃO', 'VALORES']],
       body: [
         ['Ativo/Insumo', item.produto || 'Insumo'],
-        ['Preço por grama (Tabela)', formatCurrency(item.valor_g_tabela)],
+        ['Preço por grama (Tabela)', formatCurrency(valorGExibicao)], // Usa o valor editado
         ['Quantidade proposta', `${item.kg_proposto} kg`],
         ['Quantidade bonificada', `${item.kg_bonificado} kg`],
         ['Investimento Total', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold' } }],
@@ -376,7 +381,18 @@ export default function PipelinePage() {
                   {produtosDisponiveis.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}
                 </select>
               </div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor G (Tabela)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})}/></div>
+              
+              {/* CAMPO DO VALOR DO G AGORA EDITÁVEL E REATIVO */}
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Valor G (Tabela)</label>
+                <input 
+                  type="text" // Tipo text para permitir vírgula
+                  className="w-full bg-slate-50 border rounded-xl p-3 font-bold text-blue-700" 
+                  value={formData.valor_g_tabela} 
+                  onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} // Permite digitar
+                />
+              </div>
+              
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Proposto</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento Total R$</label><input className="w-full bg-slate-100 border text-slate-600 rounded-xl p-3 font-bold" value={formData.valor} readOnly /></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Bônus</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
