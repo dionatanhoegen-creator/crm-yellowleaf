@@ -13,10 +13,12 @@ import autoTable from 'jspdf-autotable';
 const formatCurrency = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const formatDate = (dateStr: string) => {
   if (!dateStr) return '-';
-  return new Date(dateStr).toLocaleDateString('pt-BR');
+  // Ajuste de fuso simples para visualização
+  const date = new Date(dateStr);
+  date.setMinutes(date.getMinutes() + date.getTimezoneOffset());
+  return date.toLocaleDateString('pt-BR');
 };
 
-// Mapeamento de Status para nomes bonitos
 const LABELS_STATUS: Record<string, string> = {
   'prospeccao': 'Prospecção',
   'qualificacao': 'Qualificação',
@@ -30,7 +32,7 @@ export default function RelatoriosPage() {
   const supabase = createClientComponentClient();
   const [loading, setLoading] = useState(true);
   const [listaCompleta, setListaCompleta] = useState<any[]>([]);
-  const [filtroStatus, setFiltroStatus] = useState('abertos'); // abertos | todos | fechados
+  const [filtroStatus, setFiltroStatus] = useState('abertos'); 
 
   // Métricas
   const [metrics, setMetrics] = useState({
@@ -50,13 +52,11 @@ export default function RelatoriosPage() {
 
   const carregarDados = async () => {
     setLoading(true);
-    // Busca tudo ordenado por data mais recente
     const { data: pipeline } = await supabase.from('pipeline').select('*').order('created_at', { ascending: false });
 
     if (pipeline) {
       setListaCompleta(pipeline);
 
-      // 1. Cálculos de KPI
       const totalOps = pipeline.length;
       const totalValor = pipeline.reduce((acc, item) => acc + (Number(item.valor) || 0), 0);
       
@@ -64,7 +64,6 @@ export default function RelatoriosPage() {
       const qtdFechado = fechados.length;
       const valorFechado = fechados.reduce((acc, item) => acc + (Number(item.valor) || 0), 0);
 
-      // 2. Cálculo do Funil
       const novoFunil: any = {
         'prospeccao': { qtd: 0, valor: 0, label: 'Prospecção', color: 'bg-blue-500' },
         'qualificacao': { qtd: 0, valor: 0, label: 'Qualificação', color: 'bg-purple-500' },
@@ -95,7 +94,6 @@ export default function RelatoriosPage() {
     setLoading(false);
   };
 
-  // --- FILTRO DA LISTA ---
   const listaFiltrada = listaCompleta.filter(item => {
     if (filtroStatus === 'todos') return true;
     if (filtroStatus === 'fechados') return item.status === 'fechado';
@@ -103,20 +101,29 @@ export default function RelatoriosPage() {
     return true;
   });
 
-  // --- GERADOR DE PDF PAISAGEM ---
+  // --- GERADOR DE PDF COM LOGO ---
   const gerarRelatorioGerencial = () => {
-    const doc = new jsPDF('l', 'mm', 'a4'); // 'l' = Landscape (Paisagem)
+    const doc = new jsPDF('l', 'mm', 'a4'); // Paisagem
     
-    // Cabeçalho
+    // 1. INSERE O LOGO (Se existir)
+    try {
+        // Posição X=14, Y=10, Largura=35, Altura=15
+        doc.addImage("/logo.jpg", "JPEG", 14, 8, 35, 15);
+    } catch (e) {
+        console.error("Erro ao carregar logo no relatório", e);
+    }
+
+    // 2. TÍTULO E DATAS
     doc.setFontSize(18);
     doc.setTextColor(40, 40, 40);
-    doc.text("Relatório Gerencial de Vendas", 14, 15);
+    // Ajustei o Y para 30 para ficar abaixo do logo
+    doc.text("Relatório Gerencial de Vendas", 14, 32);
     
     doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')} | Filtro: ${filtroStatus.toUpperCase()}`, 14, 22);
+    doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')} | Filtro: ${filtroStatus.toUpperCase()}`, 14, 38);
 
-    // Dados da Tabela
+    // 3. TABELA DE DADOS
     const tableBody = listaFiltrada.map(item => [
         item.nome_cliente || 'Sem Nome',
         item.produto || '-',
@@ -124,28 +131,28 @@ export default function RelatoriosPage() {
         formatCurrency(item.valor || 0),
         formatDate(item.data_entrada),
         item.canal_contato || 'N/D',
-        item.observacoes ? item.observacoes.substring(0, 50) + '...' : '' // Resumo da Obs
+        item.observacoes ? item.observacoes.substring(0, 50) + '...' : '' 
     ]);
 
     autoTable(doc, {
-        startY: 28,
+        startY: 42, // Começa logo após o cabeçalho
         head: [['Cliente', 'Produto', 'Estágio', 'Valor', 'Entrada', 'Canal', 'Observações Internas']],
         body: tableBody,
         theme: 'grid',
         styles: { fontSize: 8, cellPadding: 2 },
-        headStyles: { fillColor: [20, 83, 45], textColor: 255, fontStyle: 'bold' }, // Verde YellowLeaf
+        headStyles: { fillColor: [20, 83, 45], textColor: 255, fontStyle: 'bold' }, 
         columnStyles: {
-            0: { cellWidth: 40 }, // Cliente
-            1: { cellWidth: 35 }, // Produto
-            2: { cellWidth: 25 }, // Estágio
-            3: { cellWidth: 25, halign: 'right' }, // Valor
-            4: { cellWidth: 20, halign: 'center' }, // Data
-            5: { cellWidth: 25 }, // Canal
-            6: { cellWidth: 'auto' } // Obs (restante)
+            0: { cellWidth: 40 }, 
+            1: { cellWidth: 35 }, 
+            2: { cellWidth: 25 }, 
+            3: { cellWidth: 25, halign: 'right' }, 
+            4: { cellWidth: 20, halign: 'center' }, 
+            5: { cellWidth: 25 }, 
+            6: { cellWidth: 'auto' } 
         }
     });
 
-    // Rodapé com Totais
+    // RODAPÉ COM TOTAIS
     const finalY = (doc as any).lastAutoTable.finalY + 10;
     doc.setFontSize(10);
     doc.setTextColor(0);
@@ -161,7 +168,7 @@ export default function RelatoriosPage() {
     <div className="p-6 md:p-8 bg-slate-50 min-h-screen font-sans text-slate-800">
       <div className="max-w-7xl mx-auto">
         
-        {/* CABEÇALHO */}
+        {/* CABEÇALHO DA PÁGINA */}
         <div className="mb-8 flex flex-col md:flex-row justify-between items-end gap-4">
            <div className="flex items-center gap-3">
              <div className="p-3 bg-slate-800 text-white rounded-xl shadow-lg shadow-slate-200">
@@ -234,7 +241,7 @@ export default function RelatoriosPage() {
             </div>
           </div>
 
-          {/* PAINEL META (ESCURO) */}
+          {/* PAINEL META */}
           <div className="bg-slate-800 text-white p-6 rounded-3xl shadow-xl flex flex-col justify-between relative overflow-hidden">
              <div className="relative z-10">
                <h3 className="font-bold text-lg mb-2">Meta vs Realizado</h3>
@@ -249,7 +256,7 @@ export default function RelatoriosPage() {
           </div>
         </div>
 
-        {/* 3. RELATÓRIO DETALHADO (NOVA SEÇÃO) */}
+        {/* 3. TABELA DETALHADA E EXPORTAÇÃO */}
         <div className="bg-white rounded-3xl shadow-lg border border-slate-100 overflow-hidden">
             <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-50/50">
                 <div>
@@ -257,13 +264,11 @@ export default function RelatoriosPage() {
                     <p className="text-xs text-slate-500">Visualize e exporte os dados para apresentar à diretoria.</p>
                 </div>
                 <div className="flex gap-2">
-                    {/* FILTROS */}
                     <div className="flex bg-white border border-slate-200 rounded-lg p-1">
                         <button onClick={() => setFiltroStatus('abertos')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${filtroStatus === 'abertos' ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>Abertos</button>
                         <button onClick={() => setFiltroStatus('fechados')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${filtroStatus === 'fechados' ? 'bg-green-100 text-green-700' : 'text-slate-500 hover:bg-slate-50'}`}>Fechados</button>
                         <button onClick={() => setFiltroStatus('todos')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${filtroStatus === 'todos' ? 'bg-slate-200 text-slate-700' : 'text-slate-500 hover:bg-slate-50'}`}>Todos</button>
                     </div>
-                    {/* BOTÃO EXPORTAR */}
                     <button onClick={gerarRelatorioGerencial} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm transition active:scale-95">
                         <Download size={14}/> Baixar PDF
                     </button>
@@ -278,14 +283,14 @@ export default function RelatoriosPage() {
                             <th className="p-4">Produto</th>
                             <th className="p-4">Estágio</th>
                             <th className="p-4">Valor</th>
-                            <th className="p-4">Data Entrada</th>
+                            <th className="p-4">Entrada</th>
                             <th className="p-4">Canal</th>
                             <th className="p-4">Obs. Interna</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                         {listaFiltrada.length === 0 && (
-                            <tr><td colSpan={7} className="p-8 text-center text-slate-400">Nenhum registro encontrado para este filtro.</td></tr>
+                            <tr><td colSpan={7} className="p-8 text-center text-slate-400">Nenhum registro encontrado.</td></tr>
                         )}
                         {listaFiltrada.map(item => (
                             <tr key={item.id} className="hover:bg-slate-50 transition">
