@@ -15,13 +15,12 @@ import dynamic from 'next/dynamic';
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 import 'react-quill-new/dist/quill.snow.css';
 
-// --- TABELA TÉCNICA COM FILTRO POR ESTADO (UF) ---
-// Adicione a sigla do estado no array 'ufs' para restringir a visibilidade.
+// --- TABELA TÉCNICA COM FILTRO POR UF ---
 const TABELA_PRODUTOS: Record<string, any> = {
-  "Allisane®": { preco_g: 2.50, peso: 15.0, ufs: [] }, // Vazio = Global
-  "Anethin®": { preco_g: 2.50, peso: 12.0, ufs: ['RS', 'SC', 'PR'] }, // Exemplo: Sul
+  "Allisane®": { preco_g: 2.50, peso: 15.0, ufs: [] }, 
+  "Anethin®": { preco_g: 2.50, peso: 12.0, ufs: ['RS', 'SC', 'PR'] }, 
   "Anidream®": { preco_g: 12.00, peso: 1.5, ufs: [] },
-  "ArtemiFresh®": { preco_g: 2.50, peso: 15.0, ufs: ['DF'] }, // Exemplo: Apenas DF
+  "ArtemiFresh®": { preco_g: 2.50, peso: 15.0, ufs: ['DF'] }, 
   "BioCarum®": { preco_g: 2.50, peso: 15.0, ufs: [] },
   "Cardasense®": { preco_g: 2.50, peso: 12.0, ufs: [] },
   "CarySlim®": { preco_g: 2.50, peso: 12.0, ufs: [] },
@@ -62,20 +61,19 @@ export default function PipelinePage() {
 
   useEffect(() => { setMounted(true); carregarOportunidades(); }, []);
 
-  // Filtra produtos baseado na UF do cliente buscada pelo CNPJ
+  // FILTRO DE PRODUTOS CORRIGIDO
   const produtosFiltrados = Object.keys(TABELA_PRODUTOS).filter(nome => {
     const p = TABELA_PRODUTOS[nome];
-    // Se não tiver UFs definidas, aparece para todos. Caso contrário, checa se a UF do cliente está na lista.
-    return !p.ufs || p.ufs.length === 0 || p.ufs.includes(formData.uf_exclusividade);
+    const ufAtual = formData.uf_exclusividade?.toUpperCase();
+    return !p.ufs || p.ufs.length === 0 || p.ufs.includes(ufAtual);
   });
 
+  // CÁLCULO AUTOMÁTICO
   useEffect(() => {
     if (TABELA_PRODUTOS[formData.produto]) {
       const p = TABELA_PRODUTOS[formData.produto];
-      const valorG = p.preco_g;
-      const kgDigitado = Number(formData.kg_proposto) || 0;
-      const novoInvestimentoTotal = (valorG * 1000 * kgDigitado).toFixed(2);
-      setFormData(prev => ({ ...prev, valor_g_tabela: valorG.toFixed(2), peso_formula_g: p.peso.toString(), valor: novoInvestimentoTotal }));
+      const vTotal = (p.preco_g * 1000 * Number(formData.kg_proposto || 0)).toFixed(2);
+      setFormData(prev => ({ ...prev, valor_g_tabela: p.preco_g.toFixed(2), peso_formula_g: p.peso.toString(), valor: vTotal }));
     }
   }, [formData.produto, formData.kg_proposto]);
 
@@ -103,20 +101,17 @@ export default function PipelinePage() {
         uf_exclusividade: data.uf || '',
         telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : prev.telefone
       }));
-    } catch (e) { console.error("Erro CNPJ"); }
+    } catch (e) {}
     setLoadingCNPJ(false);
   };
 
-  const formatCurrency = (val: any) => {
-    return (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  };
+  const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
   const cleanHtmlForPdf = (html: string) => {
     if (!html) return "";
     let text = html.replace(/<p>/g, "").replace(/<\/p>/g, "\n").replace(/<br>/g, "\n");
     text = text.replace(/<li>/g, "  • ").replace(/<\/li>/g, "\n");
-    text = text.replace(/<[^>]*>?/gm, "");
-    text = text.replace(/&nbsp;/g, " ");
+    text = text.replace(/<[^>]*>?/gm, "").replace(/&nbsp;/g, " ");
     return text.trim();
   };
 
@@ -194,11 +189,10 @@ export default function PipelinePage() {
     if (item.observacoes_proposta) {
       doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
       doc.text("NOTAS E CONDIÇÕES COMERCIAIS:", 20, currentY);
-      currentY += 6;
-      doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
+      currentY += 6; doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
       const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
       const splitText = doc.splitTextToSize(notasTexto, 170);
-      const limitedText = splitText.slice(0, 3);
+      const limitedText = splitText.slice(0, 3); // LIMITE DE 3 LINHAS
       doc.text(limitedText, 20, currentY);
       currentY += (limitedText.length * 5) + 5; 
     }
@@ -207,13 +201,13 @@ export default function PipelinePage() {
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
     doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho dos ativos.";
+    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho.";
     doc.text(doc.splitTextToSize(certText, 160), 105, certY + 6, { align: 'center' });
 
     try {
       const imgW = 100; const imgH = 20; const xPos = (210 - imgW) / 2;
-      doc.addImage("/selo.jpg", "JPEG", xPos, certY + 16, imgW, imgH);
-    } catch (e) { doc.setFontSize(9); doc.setFont("helvetica", "bold"); doc.text("SELOS: HACCP • ISO • FSSC 22000 • GMP", 105, certY + 22, { align: 'center' }); }
+      doc.addImage("/selo.jpg", "JPEG", xPos, certY + 16, imgW, imgH); // SELOS GRANDES
+    } catch (e) { doc.setFontSize(9); doc.setFont("helvetica", "bold"); doc.text("SELOS: HACCP • ISO • GMP", 105, certY + 22, { align: 'center' }); }
 
     const fY = 285; doc.setFontSize(7); doc.setTextColor(150);
     doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
@@ -228,7 +222,7 @@ export default function PipelinePage() {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     const { data: { user } } = await supabase.auth.getUser();
     
-    // Converte valores para números reais para evitar erros no banco de dados
+    // CORREÇÃO DE DATA E NÚMEROS
     const payload = {
       ...formData,
       user_id: user?.id,
@@ -238,19 +232,14 @@ export default function PipelinePage() {
       kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
       parcelas: parseInt(String(formData.parcelas)) || 1,
       dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45,
-      fator_lucro: parseFloat(String(formData.fator_lucro)) || 5,
-      peso_formula_g: parseFloat(String(formData.peso_formula_g)) || 13.2
+      data_lembrete: formData.data_lembrete || null, // CORRIGE ERRO DE DATA VAZIA
+      data_entrada: formData.data_entrada || new Date().toISOString().split('T')[0]
     };
 
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
     
-    if (!error) { 
-      setModalOpen(false); 
-      carregarOportunidades(); 
-    } else { 
-      console.error("Erro detalhado do banco:", error); 
-      alert(`Erro ao salvar: ${error.message || 'Verifique o console (F12)'}`); 
-    }
+    if (!error) { setModalOpen(false); carregarOportunidades(); } 
+    else { console.error("Erro banco:", error); alert(`Erro ao salvar: ${error.message}`); }
   };
 
   return (
@@ -306,18 +295,18 @@ export default function PipelinePage() {
 
               <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta e Payback</h3></div>
               <div className="md:col-span-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Ativo (Filtrado por: {formData.uf_exclusividade || 'Global'})</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Ativo (Filtro UF: {formData.uf_exclusividade || 'Global'})</label>
                 <select className="w-full bg-slate-50 border rounded-xl p-3 font-bold" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})}>
                   <option value="">Selecione...</option>
                   {produtosFiltrados.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor do G (Tabela)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})}/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor G (Tabela)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Proposto</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento Total R$</label><input className="w-full bg-slate-100 border border-slate-200 text-slate-600 rounded-xl p-3 font-bold cursor-not-allowed" value={formData.valor} readOnly /></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Investimento Total R$</label><input className="w-full bg-slate-100 border text-slate-600 rounded-xl p-3 font-bold" value={formData.valor} readOnly /></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Bônus</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Parcelas</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª Parcela (Dias)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª Parc (Dias)</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
 
               <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100">
                   <label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><StickyNote size={14}/> Notas e Condições (Máx 3 linhas)</label>
@@ -326,13 +315,10 @@ export default function PipelinePage() {
                   </div>
               </div>
             </div>
-
-            <div className="p-6 bg-slate-50 border-t flex justify-between items-center shrink-0">
-              {editingOp ? <button onClick={() => { if(confirm('Excluir?')) { supabase.from('pipeline').delete().eq('id', editingOp.id).then(() => { carregarOportunidades(); setModalOpen(false); }); }}} className="text-red-500 font-bold text-xs uppercase tracking-widest px-4 py-2 rounded-lg">Excluir</button> : <div/>}
-              <div className="flex gap-2">
-                <button onClick={() => setModalOpen(false)} className="px-6 font-bold text-slate-400 hover:text-slate-600 transition">CANCELAR</button>
-                <button onClick={handleSave} className="bg-[#2563eb] text-white px-12 py-3 rounded-xl font-bold shadow-lg uppercase tracking-widest active:scale-95 transition">Salvar Dados</button>
-              </div>
+            <div className="p-6 bg-slate-50 border-t flex justify-end items-center shrink-0 gap-2">
+              {editingOp && <button onClick={() => { if(confirm('Excluir?')) { supabase.from('pipeline').delete().eq('id', editingOp.id).then(() => { carregarOportunidades(); setModalOpen(false); }); }}} className="text-red-500 font-bold text-xs uppercase px-4 py-2">Excluir</button>}
+              <button onClick={() => setModalOpen(false)} className="px-6 font-bold text-slate-400">CANCELAR</button>
+              <button onClick={handleSave} className="bg-[#2563eb] text-white px-12 py-3 rounded-xl font-bold uppercase active:scale-95 transition">Salvar Dados</button>
             </div>
           </div>
         </div>, document.body
