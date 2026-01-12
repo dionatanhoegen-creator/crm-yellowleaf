@@ -252,7 +252,7 @@ export default function PipelinePage() {
         autoTable(doc, {
             startY: currentY,
             margin: { left: 20, right: 20 },
-            head: [['NOTAS E CONDIÇÕES COMERCIAIS']],
+            head: [['CONDIÇÕES GERAIS DA PROPOSTA']],
             body: [[notasTexto]],
             theme: 'grid',
             headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'left' },
@@ -274,7 +274,8 @@ export default function PipelinePage() {
     // 2. TEXTO
     const textY = certY + 5;
     doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho dos ativos.";
+    const certText = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e promovemos sua comercialização com responsabilidade e
+ética.";
     const splitCertText = doc.splitTextToSize(certText, 170);
     doc.text(splitCertText, 105, textY, { align: 'center' });
 
