@@ -182,7 +182,7 @@ export default function PipelinePage() {
     return text.trim();
   };
 
-  const gerarPDFPremium = (item: any) => {
+  const gerarGERAR PDF = (item: any) => {
     const doc = new jsPDF();
     const verdeEscuro: [number, number, number] = [20, 83, 45];
     const verdeMedio: [number, number, number] = [34, 139, 34];
@@ -222,12 +222,12 @@ export default function PipelinePage() {
       head: [['DESCRIÇÃO', 'VALORES']],
       body: [
         ['Ativo/Insumo', item.produto || 'Insumo'],
-        ['Preço por grama (Negociado)', formatCurrency(valorGExibicao)], // Mostra "Negociado"
-        ['Quantidade proposta', `${item.kg_proposto} kg`],
-        ['Quantidade bonificada', `${item.kg_bonificado} kg`],
-        ['Investimento Total', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold' } }],
-        ['Valor do grama c/ bonificação', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold', textColor: textoCinza } }],
-        ['Condição de Pagamento', `${item.parcelas} parcelas de ${formatCurrency(vParc)}`],
+        ['Preço por grama (g)', formatCurrency(valorGExibicao)], // Mostra "Negociado"
+        ['Quantidade da proposta (kg)', `${item.kg_proposto} kg`],
+        ['Quantidade bonificada (kg)', `${item.kg_bonificado} kg`],
+        ['Investimento Total (R$)', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold' } }],
+        ['Preço do grama c/ bonificação (g)', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold', textColor: textoCinza } }],
+        ['Condição de Pagamento ', `${item.parcelas} parcelas de ${formatCurrency(vParc)}`],
         ['Vencimento 1ª Parcela', `${item.dias_primeira_parcela} dias`]
       ],
       theme: 'grid',
@@ -243,11 +243,11 @@ export default function PipelinePage() {
 
     autoTable(doc, {
       startY: paybackY, margin: { left: 20, right: 20 },
-      head: [['ANÁLISE TÉCNICA DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
+      head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
       body: [
-        ['Custo por fórmula (Manipulado)', formatCurrency(custoF)],
-        ['Sugestão de Venda (Fator 5)', formatCurrency(precoV)],
-        [{ content: 'META DE VIABILIDADE (Ponto de Equilíbrio)', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: verdeMedio, fontSize: 12, halign: 'right' } }]
+        ['Custo por fórmula (R$) (Manipulado)', formatCurrency(custoF)],
+        ['Sugestão de Venda (R$) (Fator 5)', formatCurrency(precoV)],
+        [{ content: 'META DE VIABILIDADE', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: verdeMedio, fontSize: 12, halign: 'right' } }]
       ],
       theme: 'grid',
       headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
