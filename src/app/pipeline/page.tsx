@@ -179,7 +179,12 @@ export default function PipelinePage() {
     const cinzaSuave: [number, number, number] = [243, 244, 246];
     const textoCinza: [number, number, number] = [60, 60, 60];
 
-    try { doc.addImage("/logo.jpg", "JPEG", 20, 10, 40, 20); } catch (e) {}
+    // --- 1. CABEÇALHO (LOGO AUMENTADO) ---
+    try { 
+        // Aumentei o logo para 50x25 (era 40x20)
+        doc.addImage("/logo.jpg", "JPEG", 20, 10, 50, 25); 
+    } catch (e) {}
+
     doc.setFont("helvetica", "bold"); doc.setFontSize(24);
     doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
     doc.text("PROPOSTA COMERCIAL", 190, 22, { align: 'right' });
@@ -245,7 +250,7 @@ export default function PipelinePage() {
     });
 
     // --- NOTAS (Tabela Padronizada) ---
-    let currentY = (doc as any).lastAutoTable.finalY + 8; // Espaço reduzido
+    let currentY = (doc as any).lastAutoTable.finalY + 8; 
     
     if (item.observacoes_proposta) {
         const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
@@ -264,34 +269,31 @@ export default function PipelinePage() {
         currentY += 8;
     }
 
-    // --- SEÇÃO QUALIDADE E PRODUÇÃO (REDIMENSIONADA PARA NÃO SOBREPOR) ---
+    // --- SEÇÃO QUALIDADE E PRODUÇÃO (AJUSTADA) ---
     const certY = currentY; 
     
-    // 1. TÍTULO
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
 
-    // 2. TEXTO
+    // TEXTO (Frase atualizada conforme solicitado)
     const textY = certY + 5;
     doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-    const certText = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e promovemos sua comercialização com responsabilidade e
-ética.";
+    const certText = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e promovemos sua comercialização com responsabilidade e ética.";
     const splitCertText = doc.splitTextToSize(certText, 170);
     doc.text(splitCertText, 105, textY, { align: 'center' });
 
-    // 3. IMAGEM DOS SELOS (REDUZIDA PARA 110x18mm)
-    const imgY = textY + (splitCertText.length * 4) + 3; // Menos espaço antes da imagem
+    // IMAGEM DOS SELOS (REDUZIDA PARA 90x15mm para não bater no rodapé)
+    const imgY = textY + (splitCertText.length * 4) + 3; 
     
     try {
-      const imgW = 110; // Largura reduzida (era 140)
-      const imgH = 18;  // Altura reduzida (era 28) - Proporção ajustada
+      const imgW = 90; // Menor que antes (era 110/140)
+      const imgH = 15; // Menor que antes (era 18/28)
       const xPos = (210 - imgW) / 2;
       
-      // Verificação de segurança para não invadir o rodapé
       if (imgY + imgH < 280) {
           doc.addImage("/selo.jpg", "JPEG", xPos, imgY, imgW, imgH);
       } else {
-          doc.addPage(); // Se não couber, cria nova página
+          doc.addPage(); 
           doc.addImage("/selo.jpg", "JPEG", xPos, 20, imgW, imgH);
       }
     } catch (e) {}
@@ -413,7 +415,6 @@ export default function PipelinePage() {
                 </select>
               </div>
               
-              {/* CAMPO DO VALOR DO G AGORA EDITÁVEL E REATIVO */}
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase">Valor G (Tabela)</label>
                 <input 
