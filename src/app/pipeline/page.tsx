@@ -182,7 +182,7 @@ export default function PipelinePage() {
     return text.trim();
   };
 
-  const gerarGERAR PDF = (item: any) => {
+  const gerarPDFPremium = (item: any) => {
     const doc = new jsPDF();
     const verdeEscuro: [number, number, number] = [20, 83, 45];
     const verdeMedio: [number, number, number] = [34, 139, 34];
@@ -360,7 +360,7 @@ export default function PipelinePage() {
             <div className="bg-[#242f3e] p-6 flex justify-between items-center text-white shrink-0">
               <h2 className="text-lg font-bold flex items-center gap-2">✨ {editingOp ? 'Editar Oportunidade' : 'Nova Oportunidade'}</h2>
               <div className="flex gap-2">
-                {editingOp && <button onClick={() => gerarPDFPremium(formData)} className="bg-green-600 px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase shadow-lg"><Download size={14}/> PDF Premium</button>}
+                {editingOp && <button onClick={() => gerarPDFPremium(formData)} className="bg-green-600 px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase shadow-lg"><Download size={14}/> Gerar PDF</button>}
                 <button onClick={() => setModalOpen(false)} className="hover:bg-white/10 p-1 rounded-full"><X/></button>
               </div>
             </div>
