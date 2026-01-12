@@ -15,7 +15,6 @@ import dynamic from 'next/dynamic';
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 import 'react-quill-new/dist/quill.snow.css';
 
-// --- URL DA API (A MESMA DA PÁGINA DE PRODUTOS) ---
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
 const ESTAGIOS = [
@@ -30,12 +29,10 @@ const ESTAGIOS = [
 export default function PipelinePage() {
   const supabase = createClientComponentClient();
   
-  // DADOS
   const [oportunidades, setOportunidades] = useState<any[]>([]);
   const [produtosApi, setProdutosApi] = useState<any[]>([]); 
   const [exclusividades, setExclusividades] = useState<any[]>([]); 
   
-  // UI
   const [loading, setLoading] = useState(true);
   const [loadingProdutos, setLoadingProdutos] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -63,11 +60,9 @@ export default function PipelinePage() {
     setLoading(false);
   };
 
-  // --- FUNÇÃO AUXILIAR PARA TRATAR NÚMEROS (Aceita "2,50" e "2.50") ---
   const parseMoney = (valor: any) => {
     if (typeof valor === 'number') return valor;
     if (!valor) return 0;
-    // Remove R$, espaços e troca vírgula por ponto
     const limpo = String(valor).replace('R$', '').replace(/\s/g, '').replace(',', '.');
     return parseFloat(limpo) || 0;
   };
@@ -104,7 +99,6 @@ export default function PipelinePage() {
     }
   };
 
-  // --- FILTRO INTELIGENTE ---
   const produtosDisponiveis = produtosApi.filter(prod => {
     const nomeProduto = prod.ativo;
     const ufAtual = (formData.uf_exclusividade || '').toUpperCase().trim();
@@ -122,36 +116,43 @@ export default function PipelinePage() {
     return !bloqueado; 
   });
 
-  // --- EFEITO 1: QUANDO SELECIONA O PRODUTO (Preenche o preço sugerido) ---
+  // --- LÓGICA 1: CARREGA DADOS QUANDO SELECIONA PRODUTO ---
   useEffect(() => {
-    // Só roda se o usuário mudou o produto no dropdown
     if (!formData.produto) return;
-
+    // Só atualiza o preço pela API se o usuário TROCAR de produto
+    // Isso evita sobrescrever o preço que o usuário editou manualmente
     const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
-
     if (produtoSelecionado) {
-      setFormData(prev => ({ 
-          ...prev, 
-          // Preenche o valor do G com o da tabela, mas permite edição depois
-          valor_g_tabela: produtoSelecionado.preco_grama.toFixed(2).replace('.', ','), 
-          peso_formula_g: produtoSelecionado.peso_formula.toString()
-      }));
+        // Verifica se o preço já foi editado ou se é uma nova seleção
+        const precoAtual = parseMoney(formData.valor_g_tabela);
+        
+        // Se o preço estiver zerado ou for uma nova seleção, puxa da API
+        // Se já tiver valor, mantemos (para edição), a menos que seja troca de produto
+        if (precoAtual === 0 || !formData.valor_g_tabela) {
+             setFormData(prev => ({ 
+                ...prev, 
+                valor_g_tabela: produtoSelecionado.preco_grama.toFixed(2).replace('.', ','), 
+                peso_formula_g: produtoSelecionado.peso_formula.toString()
+            }));
+        }
     }
   }, [formData.produto, produtosApi]);
 
-  // --- EFEITO 2: A CALCULADORA (Onde a mágica acontece) ---
-  // Roda sempre que o PREÇO DO G (editado ou não) ou o KG mudam
+  // --- LÓGICA 2: CALCULADORA EM TEMPO REAL (OFERTA MANUAL) ---
+  // Roda sempre que o usuário digita no "Valor G" ou "KG"
   useEffect(() => {
-    const precoG = parseMoney(formData.valor_g_tabela); // Pega o que está digitado no campo
+    const precoG = parseMoney(formData.valor_g_tabela);
     const kg = parseMoney(formData.kg_proposto);
     
-    // Calcula: Preço Digitado * 1000 * KG Digitado
     const vTotal = (precoG * 1000 * kg).toFixed(2);
 
-    // Atualiza o Total (sem mexer no preço do G, para não travar a digitação)
-    setFormData(prev => ({ ...prev, valor: vTotal }));
-    
+    // Atualiza APENAS o total, respeitando o preço que o usuário digitou
+    setFormData(prev => {
+        if (prev.valor === vTotal) return prev; // Evita loop infinito
+        return { ...prev, valor: vTotal };
+    });
   }, [formData.valor_g_tabela, formData.kg_proposto]);
+
 
   const buscarDadosCNPJ = async () => {
     const cnpjLimpo = formData.cnpj?.replace(/\D/g, '');
@@ -213,7 +214,7 @@ export default function PipelinePage() {
     const vGramaReal = (Number(item.valor) / (totalKG * 1000)) || 0;
     const vParc = (Number(item.valor) / Number(item.parcelas)) || 0;
 
-    // Converte o valor do G para formatação correta
+    // Garante que o PDF usa o valor digitado no formulário
     const valorGExibicao = parseMoney(item.valor_g_tabela);
 
     autoTable(doc, {
@@ -221,7 +222,7 @@ export default function PipelinePage() {
       head: [['DESCRIÇÃO', 'VALORES']],
       body: [
         ['Ativo/Insumo', item.produto || 'Insumo'],
-        ['Preço por grama (Tabela)', formatCurrency(valorGExibicao)], // Usa o valor editado
+        ['Preço por grama (Negociado)', formatCurrency(valorGExibicao)], // Mostra "Negociado"
         ['Quantidade proposta', `${item.kg_proposto} kg`],
         ['Quantidade bonificada', `${item.kg_bonificado} kg`],
         ['Investimento Total', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold' } }],
@@ -312,6 +313,18 @@ export default function PipelinePage() {
     } else { 
       console.error("Erro banco:", error); 
       alert(`Erro ao salvar: ${error.message}`); 
+    }
+  };
+
+  const handleDelete = async () => {
+    if (confirm('Deseja excluir este registro permanentemente?')) {
+        const { error } = await supabase.from('pipeline').delete().eq('id', editingOp.id);
+        if (!error) {
+            carregarOportunidades();
+            setModalOpen(false);
+        } else {
+            alert("Erro ao excluir.");
+        }
     }
   };
 
@@ -407,6 +420,9 @@ export default function PipelinePage() {
               </div>
             </div>
             <div className="p-6 bg-slate-50 border-t flex justify-end items-center shrink-0 gap-2">
+              {/* BOTÃO EXCLUIR RESTAURADO */}
+              {editingOp && <button onClick={handleDelete} className="text-red-500 font-bold text-xs uppercase px-4 py-2 hover:bg-red-50 rounded-lg">Excluir</button>}
+              
               <button onClick={() => setModalOpen(false)} className="px-6 font-bold text-slate-400">CANCELAR</button>
               <button onClick={handleSave} className="bg-[#2563eb] text-white px-12 py-3 rounded-xl font-bold uppercase active:scale-95 transition">Salvar Dados</button>
             </div>
