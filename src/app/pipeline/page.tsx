@@ -43,9 +43,10 @@ export default function PipelinePage() {
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
   
-  // --- FUNÇÃO PARA PEGAR DATA LOCAL CORRETA (SEM BUG DE FUSO) ---
+  // --- CORREÇÃO DE FUSO HORÁRIO (DATA BRASIL) ---
   const getLocalData = () => {
     const now = new Date();
+    // Subtrai o offset do fuso para garantir a data local correta
     const offset = now.getTimezoneOffset() * 60000;
     return new Date(now.getTime() - offset).toISOString().split('T')[0];
   };
@@ -53,8 +54,7 @@ export default function PipelinePage() {
   const [formData, setFormData] = useState({
     cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '',
     aplicacao: '', valor: '', 
-    // Usa a função local para não dar erro de dia anterior
-    data_entrada: getLocalData(),
+    data_entrada: getLocalData(), // Inicia com a data correta
     data_lembrete: '', 
     canal_contato: 'WhatsApp',
     observacoes: '',
@@ -316,9 +316,10 @@ export default function PipelinePage() {
       parcelas: parseInt(String(formData.parcelas)) || 1,
       dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45,
       data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null,
-      data_entrada: formData.data_entrada || getLocalData(), // USA DATA LOCAL
+      data_entrada: formData.data_entrada || getLocalData(),
       canal_contato: formData.canal_contato,
-      observacoes: formData.observacoes 
+      observacoes: formData.observacoes,
+      observacoes_proposta: formData.observacoes_proposta // Garante que a nota do PDF seja salva
     };
 
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
@@ -335,15 +336,14 @@ export default function PipelinePage() {
     }
   };
 
-  // --- RENDER CARD COM PISCA-PISCA PARA HOJE ---
+  // --- CARD COM PISCA-PISCA CORRIGIDO ---
   const renderCard = (op: any) => {
-    const hoje = getLocalData(); // Data local correta
-    const dataLembrete = op.data_lembrete;
+    const hoje = getLocalData(); // 2026-01-12
+    const dataLembrete = op.data_lembrete; // Ex: 2026-01-12
     
     const isAtrasado = dataLembrete && dataLembrete < hoje;
-    const isHoje = dataLembrete && dataLembrete === hoje; // Verifica se é EXATAMENTE hoje
+    const isHoje = dataLembrete === hoje; 
     
-    // Classes dinâmicas
     let borderClass = 'border-slate-100 hover:border-blue-300';
     let bgClass = 'bg-white';
     let textClass = 'text-slate-400';
@@ -355,8 +355,7 @@ export default function PipelinePage() {
         textClass = 'text-red-500';
         label = 'Atrasado: ';
     } else if (isHoje) {
-        // EFEITO PISCANTE PARA HOJE
-        borderClass = 'border-red-500 border-2 animate-pulse'; // Borda vermelha piscando
+        borderClass = 'border-red-500 border-2 animate-pulse'; 
         textClass = 'text-red-600 font-bold';
         label = 'HOJE: ';
     }
@@ -372,7 +371,7 @@ export default function PipelinePage() {
                 <div className={`mt-3 pt-2 border-t flex items-center gap-1 text-[10px] font-bold ${textClass}`}>
                     <Clock size={10} />
                     {label}
-                    {new Date(op.data_lembrete + 'T12:00:00').toLocaleDateString('pt-BR')} 
+                    {op.data_lembrete.split('-').reverse().join('/')} 
                 </div>
             )}
         </div>
