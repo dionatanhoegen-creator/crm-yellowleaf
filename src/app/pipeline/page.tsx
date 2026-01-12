@@ -165,12 +165,18 @@ export default function PipelinePage() {
 
   const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+  // Limpador de HTML melhorado para textos longos em tabela
   const cleanHtmlForPdf = (html: string) => {
     if (!html) return "";
-    let text = html.replace(/<p>/g, "").replace(/<\/p>/g, "\n").replace(/<br>/g, "\n");
-    text = text.replace(/<li>/g, "  • ").replace(/<\/li>/g, "\n");
-    text = text.replace(/<[^>]*>?/gm, "").replace(/&nbsp;/g, " ");
-    return text.trim();
+    // Troca parágrafos e quebras por newlines
+    let text = html.replace(/<p>/g, "").replace(/<\/p>/g, "\n").replace(/<br\s*\/?>/gi, "\n");
+    // Troca itens de lista por bullets com quebra
+    text = text.replace(/<li>/g, "• ").replace(/<\/li>/g, "\n");
+    // Remove tags restantes
+    text = text.replace(/<[^>]+>/g, "");
+    // Remove múltiplos espaços e quebras extras, e decodifica entidades
+    text = text.replace(/&nbsp;/g, " ").replace(/\n\s*\n/g, "\n").trim();
+    return text;
   };
 
   const gerarPDFPremium = (item: any) => {
@@ -245,43 +251,53 @@ export default function PipelinePage() {
       columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right' } }
     });
 
-    let currentY = (doc as any).lastAutoTable.finalY + 12; 
+    // --- NOTAS E CONDIÇÕES COMERCIAIS (AGORA COMO TABELA PADRONIZADA) ---
+    let currentY = (doc as any).lastAutoTable.finalY + 10; // Espaço após Payback
+    
     if (item.observacoes_proposta) {
-      doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
-      doc.text("NOTAS E CONDIÇÕES COMERCIAIS:", 20, currentY);
-      currentY += 6; doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-      const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
-      const splitText = doc.splitTextToSize(notasTexto, 170);
-      const limitedText = splitText.slice(0, 3);
-      doc.text(limitedText, 20, currentY);
-      currentY += (limitedText.length * 5) + 5; 
+        const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
+        autoTable(doc, {
+            startY: currentY,
+            margin: { left: 20, right: 20 },
+            head: [['NOTAS E CONDIÇÕES COMERCIAIS']],
+            body: [[notasTexto]],
+            theme: 'grid',
+            headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'left' },
+            styles: { fontSize: 9, cellPadding: 3, textColor: textoCinza, valign: 'middle', overflow: 'linebreak' },
+            columnStyles: { 0: { cellWidth: 'auto' } }
+        });
+        // Atualiza o Y para o final desta nova tabela
+        currentY = (doc as any).lastAutoTable.finalY + 10;
+    } else {
+        // Se não houver notas, apenas adiciona um espaço
+        currentY += 10;
     }
 
-    // --- SEÇÃO QUALIDADE E PRODUÇÃO (AJUSTADA: TEXTO EM CIMA) ---
-    const certY = currentY + 10;
+    // --- SEÇÃO QUALIDADE E PRODUÇÃO (REPOSICIONADA) ---
+    const certY = currentY; // Usa a posição logo após as notas
     
-    // 1. TÍTULO
+    // 1. TÍTULO (Mais alto)
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
 
-    // 2. TEXTO (AGORA ACIMA DA IMAGEM)
+    // 2. TEXTO (Acima da imagem)
     const textY = certY + 7;
     doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
     const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho dos ativos.";
-    const splitCertText = doc.splitTextToSize(certText, 170); // Texto largo
+    const splitCertText = doc.splitTextToSize(certText, 170);
     doc.text(splitCertText, 105, textY, { align: 'center' });
 
-    // 3. IMAGEM DOS SELOS (AGORA EMBAIXO DO TEXTO E PROPORCIONAL)
-    const imgY = textY + (splitCertText.length * 4) + 5; // Posição dinâmica abaixo do texto
+    // 3. IMAGEM DOS SELOS (Embaixo do texto, proporcional)
+    const imgY = textY + (splitCertText.length * 4) + 5; // Calcula posição dinâmica
     
     try {
-      // Ajuste de proporção para não achatar (Proporção ~5:1)
-      const imgW = 140; // Largura boa para a página
-      const imgH = 28;  // Altura suficiente para os círculos não parecerem ovais
+      const imgW = 140; 
+      const imgH = 28;  
       const xPos = (210 - imgW) / 2;
       doc.addImage("/selo.jpg", "JPEG", xPos, imgY, imgW, imgH);
     } catch (e) {}
 
+    // RODAPÉ FIXO
     const fY = 285; doc.setFontSize(7); doc.setTextColor(150);
     doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
     doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 20, fY + 4);
