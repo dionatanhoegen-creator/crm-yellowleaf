@@ -15,7 +15,7 @@ import dynamic from 'next/dynamic';
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 import 'react-quill-new/dist/quill.snow.css';
 
-// --- TABELA DE PREÇOS BASE (Sincronizada com seu catálogo) ---
+// --- TABELA DE PREÇOS BASE ---
 const TABELA_PRODUTOS: Record<string, any> = {
   "Allisane®": { preco_g: 2.50, peso: 15.0 },
   "Anethin®": { preco_g: 2.50, peso: 12.0 },
@@ -44,7 +44,7 @@ const ESTAGIOS = [
 export default function PipelinePage() {
   const supabase = createClientComponentClient();
   const [oportunidades, setOportunidades] = useState<any[]>([]);
-  const [exclusividades, setExclusividades] = useState<any[]>([]);
+  const [exclusividades, setExclusividades] = useState<any[]>([]); // Nova aba integrada
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<any>(null);
@@ -63,32 +63,33 @@ export default function PipelinePage() {
   useEffect(() => { 
     setMounted(true); 
     carregarOportunidades();
-    carregarExclusividades(); // Puxa os dados da "Aba Exclusividades"
+    carregarExclusividades(); // Sincroniza com a aba de exclusividades
   }, []);
 
-  // BUSCA DADOS DA OUTRA ABA (EXCLUSIVIDADES)
   const carregarExclusividades = async () => {
     const { data } = await supabase.from('exclusividades').select('*');
     setExclusividades(data || []);
   };
 
-  // LÓGICA PARA FORÇAR A LISTA DE ATIVOS DISPONÍVEIS
+  // --- LÓGICA DE FILTRO DE ATIVOS (CRÍTICO) ---
   const produtosFiltrados = Object.keys(TABELA_PRODUTOS).filter(nome => {
-    const ufCliente = (formData.uf_exclusividade || '').toUpperCase();
-    const cidadeCliente = (formData.cidade_exclusividade || '').toUpperCase();
+    const ufAtual = (formData.uf_exclusividade || '').toUpperCase().trim();
+    const cidadeAtual = (formData.cidade_exclusividade || '').toUpperCase().trim();
 
-    // Verifica se esse produto tem exclusividade para OUTRA pessoa nessa região
+    // Se o estado estiver em branco, mostra todos para não travar o preenchimento
+    if (!ufAtual) return true;
+
+    // Verifica se esse produto está bloqueado por uma exclusividade de OUTRO cliente
     const bloqueado = exclusividades.some(ex => 
       ex.produto === nome && 
-      ex.uf === ufCliente && 
-      (ex.cidade === cidadeCliente || ex.cidade === 'TODAS') &&
-      ex.nome_cliente !== formData.nome_cliente // Se não for o mesmo cliente, bloqueia
+      ex.uf === ufAtual && 
+      (ex.cidade === cidadeAtual || ex.cidade === 'TODAS') &&
+      ex.nome_cliente !== formData.nome_cliente
     );
 
-    return !bloqueado; // Só mostra se não estiver bloqueado para outros
+    return !bloqueado;
   });
 
-  // CÁLCULO AUTOMÁTICO
   useEffect(() => {
     if (TABELA_PRODUTOS[formData.produto]) {
       const p = TABELA_PRODUTOS[formData.produto];
@@ -121,7 +122,7 @@ export default function PipelinePage() {
         uf_exclusividade: data.uf || '',
         telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : prev.telefone
       }));
-    } catch (e) { console.error("Erro CNPJ"); }
+    } catch (e) {}
     setLoadingCNPJ(false);
   };
 
@@ -221,7 +222,7 @@ export default function PipelinePage() {
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
     doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho dos ativos.";
+    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho.";
     doc.text(doc.splitTextToSize(certText, 160), 105, certY + 6, { align: 'center' });
 
     try {
@@ -242,7 +243,7 @@ export default function PipelinePage() {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     const { data: { user } } = await supabase.auth.getUser();
     
-    // TRATAMENTO DOS DADOS PARA O BANCO (FIX DATA ERROR)
+    // --- CORREÇÃO DEFINITIVA DO ERRO DE DATA E SALVAMENTO ---
     const payload = {
       ...formData,
       user_id: user?.id,
@@ -251,8 +252,8 @@ export default function PipelinePage() {
       kg_proposto: parseFloat(String(formData.kg_proposto)) || 0,
       kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
       parcelas: parseInt(String(formData.parcelas)) || 1,
-      dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45,
-      data_lembrete: (formData.data_lembrete && formData.data_lembrete !== "") ? formData.data_lembrete : null,
+      // Se a data estiver vazia, envia 'null' para não quebrar a sintaxe do banco
+      data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null,
       data_entrada: formData.data_entrada || new Date().toISOString().split('T')[0]
     };
 
