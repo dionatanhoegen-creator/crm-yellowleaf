@@ -179,10 +179,10 @@ export default function PipelinePage() {
     const cinzaSuave: [number, number, number] = [243, 244, 246];
     const textoCinza: [number, number, number] = [60, 60, 60];
 
-    // --- 1. CABEÇALHO (LOGO AUMENTADO) ---
+    // --- 1. CABEÇALHO (LOGO EXPANDIDO) ---
     try { 
-        // Aumentei o logo para 50x25 (era 40x20)
-        doc.addImage("/logo.jpg", "JPEG", 20, 10, 50, 25); 
+        // Aumentei o logo para 70x30 (era menor) e ajustei o Y para 5 (centraliza melhor)
+        doc.addImage("/logo.jpg", "JPEG", 20, 5, 70, 30); 
     } catch (e) {}
 
     doc.setFont("helvetica", "bold"); doc.setFontSize(24);
@@ -269,27 +269,30 @@ export default function PipelinePage() {
         currentY += 8;
     }
 
-    // --- SEÇÃO QUALIDADE E PRODUÇÃO (AJUSTADA) ---
+    // --- SEÇÃO QUALIDADE E PRODUÇÃO ---
     const certY = currentY; 
     
+    // 1. TÍTULO
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
 
-    // TEXTO (Frase atualizada conforme solicitado)
+    // 2. TEXTO (Corrigido para não quebrar)
     const textY = certY + 5;
     doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
+    // Removida a quebra de linha que estava dando erro
     const certText = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e promovemos sua comercialização com responsabilidade e ética.";
     const splitCertText = doc.splitTextToSize(certText, 170);
     doc.text(splitCertText, 105, textY, { align: 'center' });
 
-    // IMAGEM DOS SELOS (REDUZIDA PARA 90x15mm para não bater no rodapé)
+    // 3. IMAGEM DOS SELOS (REDUZIDA PARA 90x15mm para não bater no rodapé)
     const imgY = textY + (splitCertText.length * 4) + 3; 
     
     try {
-      const imgW = 90; // Menor que antes (era 110/140)
-      const imgH = 15; // Menor que antes (era 18/28)
+      const imgW = 90; 
+      const imgH = 15; 
       const xPos = (210 - imgW) / 2;
       
+      // Verificação de segurança para não invadir o rodapé
       if (imgY + imgH < 280) {
           doc.addImage("/selo.jpg", "JPEG", xPos, imgY, imgW, imgH);
       } else {
@@ -415,6 +418,7 @@ export default function PipelinePage() {
                 </select>
               </div>
               
+              {/* CAMPO DO VALOR DO G AGORA EDITÁVEL E REATIVO */}
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase">Valor G (Tabela)</label>
                 <input 
