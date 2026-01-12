@@ -116,7 +116,6 @@ export default function PipelinePage() {
     return !bloqueado; 
   });
 
-  // LÓGICA 1: CARREGA DADOS QUANDO SELECIONA PRODUTO
   useEffect(() => {
     if (!formData.produto) return;
     const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
@@ -132,7 +131,6 @@ export default function PipelinePage() {
     }
   }, [formData.produto, produtosApi]);
 
-  // LÓGICA 2: CALCULADORA EM TEMPO REAL
   useEffect(() => {
     const precoG = parseMoney(formData.valor_g_tabela);
     const kg = parseMoney(formData.kg_proposto);
@@ -165,16 +163,11 @@ export default function PipelinePage() {
 
   const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // Limpador de HTML melhorado para textos longos em tabela
   const cleanHtmlForPdf = (html: string) => {
     if (!html) return "";
-    // Troca parágrafos e quebras por newlines
     let text = html.replace(/<p>/g, "").replace(/<\/p>/g, "\n").replace(/<br\s*\/?>/gi, "\n");
-    // Troca itens de lista por bullets com quebra
     text = text.replace(/<li>/g, "• ").replace(/<\/li>/g, "\n");
-    // Remove tags restantes
     text = text.replace(/<[^>]+>/g, "");
-    // Remove múltiplos espaços e quebras extras, e decodifica entidades
     text = text.replace(/&nbsp;/g, " ").replace(/\n\s*\n/g, "\n").trim();
     return text;
   };
@@ -251,8 +244,8 @@ export default function PipelinePage() {
       columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right' } }
     });
 
-    // --- NOTAS E CONDIÇÕES COMERCIAIS (AGORA COMO TABELA PADRONIZADA) ---
-    let currentY = (doc as any).lastAutoTable.finalY + 10; // Espaço após Payback
+    // --- NOTAS (Tabela Padronizada) ---
+    let currentY = (doc as any).lastAutoTable.finalY + 8; // Espaço reduzido
     
     if (item.observacoes_proposta) {
         const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
@@ -266,35 +259,40 @@ export default function PipelinePage() {
             styles: { fontSize: 9, cellPadding: 3, textColor: textoCinza, valign: 'middle', overflow: 'linebreak' },
             columnStyles: { 0: { cellWidth: 'auto' } }
         });
-        // Atualiza o Y para o final desta nova tabela
-        currentY = (doc as any).lastAutoTable.finalY + 10;
+        currentY = (doc as any).lastAutoTable.finalY + 8;
     } else {
-        // Se não houver notas, apenas adiciona um espaço
-        currentY += 10;
+        currentY += 8;
     }
 
-    // --- SEÇÃO QUALIDADE E PRODUÇÃO (REPOSICIONADA) ---
-    const certY = currentY; // Usa a posição logo após as notas
+    // --- SEÇÃO QUALIDADE E PRODUÇÃO (REDIMENSIONADA PARA NÃO SOBREPOR) ---
+    const certY = currentY; 
     
-    // 1. TÍTULO (Mais alto)
+    // 1. TÍTULO
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
 
-    // 2. TEXTO (Acima da imagem)
-    const textY = certY + 7;
+    // 2. TEXTO
+    const textY = certY + 5;
     doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
     const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho dos ativos.";
     const splitCertText = doc.splitTextToSize(certText, 170);
     doc.text(splitCertText, 105, textY, { align: 'center' });
 
-    // 3. IMAGEM DOS SELOS (Embaixo do texto, proporcional)
-    const imgY = textY + (splitCertText.length * 4) + 5; // Calcula posição dinâmica
+    // 3. IMAGEM DOS SELOS (REDUZIDA PARA 110x18mm)
+    const imgY = textY + (splitCertText.length * 4) + 3; // Menos espaço antes da imagem
     
     try {
-      const imgW = 140; 
-      const imgH = 28;  
+      const imgW = 110; // Largura reduzida (era 140)
+      const imgH = 18;  // Altura reduzida (era 28) - Proporção ajustada
       const xPos = (210 - imgW) / 2;
-      doc.addImage("/selo.jpg", "JPEG", xPos, imgY, imgW, imgH);
+      
+      // Verificação de segurança para não invadir o rodapé
+      if (imgY + imgH < 280) {
+          doc.addImage("/selo.jpg", "JPEG", xPos, imgY, imgW, imgH);
+      } else {
+          doc.addPage(); // Se não couber, cria nova página
+          doc.addImage("/selo.jpg", "JPEG", xPos, 20, imgW, imgH);
+      }
     } catch (e) {}
 
     // RODAPÉ FIXO
