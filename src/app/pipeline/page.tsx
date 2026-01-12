@@ -15,12 +15,12 @@ import dynamic from 'next/dynamic';
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 import 'react-quill-new/dist/quill.snow.css';
 
-// --- TABELA TÉCNICA COM FILTRO POR UF ---
+// --- TABELA TÉCNICA COM FILTRO POR UF (AJUSTADA PARA SP/RS) ---
 const TABELA_PRODUTOS: Record<string, any> = {
   "Allisane®": { preco_g: 2.50, peso: 15.0, ufs: [] }, 
-  "Anethin®": { preco_g: 2.50, peso: 12.0, ufs: ['RS', 'SC', 'PR'] }, 
+  "Anethin®": { preco_g: 2.50, peso: 12.0, ufs: ['RS', 'SC', 'PR', 'SP'] }, 
   "Anidream®": { preco_g: 12.00, peso: 1.5, ufs: [] },
-  "ArtemiFresh®": { preco_g: 2.50, peso: 15.0, ufs: ['DF'] }, 
+  "ArtemiFresh®": { preco_g: 2.50, peso: 15.0, ufs: ['DF', 'SP'] }, 
   "BioCarum®": { preco_g: 2.50, peso: 15.0, ufs: [] },
   "Cardasense®": { preco_g: 2.50, peso: 12.0, ufs: [] },
   "CarySlim®": { preco_g: 2.50, peso: 12.0, ufs: [] },
@@ -61,14 +61,14 @@ export default function PipelinePage() {
 
   useEffect(() => { setMounted(true); carregarOportunidades(); }, []);
 
-  // FILTRO DE PRODUTOS CORRIGIDO
+  // FILTRO DE PRODUTOS PERMISSIVO PARA SP E RS
   const produtosFiltrados = Object.keys(TABELA_PRODUTOS).filter(nome => {
     const p = TABELA_PRODUTOS[nome];
-    const ufAtual = formData.uf_exclusividade?.toUpperCase();
-    return !p.ufs || p.ufs.length === 0 || p.ufs.includes(ufAtual);
+    const ufAtual = (formData.uf_exclusividade || '').trim().toUpperCase();
+    return !p.ufs || p.ufs.length === 0 || p.ufs.includes(ufAtual) || ufAtual === '';
   });
 
-  // CÁLCULO AUTOMÁTICO
+  // CÁLCULO AUTOMÁTICO DE INVESTIMENTO
   useEffect(() => {
     if (TABELA_PRODUTOS[formData.produto]) {
       const p = TABELA_PRODUTOS[formData.produto];
@@ -161,7 +161,7 @@ export default function PipelinePage() {
         ['Vencimento 1ª Parcela', `${item.dias_primeira_parcela} dias`]
       ],
       theme: 'grid',
-      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
+      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' }, // CENTRALIZADO
       styles: { fontSize: 10, cellPadding: 2, textColor: textoCinza },
       columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right', fontStyle: 'bold' } }
     });
@@ -180,7 +180,7 @@ export default function PipelinePage() {
         [{ content: 'META DE VIABILIDADE (Ponto de Equilíbrio)', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: verdeMedio, fontSize: 12, halign: 'right' } }]
       ],
       theme: 'grid',
-      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
+      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' }, // CENTRALIZADO
       styles: { fontSize: 10, cellPadding: 2, textColor: textoCinza },
       columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right' } }
     });
@@ -192,7 +192,7 @@ export default function PipelinePage() {
       currentY += 6; doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
       const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
       const splitText = doc.splitTextToSize(notasTexto, 170);
-      const limitedText = splitText.slice(0, 3); // LIMITE DE 3 LINHAS
+      const limitedText = splitText.slice(0, 3); // TRAVA DE 3 LINHAS
       doc.text(limitedText, 20, currentY);
       currentY += (limitedText.length * 5) + 5; 
     }
@@ -201,7 +201,7 @@ export default function PipelinePage() {
     doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
     doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho.";
+    const certText = "Nossos parceiros industriais operam sob os mais rigorosos padrões internacionais de qualidade, com produção auditada assegurando rastreabilidade e alto desempenho dos ativos.";
     doc.text(doc.splitTextToSize(certText, 160), 105, certY + 6, { align: 'center' });
 
     try {
@@ -222,7 +222,7 @@ export default function PipelinePage() {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     const { data: { user } } = await supabase.auth.getUser();
     
-    // CORREÇÃO DE DATA E NÚMEROS
+    // CORREÇÃO DEFINITIVA DO ERRO DE DATA VAZIA
     const payload = {
       ...formData,
       user_id: user?.id,
@@ -232,8 +232,9 @@ export default function PipelinePage() {
       kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
       parcelas: parseInt(String(formData.parcelas)) || 1,
       dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45,
-      data_lembrete: formData.data_lembrete || null, // CORRIGE ERRO DE DATA VAZIA
-      data_entrada: formData.data_entrada || new Date().toISOString().split('T')[0]
+      // Se a data estiver vazia, envia 'null' para não quebrar o banco
+      data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== '') ? formData.data_lembrete : null,
+      data_entrada: (formData.data_entrada && formData.data_entrada.trim() !== '') ? formData.data_entrada : new Date().toISOString().split('T')[0]
     };
 
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
