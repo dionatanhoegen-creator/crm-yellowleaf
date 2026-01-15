@@ -36,8 +36,8 @@ export default function PipelinePage() {
   
   const [oportunidades, setOportunidades] = useState<any[]>([]);
   const [produtosApi, setProdutosApi] = useState<any[]>([]); 
-  const [exclusividades, setExclusividades] = useState<any[]>([]); // VOLTOU
-  const [baseClientesExterna, setBaseClientesExterna] = useState<any[]>([]); // LISTA PARA BLOQUEIO
+  const [exclusividades, setExclusividades] = useState<any[]>([]); // RECUPERADO
+  const [baseClientesExterna, setBaseClientesExterna] = useState<any[]>([]); // PARA BLOQUEIO
   
   const [loading, setLoading] = useState(true);
   const [loadingProdutos, setLoadingProdutos] = useState(true);
@@ -45,12 +45,12 @@ export default function PipelinePage() {
   // MODAIS
   const [modalOpen, setModalOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<any>(null);
-  const [blockModal, setBlockModal] = useState({ open: false, title: '', message: '', motivo: '' }); // MODAL VERMELHO
+  const [blockModal, setBlockModal] = useState({ open: false, title: '', message: '', motivo: '' });
 
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
   
-  // --- DATA CORRETA (FUSO BRASIL) ---
+  // --- DATA CORRETA ---
   const getLocalData = () => {
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60000;
@@ -81,8 +81,8 @@ export default function PipelinePage() {
     await Promise.all([
         carregarOportunidades(), 
         carregarProdutosDaAPI(), 
-        carregarExclusividades(), // VOLTOU
-        carregarBaseClientesOficial() // NOVO (BLOQUEIO)
+        carregarExclusividades(), // RECUPERADO
+        carregarBaseClientesOficial()
     ]);
     setLoading(false);
   };
@@ -90,11 +90,21 @@ export default function PipelinePage() {
   const parseMoney = (valor: any) => {
     if (typeof valor === 'number') return valor;
     if (!valor) return 0;
-    const limpo = String(valor).replace('R$', '').replace(/\s/g, '').replace(',', '.');
-    return parseFloat(limpo) || 0;
+    // Tenta ser inteligente: se tem vírgula, assume padrão BR. Se só tem ponto, padrão US.
+    let str = String(valor).replace('R$', '').trim();
+    if (str.includes(',')) {
+        str = str.replace(/\./g, '').replace(',', '.');
+    }
+    return parseFloat(str) || 0;
   };
 
-  // 1. CARREGA LISTA DE CLIENTES (PARA O BLOQUEIO)
+  // 1. CARREGA EXCLUSIVIDADES (RECUPERADO)
+  const carregarExclusividades = async () => {
+    const { data } = await supabase.from('exclusividades').select('*');
+    setExclusividades(data || []);
+  };
+
+  // 2. CARREGA BASE OFICIAL (PARA BLOQUEIO)
   const carregarBaseClientesOficial = async () => {
     try {
         const res = await fetch(`${API_CLIENTES_URL}?path=clientes`);
@@ -105,7 +115,6 @@ export default function PipelinePage() {
     } catch (e) { console.error("Erro base externa:", e); }
   };
 
-  // 2. CARREGA PRODUTOS
   const carregarProdutosDaAPI = async () => {
     setLoadingProdutos(true);
     try {
@@ -120,14 +129,8 @@ export default function PipelinePage() {
             }));
             setProdutosApi(produtosLimpos.sort((a: any, b: any) => a.ativo.localeCompare(b.ativo)));
         }
-    } catch (e) { console.error("Erro API Planilha:", e); }
+    } catch (e) { console.error("Erro API Produtos:", e); }
     setLoadingProdutos(false);
-  };
-
-  // 3. CARREGA EXCLUSIVIDADES (VOLTOU)
-  const carregarExclusividades = async () => {
-    const { data } = await supabase.from('exclusividades').select('*');
-    setExclusividades(data || []);
   };
 
   const carregarOportunidades = async () => {
@@ -135,7 +138,7 @@ export default function PipelinePage() {
     setOportunidades(data || []);
   };
 
-  // --- FILTRO DE PRODUTOS DISPONÍVEIS (LÓGICA RESTAURADA) ---
+  // --- FILTRO DE EXCLUSIVIDADES (RECUPERADO) ---
   const produtosDisponiveis = produtosApi.filter(prod => {
     const nomeProduto = prod.ativo;
     const ufAtual = (formData.uf_exclusividade || '').toUpperCase().trim();
@@ -143,7 +146,6 @@ export default function PipelinePage() {
 
     if (!ufAtual) return true;
 
-    // Verifica se existe exclusividade para outro cliente nesta cidade
     const bloqueado = exclusividades.some(ex => 
       ex.produto === nomeProduto && 
       ex.uf === ufAtual && 
@@ -154,7 +156,6 @@ export default function PipelinePage() {
     return !bloqueado; 
   });
 
-  // AUTO-COMPLETE DE VALORES DO PRODUTO
   useEffect(() => {
     if (!formData.produto) return;
     const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
@@ -170,11 +171,10 @@ export default function PipelinePage() {
     }
   }, [formData.produto, produtosApi]);
 
-  // CÁLCULO AUTOMÁTICO DO TOTAL
   useEffect(() => {
     const precoG = parseMoney(formData.valor_g_tabela);
     const kg = parseMoney(formData.kg_proposto);
-    const vTotal = (precoG * 1000 * kg).toFixed(2);
+    const vTotal = (precoG * 1000 * kg).toFixed(2); // Retorna string "10000.00"
 
     setFormData(prev => {
         if (prev.valor === vTotal) return prev; 
@@ -183,7 +183,7 @@ export default function PipelinePage() {
   }, [formData.valor_g_tabela, formData.kg_proposto]);
 
 
-  // --- BUSCA CNPJ COM BLOQUEIO ANTECIPADO (AQUI ESTÁ A LÓGICA DO ESCUDO) ---
+  // --- BUSCA CNPJ COM BLOQUEIO ANTECIPADO (MODAL VERMELHO) ---
   const buscarDadosCNPJ = async () => {
     const cnpjLimpo = formData.cnpj?.replace(/\D/g, '');
     if (cnpjLimpo?.length !== 14) return;
@@ -197,7 +197,6 @@ export default function PipelinePage() {
     });
 
     if (clienteNaBase) {
-        // A) BLOQUEADO ADMINISTRATIVAMENTE
         if (clienteNaBase.bloqueado) {
             setBlockModal({
                 open: true,
@@ -205,12 +204,11 @@ export default function PipelinePage() {
                 message: 'Este CNPJ possui restrições administrativas.',
                 motivo: clienteNaBase.motivoBloqueio || 'Entre em contato com o financeiro.'
             });
-            setFormData(prev => ({ ...prev, cnpj: '' })); // Limpa campo
+            setFormData(prev => ({ ...prev, cnpj: '' }));
             setLoadingCNPJ(false);
             return; 
         }
 
-        // B) CARTEIRA DEFINIDA
         if (clienteNaBase.vendedor && clienteNaBase.vendedor.trim() !== "") {
             setBlockModal({
                 open: true,
@@ -218,7 +216,7 @@ export default function PipelinePage() {
                 message: 'Este cliente já pertence à carteira de outro representante.',
                 motivo: `Carteira exclusiva de: ${clienteNaBase.vendedor}`
             });
-            setFormData(prev => ({ ...prev, cnpj: '' })); // Limpa campo
+            setFormData(prev => ({ ...prev, cnpj: '' }));
             setLoadingCNPJ(false);
             return; 
         }
@@ -237,16 +235,14 @@ export default function PipelinePage() {
         uf_exclusividade: data.uf || '',
         telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : prev.telefone
       }));
-    } catch (e) {
-       // Se falhar a API do Brasil, libera para digitar manual
-    }
+    } catch (e) { }
     
     setLoadingCNPJ(false);
   };
 
   const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // --- PDF PREMIUM ---
+  // --- PDF ---
   const cleanHtmlForPdf = (html: string) => {
     if (!html) return "";
     let text = html.replace(/<p>/g, "").replace(/<\/p>/g, "\n").replace(/<br\s*\/?>/gi, "\n");
@@ -274,7 +270,6 @@ export default function PipelinePage() {
 
     doc.setFillColor(cinzaSuave[0], cinzaSuave[1], cinzaSuave[2]);
     doc.rect(20, 45, 170, 25, 'F');
-    doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
     doc.setFont("helvetica", "bold"); doc.text("DADOS DO CLIENTE", 25, 52);
     doc.setFontSize(10); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
     doc.text(`Razão Social: ${item.nome_cliente || 'N/A'}`, 25, 58);
@@ -303,9 +298,10 @@ export default function PipelinePage() {
       ],
       theme: 'grid',
       headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
+      styles: { fontSize: 10, cellPadding: 2, textColor: textoCinza },
+      columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right', fontStyle: 'bold' } }
     });
 
-    // ... (Mantendo o resto do PDF igual ao seu código original)
     const paybackY = (doc as any).lastAutoTable.finalY + 8;
     const custoF = (vGramaReal * (Number(item.peso_formula_g) || 13.2));
     const precoV = (custoF * (Number(item.fator_lucro) || 5));
@@ -320,7 +316,9 @@ export default function PipelinePage() {
         [{ content: 'META DE VIABILIDADE', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: verdeMedio, fontSize: 12, halign: 'right' } }]
       ],
       theme: 'grid',
-      headStyles: { fillColor: verdeEscuro },
+      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
+      styles: { fontSize: 10, cellPadding: 2, textColor: textoCinza },
+      columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right' } }
     });
 
     let currentY = (doc as any).lastAutoTable.finalY + 8; 
@@ -331,9 +329,35 @@ export default function PipelinePage() {
             head: [['CONDIÇÕES GERAIS DA PROPOSTA']],
             body: [[notasTexto]],
             theme: 'grid',
-            headStyles: { fillColor: verdeEscuro },
+            headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'left' },
+            styles: { fontSize: 9, cellPadding: 3, textColor: textoCinza, valign: 'middle', overflow: 'linebreak' },
+            columnStyles: { 0: { cellWidth: 'auto' } }
         });
-    }
+        currentY = (doc as any).lastAutoTable.finalY + 8;
+    } else { currentY += 8; }
+
+    const certY = currentY; 
+    doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
+    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
+
+    const textY = certY + 5;
+    doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
+    const certText = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e promovemos sua comercialização com responsabilidade e ética.";
+    const splitCertText = doc.splitTextToSize(certText, 170);
+    doc.text(splitCertText, 105, textY, { align: 'center' });
+
+    const imgY = textY + (splitCertText.length * 4) + 3; 
+    try {
+      const imgW = 90; const imgH = 15; const xPos = (210 - imgW) / 2;
+      if (imgY + imgH < 280) { doc.addImage("/selo.jpg", "JPEG", xPos, imgY, imgW, imgH); } 
+      else { doc.addPage(); doc.addImage("/selo.jpg", "JPEG", xPos, 20, imgW, imgH); }
+    } catch (e) {}
+
+    const fY = 285; doc.setFontSize(7); doc.setTextColor(150);
+    doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
+    doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 20, fY + 4);
+    doc.text("Dionatan Hoegen - Representante Comercial", 190, fY, { align: 'right' });
+    doc.text(`WhatsApp: (44) 99102-7642 | @dionatan.magistral`, 190, fY + 4, { align: 'right' });
 
     doc.save(`Proposta Comercial - ${item.nome_cliente}.pdf`);
   };
@@ -343,22 +367,22 @@ export default function PipelinePage() {
     
     const { data: { user } } = await supabase.auth.getUser();
     
-    // VALIDANDO NOVAMENTE ANTES DE SALVAR (Segurança Dupla)
-    const cnpjInputLimpo = formData.cnpj.replace(/\D/g, ''); 
-    if (cnpjInputLimpo.length === 14) {
-        const clienteNaBase = baseClientesExterna.find(c => {
-            const cnpjBase = String(c.cnpj || '').replace(/\D/g, '');
-            return cnpjBase === cnpjInputLimpo;
-        });
-        if (clienteNaBase && (clienteNaBase.bloqueado || (clienteNaBase.vendedor && clienteNaBase.vendedor.trim() !== ""))) {
-             return alert("Ação bloqueada pelo sistema. CNPJ já possui restrições."); 
-        }
+    // --- CORREÇÃO: Tratamento do Valor para evitar erro de 1 Milhão ---
+    // O valor vem como "10000.00" do toFixed(2), que é uma string COM PONTO.
+    // Se usarmos replace(/\./g, ''), vira "1000000".
+    // Então, se já está no formato de ponto, apenas converte.
+    let valorFinal = 0;
+    if (String(formData.valor).includes('.')) {
+        valorFinal = parseFloat(String(formData.valor));
+    } else {
+        // Fallback para caso venha com vírgula (digitado manualmente)
+        valorFinal = parseFloat(String(formData.valor).replace('R$', '').replace(/\./g, '').replace(',', '.')) || 0;
     }
 
     const payload = {
       ...formData,
       user_id: user?.id,
-      valor: parseFloat(String(formData.valor).replace('R$', '').replace(/\./g, '').replace(',', '.')) || 0,
+      valor: valorFinal,
       valor_g_tabela: parseFloat(String(formData.valor_g_tabela).replace(',', '.')) || 0,
       kg_proposto: parseFloat(String(formData.kg_proposto)) || 0,
       kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
@@ -389,10 +413,13 @@ export default function PipelinePage() {
     }
   };
 
+  // --- CARD COM PISCA-PISCA E ATRASADO (RECUPERADO) ---
   const renderCard = (op: any) => {
     const hoje = getLocalData(); 
-    const isAtrasado = op.data_lembrete && op.data_lembrete < hoje;
-    const isHoje = op.data_lembrete === hoje; 
+    const dataLembrete = op.data_lembrete; 
+    
+    const isAtrasado = dataLembrete && dataLembrete < hoje;
+    const isHoje = dataLembrete === hoje; 
     
     let borderClass = 'border-slate-100 hover:border-blue-300';
     let bgClass = 'bg-white';
