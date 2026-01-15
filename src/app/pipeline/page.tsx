@@ -43,10 +43,9 @@ export default function PipelinePage() {
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
   
-  // --- CORREÇÃO DE FUSO HORÁRIO (DATA BRASIL) ---
+  // --- DATA CORRETA ---
   const getLocalData = () => {
     const now = new Date();
-    // Subtrai o offset do fuso para garantir a data local correta
     const offset = now.getTimezoneOffset() * 60000;
     return new Date(now.getTime() - offset).toISOString().split('T')[0];
   };
@@ -54,7 +53,7 @@ export default function PipelinePage() {
   const [formData, setFormData] = useState({
     cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '',
     aplicacao: '', valor: '', 
-    data_entrada: getLocalData(), // Inicia com a data correta
+    data_entrada: getLocalData(), 
     data_lembrete: '', 
     canal_contato: 'WhatsApp',
     observacoes: '',
@@ -304,8 +303,31 @@ export default function PipelinePage() {
 
   const handleSave = async () => {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
-    const { data: { user } } = await supabase.auth.getUser();
     
+    // --- LÓGICA DE BLOQUEIO DE CNPJ (NOVO) ---
+    const cnpjLimpo = formData.cnpj.replace(/\D/g, '');
+    const { data: { user } } = await supabase.auth.getUser();
+
+    // Só valida se tiver CNPJ preenchido
+    if (cnpjLimpo.length === 14) {
+        // Busca se existe algum registro com este CNPJ
+        const { data: clientesExistentes } = await supabase
+            .from('pipeline')
+            .select('user_id, nome_cliente')
+            .eq('cnpj', cnpjLimpo);
+
+        if (clientesExistentes && clientesExistentes.length > 0) {
+            // Verifica se algum desses registros pertence a OUTRO usuário
+            const donoDiferente = clientesExistentes.find(c => c.user_id !== user?.id);
+            
+            if (donoDiferente) {
+                alert(`🚫 AÇÃO BLOQUEADA!\n\nO CNPJ informado já pertence à carteira de outro representante.\nNão é permitido cadastrar oportunidades para clientes de terceiros.`);
+                return; // PARA A EXECUÇÃO AQUI
+            }
+        }
+    }
+    // --- FIM DA LÓGICA DE BLOQUEIO ---
+
     const payload = {
       ...formData,
       user_id: user?.id,
@@ -319,7 +341,7 @@ export default function PipelinePage() {
       data_entrada: formData.data_entrada || getLocalData(),
       canal_contato: formData.canal_contato,
       observacoes: formData.observacoes,
-      observacoes_proposta: formData.observacoes_proposta // Garante que a nota do PDF seja salva
+      observacoes_proposta: formData.observacoes_proposta 
     };
 
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
@@ -336,10 +358,9 @@ export default function PipelinePage() {
     }
   };
 
-  // --- CARD COM PISCA-PISCA CORRIGIDO ---
   const renderCard = (op: any) => {
-    const hoje = getLocalData(); // 2026-01-12
-    const dataLembrete = op.data_lembrete; // Ex: 2026-01-12
+    const hoje = getLocalData(); 
+    const dataLembrete = op.data_lembrete; 
     
     const isAtrasado = dataLembrete && dataLembrete < hoje;
     const isHoje = dataLembrete === hoje; 
