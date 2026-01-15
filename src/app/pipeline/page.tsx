@@ -45,7 +45,7 @@ export default function PipelinePage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<any>(null);
   
-  // MODAL DE BLOQUEIO (NOVO)
+  // MODAL DE BLOQUEIO
   const [blockModal, setBlockModal] = useState({ open: false, title: '', message: '', motivo: '' });
 
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
@@ -151,12 +151,53 @@ export default function PipelinePage() {
     });
   }, [formData.valor_g_tabela, formData.kg_proposto]);
 
+  // --- BUSCA CNPJ COM VALIDAÇÃO ANTECIPADA (AQUI ESTÁ A MUDANÇA) ---
   const buscarDadosCNPJ = async () => {
     const cnpjLimpo = formData.cnpj?.replace(/\D/g, '');
     if (cnpjLimpo?.length !== 14) return;
+    
     setLoadingCNPJ(true);
+
+    // 1. ANTES DE TUDO: Verificar na Base Oficial (Bloqueio Imediato)
+    const clienteNaBase = baseClientesExterna.find(c => {
+        const cnpjBase = String(c.cnpj || '').replace(/\D/g, '');
+        return cnpjBase === cnpjLimpo;
+    });
+
+    if (clienteNaBase) {
+        // A) BLOQUEADO ADMINISTRATIVAMENTE
+        if (clienteNaBase.bloqueado) {
+            setBlockModal({
+                open: true,
+                title: 'CLIENTE BLOQUEADO',
+                message: 'Este CNPJ possui restrições administrativas.',
+                motivo: clienteNaBase.motivoBloqueio || 'Entre em contato com o financeiro.'
+            });
+            // Limpa o campo para não deixar prosseguir visualmente
+            setFormData(prev => ({ ...prev, cnpj: '' }));
+            setLoadingCNPJ(false);
+            return; // PARA A EXECUÇÃO AQUI
+        }
+
+        // B) CARTEIRA DEFINIDA
+        if (clienteNaBase.vendedor && clienteNaBase.vendedor.trim() !== "") {
+            setBlockModal({
+                open: true,
+                title: 'CARTEIRA DEFINIDA',
+                message: 'Este cliente já pertence à carteira de outro representante.',
+                motivo: `Carteira exclusiva de: ${clienteNaBase.vendedor}`
+            });
+            setFormData(prev => ({ ...prev, cnpj: '' }));
+            setLoadingCNPJ(false);
+            return; // PARA A EXECUÇÃO AQUI
+        }
+    }
+
+    // 2. Se passou, busca na BrasilAPI
     try {
       const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`);
+      if (!res.ok) throw new Error("Erro CNPJ");
+      
       const data = await res.json();
       setFormData(prev => ({ 
         ...prev, 
@@ -165,7 +206,10 @@ export default function PipelinePage() {
         uf_exclusividade: data.uf || '',
         telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : prev.telefone
       }));
-    } catch (e) {}
+    } catch (e) {
+        // Se der erro na API do Brasil, não faz nada, deixa o usuário preencher manual
+    }
+    
     setLoadingCNPJ(false);
   };
 
@@ -185,7 +229,6 @@ export default function PipelinePage() {
     const doc = new jsPDF();
     const verdeEscuro: [number, number, number] = [20, 83, 45];
     const cinzaSuave: [number, number, number] = [243, 244, 246];
-    const textoCinza: [number, number, number] = [60, 60, 60];
 
     try { doc.addImage("/logo.jpg", "JPEG", 20, 12, 50, 20); } catch (e) {}
 
@@ -225,48 +268,25 @@ export default function PipelinePage() {
     doc.save(`Proposta_${item.nome_cliente}.pdf`);
   };
 
-  // --- LÓGICA DE SALVAMENTO BLINDADA ---
+  // --- SALVAMENTO (Mantivemos a validação aqui como "dupla segurança") ---
   const handleSave = async () => {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     
     const { data: { user } } = await supabase.auth.getUser();
-    
     const cnpjInputLimpo = formData.cnpj.replace(/\D/g, ''); 
 
     if (cnpjInputLimpo.length === 14) {
-        
-        // 1. Validação na Base Oficial (Google Sheets)
+        // Revalida rapidinho só pra garantir que ninguém burlou
         const clienteNaBase = baseClientesExterna.find(c => {
             const cnpjBase = String(c.cnpj || '').replace(/\D/g, '');
             return cnpjBase === cnpjInputLimpo;
         });
 
-        if (clienteNaBase) {
-            // A) BLOQUEADO ADMINISTRATIVAMENTE
-            if (clienteNaBase.bloqueado) {
-                setBlockModal({
-                    open: true,
-                    title: 'CLIENTE BLOQUEADO',
-                    message: 'Este CNPJ possui restrições administrativas e não pode ser cadastrado.',
-                    motivo: clienteNaBase.motivoBloqueio || 'Entre em contato com o financeiro.'
-                });
-                return; // PARA AQUI
-            }
-
-            // B) CARTEIRA DEFINIDA (BLOQUEIO DE CONFLITO)
-            if (clienteNaBase.vendedor && clienteNaBase.vendedor.trim() !== "") {
-                setBlockModal({
-                    open: true,
-                    title: 'CARTEIRA DEFINIDA',
-                    message: 'Este cliente já pertence à carteira de outro representante.',
-                    motivo: `Carteira exclusiva de: ${clienteNaBase.vendedor}`
-                });
-                return; // PARA AQUI (Não deixa continuar)
-            }
+        if (clienteNaBase && (clienteNaBase.bloqueado || (clienteNaBase.vendedor && clienteNaBase.vendedor.trim() !== ""))) {
+             return alert("Ação bloqueada pelo sistema."); // Fallback simples caso o modal falhe
         }
     }
 
-    // Se passou, salva no Supabase
     const payload = {
       ...formData,
       user_id: user?.id,
@@ -341,7 +361,6 @@ export default function PipelinePage() {
         ))}
       </div>
 
-      {/* MODAL PRINCIPAL DE EDIÇÃO */}
       {modalOpen && mounted && createPortal(
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-5xl rounded-[2.5rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95">
@@ -354,21 +373,19 @@ export default function PipelinePage() {
             </div>
 
             <div className="p-8 grid grid-cols-1 md:grid-cols-4 gap-5 overflow-y-auto bg-white flex-1">
-              {/* STATUS E IDENTIFICAÇÃO */}
               <div className="md:col-span-4 border-b pb-2 flex justify-between items-center">
                   <h3 className="text-[10px] font-black text-blue-600 uppercase">1. Identificação</h3>
                   <select className="bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold px-3 py-1 rounded-lg outline-none" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
                       {ESTAGIOS.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
                   </select>
               </div>
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">CNPJ</label><div className="flex gap-2"><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} onBlur={buscarDadosCNPJ}/><button onClick={buscarDadosCNPJ} className="bg-blue-50 text-blue-600 p-3 rounded-xl border"><Search size={20}/></button></div></div>
+              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">CNPJ</label><div className="flex gap-2"><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} onBlur={buscarDadosCNPJ} placeholder="Digite para validar..."/><button onClick={buscarDadosCNPJ} className="bg-blue-50 text-blue-600 p-3 rounded-xl border"><Search size={20}/></button></div></div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Razão Social</label><input className="w-full bg-slate-50 border rounded-xl p-3 font-bold uppercase" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Cidade</label><input className="w-full bg-slate-100 border rounded-xl p-3" value={formData.cidade_exclusividade} readOnly/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">UF</label><input className="w-full bg-slate-100 border rounded-xl p-3" value={formData.uf_exclusividade} readOnly/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Contato</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">WhatsApp</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})}/></div>
 
-              {/* PRODUTO E VALORES */}
               <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta</h3></div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Ativo</label><select className="w-full bg-slate-50 border rounded-xl p-3 font-bold disabled:opacity-50" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})} disabled={loadingProdutos}><option value="">Selecione...</option>{produtosApi.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}</select></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor G (Tabela)</label><input type="text" className="w-full bg-slate-50 border rounded-xl p-3 font-bold text-blue-700" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} /></div>
@@ -377,7 +394,6 @@ export default function PipelinePage() {
               
               <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100"><label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><FileText size={14}/> Notas (PDF)</label><div className="bg-white rounded-xl overflow-hidden border border-blue-100 text-slate-700"><ReactQuill theme="snow" value={formData.observacoes_proposta} onChange={(val) => setFormData({...formData, observacoes_proposta: val})} modules={{ toolbar: [['bold', 'italic', 'underline'], [{'list': 'ordered'}, {'list': 'bullet'}], ['clean']] }} /></div></div>
 
-              {/* GESTÃO */}
               <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-orange-600 uppercase">3. Gestão</h3></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Data Entrada</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_entrada} onChange={e => setFormData({...formData, data_entrada: e.target.value})} /></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Próximo Contato</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} /></div>
@@ -394,17 +410,14 @@ export default function PipelinePage() {
         </div>, document.body
       )}
 
-      {/* --- MODAL DE BLOQUEIO PERSONALIZADO (NOVO) --- */}
+      {/* --- MODAL DE BLOQUEIO --- */}
       {blockModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in duration-300">
            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-              {/* Header Vermelho */}
               <div className="bg-red-600 p-6 flex flex-col items-center justify-center text-white">
                  <ShieldAlert size={64} className="mb-4 opacity-90"/>
                  <h2 className="text-2xl font-black uppercase tracking-tight text-center">{blockModal.title}</h2>
               </div>
-              
-              {/* Corpo da Mensagem */}
               <div className="p-8 text-center">
                  <p className="text-slate-600 font-bold text-lg mb-2">{blockModal.message}</p>
                  <div className="bg-red-50 border border-red-100 rounded-xl p-4 mt-4">
@@ -412,8 +425,6 @@ export default function PipelinePage() {
                     <p className="text-red-800 font-bold text-sm">{blockModal.motivo}</p>
                  </div>
               </div>
-
-              {/* Botão Único */}
               <div className="p-4 bg-slate-50 border-t border-slate-100">
                  <button 
                     onClick={() => setBlockModal({ ...blockModal, open: false })}
@@ -425,7 +436,6 @@ export default function PipelinePage() {
            </div>
         </div>, document.body
       )}
-
     </div>
   );
 }
