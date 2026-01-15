@@ -43,7 +43,7 @@ export default function PipelinePage() {
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
   
-  // --- DATA CORRETA ---
+  // --- DATA CORRETA (FUSO BRASIL) ---
   const getLocalData = () => {
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60000;
@@ -304,34 +304,38 @@ export default function PipelinePage() {
   const handleSave = async () => {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     
-    // --- LÓGICA DE BLOQUEIO DE CNPJ (NOVO) ---
-    const cnpjLimpo = formData.cnpj.replace(/\D/g, '');
     const { data: { user } } = await supabase.auth.getUser();
+    
+    // --- LÓGICA DE BLOQUEIO CNPJ CORRIGIDA ---
+    const cnpjLimpo = formData.cnpj.replace(/\D/g, ''); // 07218...
+    // Cria formato XX.XXX.XXX/XXXX-XX manualmente
+    const cnpjFormatado = cnpjLimpo.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
 
-    // Só valida se tiver CNPJ preenchido
     if (cnpjLimpo.length === 14) {
-        // Busca se existe algum registro com este CNPJ
+        // BUSCA DUPLA: Procura pelo formato limpo OU formatado
         const { data: clientesExistentes } = await supabase
             .from('pipeline')
-            .select('user_id, nome_cliente')
-            .eq('cnpj', cnpjLimpo);
+            .select('id, user_id, nome_cliente, cnpj')
+            .or(`cnpj.eq.${cnpjLimpo},cnpj.eq.${cnpjFormatado}`);
 
         if (clientesExistentes && clientesExistentes.length > 0) {
-            // Verifica se algum desses registros pertence a OUTRO usuário
-            const donoDiferente = clientesExistentes.find(c => c.user_id !== user?.id);
+            // Se estou editando, ignoro meu próprio registro
+            const conflitosReais = clientesExistentes.filter(c => editingOp ? c.id !== editingOp.id : true);
+            
+            // Verifica se pertence a OUTRO usuário
+            const donoDiferente = conflitosReais.find(c => c.user_id !== user?.id);
             
             if (donoDiferente) {
-                alert(`🚫 AÇÃO BLOQUEADA!\n\nO CNPJ informado já pertence à carteira de outro representante.\nNão é permitido cadastrar oportunidades para clientes de terceiros.`);
-                return; // PARA A EXECUÇÃO AQUI
+                alert(`🚫 AÇÃO BLOQUEADA!\n\nO cliente ${donoDiferente.nome_cliente}\nCNPJ: ${donoDiferente.cnpj}\n\nJá pertence à carteira de outro representante.\nNão é permitido duplicar este cadastro.`);
+                return;
             }
         }
     }
-    // --- FIM DA LÓGICA DE BLOQUEIO ---
 
     const payload = {
       ...formData,
       user_id: user?.id,
-      valor: parseFloat(String(formData.valor).replace(',', '.')) || 0,
+      valor: parseFloat(String(formData.valor).replace('R$', '').replace(/\./g, '').replace(',', '.')) || 0,
       valor_g_tabela: parseFloat(String(formData.valor_g_tabela).replace(',', '.')) || 0,
       kg_proposto: parseFloat(String(formData.kg_proposto)) || 0,
       kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
