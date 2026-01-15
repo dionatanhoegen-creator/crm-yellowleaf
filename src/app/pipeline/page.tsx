@@ -36,21 +36,21 @@ export default function PipelinePage() {
   
   const [oportunidades, setOportunidades] = useState<any[]>([]);
   const [produtosApi, setProdutosApi] = useState<any[]>([]); 
-  const [baseClientesExterna, setBaseClientesExterna] = useState<any[]>([]); 
+  const [exclusividades, setExclusividades] = useState<any[]>([]); // VOLTOU
+  const [baseClientesExterna, setBaseClientesExterna] = useState<any[]>([]); // LISTA PARA BLOQUEIO
   
   const [loading, setLoading] = useState(true);
   const [loadingProdutos, setLoadingProdutos] = useState(true);
   
-  // MODAL PRINCIPAL
+  // MODAIS
   const [modalOpen, setModalOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<any>(null);
-  
-  // MODAL DE BLOQUEIO
-  const [blockModal, setBlockModal] = useState({ open: false, title: '', message: '', motivo: '' });
+  const [blockModal, setBlockModal] = useState({ open: false, title: '', message: '', motivo: '' }); // MODAL VERMELHO
 
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
   
+  // --- DATA CORRETA (FUSO BRASIL) ---
   const getLocalData = () => {
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60000;
@@ -81,7 +81,8 @@ export default function PipelinePage() {
     await Promise.all([
         carregarOportunidades(), 
         carregarProdutosDaAPI(), 
-        carregarBaseClientesOficial()
+        carregarExclusividades(), // VOLTOU
+        carregarBaseClientesOficial() // NOVO (BLOQUEIO)
     ]);
     setLoading(false);
   };
@@ -93,6 +94,7 @@ export default function PipelinePage() {
     return parseFloat(limpo) || 0;
   };
 
+  // 1. CARREGA LISTA DE CLIENTES (PARA O BLOQUEIO)
   const carregarBaseClientesOficial = async () => {
     try {
         const res = await fetch(`${API_CLIENTES_URL}?path=clientes`);
@@ -103,6 +105,7 @@ export default function PipelinePage() {
     } catch (e) { console.error("Erro base externa:", e); }
   };
 
+  // 2. CARREGA PRODUTOS
   const carregarProdutosDaAPI = async () => {
     setLoadingProdutos(true);
     try {
@@ -117,8 +120,14 @@ export default function PipelinePage() {
             }));
             setProdutosApi(produtosLimpos.sort((a: any, b: any) => a.ativo.localeCompare(b.ativo)));
         }
-    } catch (e) { console.error("Erro API Produtos:", e); }
+    } catch (e) { console.error("Erro API Planilha:", e); }
     setLoadingProdutos(false);
+  };
+
+  // 3. CARREGA EXCLUSIVIDADES (VOLTOU)
+  const carregarExclusividades = async () => {
+    const { data } = await supabase.from('exclusividades').select('*');
+    setExclusividades(data || []);
   };
 
   const carregarOportunidades = async () => {
@@ -126,6 +135,26 @@ export default function PipelinePage() {
     setOportunidades(data || []);
   };
 
+  // --- FILTRO DE PRODUTOS DISPONÍVEIS (LÓGICA RESTAURADA) ---
+  const produtosDisponiveis = produtosApi.filter(prod => {
+    const nomeProduto = prod.ativo;
+    const ufAtual = (formData.uf_exclusividade || '').toUpperCase().trim();
+    const cidadeAtual = (formData.cidade_exclusividade || '').toUpperCase().trim();
+
+    if (!ufAtual) return true;
+
+    // Verifica se existe exclusividade para outro cliente nesta cidade
+    const bloqueado = exclusividades.some(ex => 
+      ex.produto === nomeProduto && 
+      ex.uf === ufAtual && 
+      (ex.cidade === cidadeAtual || ex.cidade === 'TODAS') &&
+      ex.nome_cliente !== formData.nome_cliente
+    );
+
+    return !bloqueado; 
+  });
+
+  // AUTO-COMPLETE DE VALORES DO PRODUTO
   useEffect(() => {
     if (!formData.produto) return;
     const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
@@ -141,24 +170,27 @@ export default function PipelinePage() {
     }
   }, [formData.produto, produtosApi]);
 
+  // CÁLCULO AUTOMÁTICO DO TOTAL
   useEffect(() => {
     const precoG = parseMoney(formData.valor_g_tabela);
     const kg = parseMoney(formData.kg_proposto);
     const vTotal = (precoG * 1000 * kg).toFixed(2);
+
     setFormData(prev => {
         if (prev.valor === vTotal) return prev; 
         return { ...prev, valor: vTotal };
     });
   }, [formData.valor_g_tabela, formData.kg_proposto]);
 
-  // --- BUSCA CNPJ COM VALIDAÇÃO ANTECIPADA (AQUI ESTÁ A MUDANÇA) ---
+
+  // --- BUSCA CNPJ COM BLOQUEIO ANTECIPADO (AQUI ESTÁ A LÓGICA DO ESCUDO) ---
   const buscarDadosCNPJ = async () => {
     const cnpjLimpo = formData.cnpj?.replace(/\D/g, '');
     if (cnpjLimpo?.length !== 14) return;
     
     setLoadingCNPJ(true);
 
-    // 1. ANTES DE TUDO: Verificar na Base Oficial (Bloqueio Imediato)
+    // 1. CHECAGEM DE BLOQUEIO (NA BASE EXTERNA)
     const clienteNaBase = baseClientesExterna.find(c => {
         const cnpjBase = String(c.cnpj || '').replace(/\D/g, '');
         return cnpjBase === cnpjLimpo;
@@ -173,10 +205,9 @@ export default function PipelinePage() {
                 message: 'Este CNPJ possui restrições administrativas.',
                 motivo: clienteNaBase.motivoBloqueio || 'Entre em contato com o financeiro.'
             });
-            // Limpa o campo para não deixar prosseguir visualmente
-            setFormData(prev => ({ ...prev, cnpj: '' }));
+            setFormData(prev => ({ ...prev, cnpj: '' })); // Limpa campo
             setLoadingCNPJ(false);
-            return; // PARA A EXECUÇÃO AQUI
+            return; 
         }
 
         // B) CARTEIRA DEFINIDA
@@ -187,13 +218,13 @@ export default function PipelinePage() {
                 message: 'Este cliente já pertence à carteira de outro representante.',
                 motivo: `Carteira exclusiva de: ${clienteNaBase.vendedor}`
             });
-            setFormData(prev => ({ ...prev, cnpj: '' }));
+            setFormData(prev => ({ ...prev, cnpj: '' })); // Limpa campo
             setLoadingCNPJ(false);
-            return; // PARA A EXECUÇÃO AQUI
+            return; 
         }
     }
 
-    // 2. Se passou, busca na BrasilAPI
+    // 2. SE PASSOU, BUSCA NA BRASIL API
     try {
       const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`);
       if (!res.ok) throw new Error("Erro CNPJ");
@@ -207,7 +238,7 @@ export default function PipelinePage() {
         telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : prev.telefone
       }));
     } catch (e) {
-        // Se der erro na API do Brasil, não faz nada, deixa o usuário preencher manual
+       // Se falhar a API do Brasil, libera para digitar manual
     }
     
     setLoadingCNPJ(false);
@@ -215,7 +246,7 @@ export default function PipelinePage() {
 
   const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // --- FUNÇÕES DE PDF ---
+  // --- PDF PREMIUM ---
   const cleanHtmlForPdf = (html: string) => {
     if (!html) return "";
     let text = html.replace(/<p>/g, "").replace(/<\/p>/g, "\n").replace(/<br\s*\/?>/gi, "\n");
@@ -229,6 +260,7 @@ export default function PipelinePage() {
     const doc = new jsPDF();
     const verdeEscuro: [number, number, number] = [20, 83, 45];
     const cinzaSuave: [number, number, number] = [243, 244, 246];
+    const textoCinza: [number, number, number] = [60, 60, 60];
 
     try { doc.addImage("/logo.jpg", "JPEG", 20, 12, 50, 20); } catch (e) {}
 
@@ -242,14 +274,19 @@ export default function PipelinePage() {
 
     doc.setFillColor(cinzaSuave[0], cinzaSuave[1], cinzaSuave[2]);
     doc.rect(20, 45, 170, 25, 'F');
+    doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
     doc.setFont("helvetica", "bold"); doc.text("DADOS DO CLIENTE", 25, 52);
-    doc.setFontSize(10); doc.setFont("helvetica", "normal");
+    doc.setFontSize(10); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
     doc.text(`Razão Social: ${item.nome_cliente || 'N/A'}`, 25, 58);
     doc.text(`Contato: ${item.contato || 'N/A'}  |  Tel: ${item.telefone || 'N/A'}`, 25, 63);
+    doc.text(`Cidade/UF: ${item.cidade_exclusividade || 'N/A'} / ${item.uf_exclusividade || ''}`, 25, 68);
 
-    const valorGExibicao = parseMoney(item.valor_g_tabela);
+    doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
+    doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 20, 83);
     const totalKG = Number(item.kg_proposto) + Number(item.kg_bonificado);
     const vGramaReal = (Number(item.valor) / (totalKG * 1000)) || 0;
+    const vParc = (Number(item.valor) / Number(item.parcelas)) || 0;
+    const valorGExibicao = parseMoney(item.valor_g_tabela);
 
     autoTable(doc, {
       startY: 88, margin: { left: 20, right: 20 },
@@ -260,30 +297,61 @@ export default function PipelinePage() {
         ['Quantidade da proposta (kg)', `${item.kg_proposto} kg`],
         ['Quantidade bonificada (kg)', `${item.kg_bonificado} kg`],
         ['Investimento Total (R$)', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold' } }],
-        ['Preço Real do grama (g)', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold' } }],
+        ['Preço do grama c/ bonificação (g)', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold', textColor: textoCinza } }],
+        ['Condição de Pagamento ', `${item.parcelas} parcelas de ${formatCurrency(vParc)}`],
+        ['Vencimento 1ª Parcela', `${item.dias_primeira_parcela} dias`]
+      ],
+      theme: 'grid',
+      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
+    });
+
+    // ... (Mantendo o resto do PDF igual ao seu código original)
+    const paybackY = (doc as any).lastAutoTable.finalY + 8;
+    const custoF = (vGramaReal * (Number(item.peso_formula_g) || 13.2));
+    const precoV = (custoF * (Number(item.fator_lucro) || 5));
+    const formulasDia = vParc > 0 ? ((vParc / precoV) / 22) : 0;
+
+    autoTable(doc, {
+      startY: paybackY, margin: { left: 20, right: 20 },
+      head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
+      body: [
+        ['Custo por fórmula (R$) (Manipulado)', formatCurrency(custoF)],
+        ['Sugestão de Venda (R$) (Fator 5)', formatCurrency(precoV)],
+        [{ content: 'META DE VIABILIDADE', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: verdeMedio, fontSize: 12, halign: 'right' } }]
       ],
       theme: 'grid',
       headStyles: { fillColor: verdeEscuro },
     });
-    doc.save(`Proposta_${item.nome_cliente}.pdf`);
+
+    let currentY = (doc as any).lastAutoTable.finalY + 8; 
+    if (item.observacoes_proposta) {
+        const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
+        autoTable(doc, {
+            startY: currentY, margin: { left: 20, right: 20 },
+            head: [['CONDIÇÕES GERAIS DA PROPOSTA']],
+            body: [[notasTexto]],
+            theme: 'grid',
+            headStyles: { fillColor: verdeEscuro },
+        });
+    }
+
+    doc.save(`Proposta Comercial - ${item.nome_cliente}.pdf`);
   };
 
-  // --- SALVAMENTO (Mantivemos a validação aqui como "dupla segurança") ---
   const handleSave = async () => {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     
     const { data: { user } } = await supabase.auth.getUser();
+    
+    // VALIDANDO NOVAMENTE ANTES DE SALVAR (Segurança Dupla)
     const cnpjInputLimpo = formData.cnpj.replace(/\D/g, ''); 
-
     if (cnpjInputLimpo.length === 14) {
-        // Revalida rapidinho só pra garantir que ninguém burlou
         const clienteNaBase = baseClientesExterna.find(c => {
             const cnpjBase = String(c.cnpj || '').replace(/\D/g, '');
             return cnpjBase === cnpjInputLimpo;
         });
-
         if (clienteNaBase && (clienteNaBase.bloqueado || (clienteNaBase.vendedor && clienteNaBase.vendedor.trim() !== ""))) {
-             return alert("Ação bloqueada pelo sistema."); // Fallback simples caso o modal falhe
+             return alert("Ação bloqueada pelo sistema. CNPJ já possui restrições."); 
         }
     }
 
@@ -298,6 +366,9 @@ export default function PipelinePage() {
       dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45,
       data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null,
       data_entrada: formData.data_entrada || getLocalData(),
+      canal_contato: formData.canal_contato,
+      observacoes: formData.observacoes,
+      observacoes_proposta: formData.observacoes_proposta 
     };
 
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
@@ -312,7 +383,7 @@ export default function PipelinePage() {
   };
 
   const handleDelete = async () => {
-    if (confirm('Deseja excluir este registro?')) {
+    if (confirm('Deseja excluir este registro permanentemente?')) {
         const { error } = await supabase.from('pipeline').delete().eq('id', editingOp.id);
         if (!error) { carregarOportunidades(); setModalOpen(false); } 
     }
@@ -324,19 +395,31 @@ export default function PipelinePage() {
     const isHoje = op.data_lembrete === hoje; 
     
     let borderClass = 'border-slate-100 hover:border-blue-300';
-    if (isAtrasado) borderClass = 'border-red-200 bg-red-50/30';
-    else if (isHoje) borderClass = 'border-red-500 border-2 animate-pulse';
+    let bgClass = 'bg-white';
+    let textClass = 'text-slate-400';
+    let label = 'Ligar: ';
+
+    if (isAtrasado) {
+        borderClass = 'border-red-200';
+        bgClass = 'bg-red-50/30';
+        textClass = 'text-red-500';
+        label = 'Atrasado: ';
+    } else if (isHoje) {
+        borderClass = 'border-red-500 border-2 animate-pulse'; 
+        textClass = 'text-red-600 font-bold';
+        label = 'HOJE: ';
+    }
     
     return (
-        <div key={op.id} onClick={() => { setEditingOp(op); setFormData(op); setModalOpen(true); }} className={`p-4 rounded-xl border cursor-pointer shadow-sm transition hover:-translate-y-1 bg-white ${borderClass}`}>
+        <div key={op.id} onClick={() => { setEditingOp(op); setFormData(op); setModalOpen(true); }} className={`p-4 rounded-xl border cursor-pointer shadow-sm transition hover:-translate-y-1 ${bgClass} ${borderClass}`}>
             <h4 className="font-bold text-slate-700 text-sm uppercase truncate">{op.nome_cliente}</h4>
             <div className="flex justify-between items-center mt-2">
                 <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg font-bold truncate max-w-[50%]">{op.produto}</span>
                 <span className="text-xs font-black text-slate-600">{formatCurrency(op.valor)}</span>
             </div>
             {op.data_lembrete && (
-                <div className={`mt-3 pt-2 border-t flex items-center gap-1 text-[10px] font-bold ${isAtrasado || isHoje ? 'text-red-600' : 'text-slate-400'}`}>
-                    <Clock size={10} /> {isAtrasado ? 'Atrasado: ' : isHoje ? 'HOJE: ' : 'Ligar: '} {op.data_lembrete.split('-').reverse().join('/')} 
+                <div className={`mt-3 pt-2 border-t flex items-center gap-1 text-[10px] font-bold ${textClass}`}>
+                    <Clock size={10} /> {label} {op.data_lembrete.split('-').reverse().join('/')} 
                 </div>
             )}
         </div>
@@ -374,7 +457,7 @@ export default function PipelinePage() {
 
             <div className="p-8 grid grid-cols-1 md:grid-cols-4 gap-5 overflow-y-auto bg-white flex-1">
               <div className="md:col-span-4 border-b pb-2 flex justify-between items-center">
-                  <h3 className="text-[10px] font-black text-blue-600 uppercase">1. Identificação</h3>
+                  <h3 className="text-[10px] font-black text-blue-600 uppercase">1. Identificação e Status</h3>
                   <select className="bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold px-3 py-1 rounded-lg outline-none" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
                       {ESTAGIOS.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
                   </select>
@@ -386,19 +469,22 @@ export default function PipelinePage() {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Contato</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">WhatsApp</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})}/></div>
 
-              <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta</h3></div>
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Ativo</label><select className="w-full bg-slate-50 border rounded-xl p-3 font-bold disabled:opacity-50" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})} disabled={loadingProdutos}><option value="">Selecione...</option>{produtosApi.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}</select></div>
+              <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta e Payback</h3></div>
+              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase flex justify-between">Ativo {loadingProdutos ? '(Carregando...)' : ''}</label><select className="w-full bg-slate-50 border rounded-xl p-3 font-bold disabled:opacity-50" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})} disabled={loadingProdutos}><option value="">Selecione...</option>{produtosDisponiveis.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}</select></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor G (Tabela)</label><input type="text" className="w-full bg-slate-50 border rounded-xl p-3 font-bold text-blue-700" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} /></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Proposto</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Total R$</label><input className="w-full bg-slate-100 border text-slate-600 rounded-xl p-3 font-bold" value={formData.valor} readOnly /></div>
-              
-              <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100"><label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><FileText size={14}/> Notas (PDF)</label><div className="bg-white rounded-xl overflow-hidden border border-blue-100 text-slate-700"><ReactQuill theme="snow" value={formData.observacoes_proposta} onChange={(val) => setFormData({...formData, observacoes_proposta: val})} modules={{ toolbar: [['bold', 'italic', 'underline'], [{'list': 'ordered'}, {'list': 'bullet'}], ['clean']] }} /></div></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Bônus</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Parcelas</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª Parc</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
 
-              <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-orange-600 uppercase">3. Gestão</h3></div>
+              <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100"><label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><FileText size={14}/> Notas e Condições (Para o PDF)</label><div className="bg-white rounded-xl overflow-hidden border border-blue-100 text-slate-700"><ReactQuill theme="snow" value={formData.observacoes_proposta} onChange={(val) => setFormData({...formData, observacoes_proposta: val})} modules={{ toolbar: [['bold', 'italic', 'underline'], [{'list': 'ordered'}, {'list': 'bullet'}], ['clean']] }} /></div></div>
+
+              <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-orange-600 uppercase">3. Gestão e Acompanhamento (Interno)</h3></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Data Entrada</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_entrada} onChange={e => setFormData({...formData, data_entrada: e.target.value})} /></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Próximo Contato</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} /></div>
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Canal</label><select className="w-full bg-slate-50 border rounded-xl p-3" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-              <div className="md:col-span-4"><label className="text-[10px] font-bold text-slate-400 uppercase flex gap-2"><MessageSquare size={14}/> Obs. Interna</label><textarea className="w-full bg-slate-50 border rounded-xl p-3 h-20 resize-none" value={formData.observacoes} onChange={e => setFormData({...formData, observacoes: e.target.value})} /></div>
+              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Canal de Contato</label><select className="w-full bg-slate-50 border rounded-xl p-3" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+              <div className="md:col-span-4"><label className="text-[10px] font-bold text-slate-400 uppercase flex gap-2"><MessageSquare size={14}/> Anotações Internas (Não sai no PDF)</label><textarea className="w-full bg-slate-50 border rounded-xl p-3 h-20 resize-none" placeholder="Ex: Cliente pediu desconto, ligar novamente semana que vem..." value={formData.observacoes} onChange={e => setFormData({...formData, observacoes: e.target.value})} /></div>
             </div>
 
             <div className="p-6 bg-slate-50 border-t flex justify-end items-center shrink-0 gap-2">
@@ -410,7 +496,7 @@ export default function PipelinePage() {
         </div>, document.body
       )}
 
-      {/* --- MODAL DE BLOQUEIO --- */}
+      {/* --- MODAL DE BLOQUEIO (CENTRO) --- */}
       {blockModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in duration-300">
            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
