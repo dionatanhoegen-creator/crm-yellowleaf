@@ -6,7 +6,7 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -18,7 +18,6 @@ import 'react-quill-new/dist/quill.snow.css';
 
 // URLs DAS APIs
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
-// Mesma URL da aba Clientes para validar carteira
 const API_CLIENTES_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
 const ESTAGIOS = [
@@ -37,12 +36,18 @@ export default function PipelinePage() {
   
   const [oportunidades, setOportunidades] = useState<any[]>([]);
   const [produtosApi, setProdutosApi] = useState<any[]>([]); 
-  const [baseClientesExterna, setBaseClientesExterna] = useState<any[]>([]); // Lista oficial de clientes
+  const [baseClientesExterna, setBaseClientesExterna] = useState<any[]>([]); 
   
   const [loading, setLoading] = useState(true);
   const [loadingProdutos, setLoadingProdutos] = useState(true);
+  
+  // MODAL PRINCIPAL
   const [modalOpen, setModalOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<any>(null);
+  
+  // MODAL DE BLOQUEIO (NOVO)
+  const [blockModal, setBlockModal] = useState({ open: false, title: '', message: '', motivo: '' });
+
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
   
@@ -76,7 +81,7 @@ export default function PipelinePage() {
     await Promise.all([
         carregarOportunidades(), 
         carregarProdutosDaAPI(), 
-        carregarBaseClientesOficial() // Nova função crítica
+        carregarBaseClientesOficial()
     ]);
     setLoading(false);
   };
@@ -88,7 +93,6 @@ export default function PipelinePage() {
     return parseFloat(limpo) || 0;
   };
 
-  // --- CARREGA DADOS OFICIAIS DA PLANILHA GOOGLE ---
   const carregarBaseClientesOficial = async () => {
     try {
         const res = await fetch(`${API_CLIENTES_URL}?path=clientes`);
@@ -96,9 +100,7 @@ export default function PipelinePage() {
         if (json.success && Array.isArray(json.data)) {
             setBaseClientesExterna(json.data);
         }
-    } catch (e) {
-        console.error("Erro ao carregar base de clientes externa:", e);
-    }
+    } catch (e) { console.error("Erro base externa:", e); }
   };
 
   const carregarProdutosDaAPI = async () => {
@@ -169,7 +171,7 @@ export default function PipelinePage() {
 
   const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // --- FUNÇÕES DE PDF (PREMIUM) ---
+  // --- FUNÇÕES DE PDF ---
   const cleanHtmlForPdf = (html: string) => {
     if (!html) return "";
     let text = html.replace(/<p>/g, "").replace(/<\/p>/g, "\n").replace(/<br\s*\/?>/gi, "\n");
@@ -220,42 +222,46 @@ export default function PipelinePage() {
       theme: 'grid',
       headStyles: { fillColor: verdeEscuro },
     });
-
-    // ... (restante do código do PDF simplificado para caber, mantendo o original) ...
     doc.save(`Proposta_${item.nome_cliente}.pdf`);
   };
 
-  // --- LÓGICA DE SALVAMENTO COM VALIDAÇÃO EXTERNA ---
+  // --- LÓGICA DE SALVAMENTO BLINDADA ---
   const handleSave = async () => {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     
     const { data: { user } } = await supabase.auth.getUser();
     
-    // Limpa CNPJ para comparação
     const cnpjInputLimpo = formData.cnpj.replace(/\D/g, ''); 
 
-    // Validação APENAS se tiver CNPJ preenchido
     if (cnpjInputLimpo.length === 14) {
         
-        // 1. Procura na Base Oficial (Google Sheets)
+        // 1. Validação na Base Oficial (Google Sheets)
         const clienteNaBase = baseClientesExterna.find(c => {
             const cnpjBase = String(c.cnpj || '').replace(/\D/g, '');
             return cnpjBase === cnpjInputLimpo;
         });
 
         if (clienteNaBase) {
-            // A) Verifica se está BLOQUEADO
+            // A) BLOQUEADO ADMINISTRATIVAMENTE
             if (clienteNaBase.bloqueado) {
-                alert(`🛑 CLIENTE BLOQUEADO NA BASE!\n\nMotivo: ${clienteNaBase.motivoBloqueio || 'Restrição administrativa'}\n\nNão é possível abrir oportunidade.`);
-                return;
+                setBlockModal({
+                    open: true,
+                    title: 'CLIENTE BLOQUEADO',
+                    message: 'Este CNPJ possui restrições administrativas e não pode ser cadastrado.',
+                    motivo: clienteNaBase.motivoBloqueio || 'Entre em contato com o financeiro.'
+                });
+                return; // PARA AQUI
             }
 
-            // B) Verifica se tem Vendedor (Dono da Carteira)
-            // Lógica: Se tem vendedor cadastrado e não sou eu (assumindo que o sistema saberia quem sou eu, 
-            // mas como o nome no Google Sheets pode ser "João" e aqui é UUID, vamos alertar sempre que houver vendedor).
+            // B) CARTEIRA DEFINIDA (BLOQUEIO DE CONFLITO)
             if (clienteNaBase.vendedor && clienteNaBase.vendedor.trim() !== "") {
-                const confirmar = confirm(`⚠️ ATENÇÃO: CARTEIRA DEFINIDA\n\nEste cliente consta na base oficial como pertencente a:\n👤 ${clienteNaBase.vendedor}\n\nSe você NÃO for este vendedor, não prossiga.\nDeseja continuar mesmo assim?`);
-                if (!confirmar) return;
+                setBlockModal({
+                    open: true,
+                    title: 'CARTEIRA DEFINIDA',
+                    message: 'Este cliente já pertence à carteira de outro representante.',
+                    motivo: `Carteira exclusiva de: ${clienteNaBase.vendedor}`
+                });
+                return; // PARA AQUI (Não deixa continuar)
             }
         }
     }
@@ -292,7 +298,6 @@ export default function PipelinePage() {
     }
   };
 
-  // --- RENDERIZAR CARD ---
   const renderCard = (op: any) => {
     const hoje = getLocalData(); 
     const isAtrasado = op.data_lembrete && op.data_lembrete < hoje;
@@ -336,6 +341,7 @@ export default function PipelinePage() {
         ))}
       </div>
 
+      {/* MODAL PRINCIPAL DE EDIÇÃO */}
       {modalOpen && mounted && createPortal(
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-5xl rounded-[2.5rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95">
@@ -387,6 +393,39 @@ export default function PipelinePage() {
           </div>
         </div>, document.body
       )}
+
+      {/* --- MODAL DE BLOQUEIO PERSONALIZADO (NOVO) --- */}
+      {blockModal.open && mounted && createPortal(
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in duration-300">
+           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+              {/* Header Vermelho */}
+              <div className="bg-red-600 p-6 flex flex-col items-center justify-center text-white">
+                 <ShieldAlert size={64} className="mb-4 opacity-90"/>
+                 <h2 className="text-2xl font-black uppercase tracking-tight text-center">{blockModal.title}</h2>
+              </div>
+              
+              {/* Corpo da Mensagem */}
+              <div className="p-8 text-center">
+                 <p className="text-slate-600 font-bold text-lg mb-2">{blockModal.message}</p>
+                 <div className="bg-red-50 border border-red-100 rounded-xl p-4 mt-4">
+                    <p className="text-xs text-red-500 font-bold uppercase tracking-wider mb-1">Motivo do Bloqueio</p>
+                    <p className="text-red-800 font-bold text-sm">{blockModal.motivo}</p>
+                 </div>
+              </div>
+
+              {/* Botão Único */}
+              <div className="p-4 bg-slate-50 border-t border-slate-100">
+                 <button 
+                    onClick={() => setBlockModal({ ...blockModal, open: false })}
+                    className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-xl transition transform active:scale-[0.98]"
+                 >
+                    ENTENDIDO, FECHAR AVISO
+                 </button>
+              </div>
+           </div>
+        </div>, document.body
+      )}
+
     </div>
   );
 }
