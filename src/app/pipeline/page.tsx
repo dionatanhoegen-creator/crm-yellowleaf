@@ -1,477 +1,329 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom'; 
 import { 
-  Plus, Search, Calendar, User, Phone, DollarSign, 
-  X, Tag, Beaker, MessageCircle, AlertCircle, 
-  CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare
+  BarChart3, TrendingUp, DollarSign, Users, 
+  Calendar, CheckCircle2, XCircle, FileText, PieChart, Download, Filter
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-import dynamic from 'next/dynamic';
-const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
-import 'react-quill-new/dist/quill.snow.css';
+// --- UTILITÁRIOS ---
+const formatCurrency = (val: number) => val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const formatDate = (dateStr: string) => {
+  if (!dateStr) return '-';
+  // Pequeno ajuste para garantir que a data não volte 1 dia na visualização
+  const date = new Date(dateStr);
+  date.setMinutes(date.getMinutes() + date.getTimezoneOffset());
+  return date.toLocaleDateString('pt-BR');
+};
 
-const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
+// Mapeamento de Status para nomes bonitos no relatório
+const LABELS_STATUS: Record<string, string> = {
+  'prospeccao': 'Prospecção',
+  'qualificacao': 'Qualificação',
+  'apresentacao': 'Apresentação',
+  'negociacao': 'Negociação',
+  'fechado': 'Venda Fechada',
+  'perdido': 'Perdido'
+};
 
-const ESTAGIOS = [
-  { id: 'prospeccao', label: 'Prospecção', color: 'border-blue-500', text: 'text-blue-700' },
-  { id: 'qualificacao', label: 'Qualificação', color: 'border-purple-500', text: 'text-purple-700' },
-  { id: 'apresentacao', label: 'Apresentação', color: 'border-pink-500', text: 'text-pink-700' },
-  { id: 'negociacao', label: 'Negociação', color: 'border-yellow-500', text: 'text-yellow-700' },
-  { id: 'fechado', label: 'Fechado', color: 'border-green-500', text: 'text-green-700' },
-  { id: 'perdido', label: 'Perdido', color: 'border-red-500', text: 'text-red-700' },
-];
-
-const CANAIS_CONTATO = ['WhatsApp', 'Ligação', 'E-mail', 'Visita Presencial', 'Instagram'];
-
-export default function PipelinePage() {
+export default function RelatoriosPage() {
   const supabase = createClientComponentClient();
-  
-  const [oportunidades, setOportunidades] = useState<any[]>([]);
-  const [produtosApi, setProdutosApi] = useState<any[]>([]); 
-  const [exclusividades, setExclusividades] = useState<any[]>([]); 
-  
   const [loading, setLoading] = useState(true);
-  const [loadingProdutos, setLoadingProdutos] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingOp, setEditingOp] = useState<any>(null);
-  const [loadingCNPJ, setLoadingCNPJ] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  
-  // --- DATA CORRETA (FUSO BRASIL) ---
-  const getLocalData = () => {
-    const now = new Date();
-    const offset = now.getTimezoneOffset() * 60000;
-    return new Date(now.getTime() - offset).toISOString().split('T')[0];
-  };
+  const [listaCompleta, setListaCompleta] = useState<any[]>([]);
+  const [filtroStatus, setFiltroStatus] = useState('abertos'); // abertos | todos | fechados
 
-  const [formData, setFormData] = useState({
-    cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '',
-    aplicacao: '', valor: '', 
-    data_entrada: getLocalData(), 
-    data_lembrete: '', 
-    canal_contato: 'WhatsApp',
-    observacoes: '',
-    observacoes_proposta: '', 
-    status: 'prospeccao',
-    kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45',
-    peso_formula_g: '13.2', fator_lucro: '5', cidade_exclusividade: '', uf_exclusividade: '', 
-    valor_g_tabela: '0'
+  // Métricas
+  const [metrics, setMetrics] = useState({
+    totalOportunidades: 0,
+    valorTotalPipeline: 0,
+    valorFechado: 0,
+    qtdFechado: 0,
+    taxaConversao: 0,
+    ticketMedio: 0
   });
 
-  useEffect(() => { 
-    setMounted(true); 
-    inicializarDados();
+  const [funil, setFunil] = useState<Record<string, { qtd: number, valor: number }>>({});
+
+  useEffect(() => {
+    carregarDados();
   }, []);
 
-  const inicializarDados = async () => {
+  const carregarDados = async () => {
     setLoading(true);
-    await Promise.all([carregarOportunidades(), carregarProdutosDaAPI(), carregarExclusividades()]);
+    // Busca tudo ordenado por data mais recente
+    const { data: pipeline } = await supabase.from('pipeline').select('*').order('created_at', { ascending: false });
+
+    if (pipeline) {
+      setListaCompleta(pipeline);
+
+      // 1. Cálculos de KPI
+      const totalOps = pipeline.length;
+      const totalValor = pipeline.reduce((acc, item) => acc + (Number(item.valor) || 0), 0);
+      
+      const fechados = pipeline.filter(i => i.status === 'fechado');
+      const qtdFechado = fechados.length;
+      const valorFechado = fechados.reduce((acc, item) => acc + (Number(item.valor) || 0), 0);
+
+      // 2. Cálculo do Funil
+      const novoFunil: any = {
+        'prospeccao': { qtd: 0, valor: 0, label: 'Prospecção', color: 'bg-blue-500' },
+        'qualificacao': { qtd: 0, valor: 0, label: 'Qualificação', color: 'bg-purple-500' },
+        'apresentacao': { qtd: 0, valor: 0, label: 'Apresentação', color: 'bg-pink-500' },
+        'negociacao': { qtd: 0, valor: 0, label: 'Negociação', color: 'bg-yellow-500' },
+        'fechado': { qtd: 0, valor: 0, label: 'Fechado', color: 'bg-green-500' },
+        'perdido': { qtd: 0, valor: 0, label: 'Perdido', color: 'bg-red-500' },
+      };
+
+      pipeline.forEach(item => {
+        if (novoFunil[item.status]) {
+          novoFunil[item.status].qtd += 1;
+          novoFunil[item.status].valor += (Number(item.valor) || 0);
+        }
+      });
+
+      setMetrics({
+        totalOportunidades: totalOps,
+        valorTotalPipeline: totalValor,
+        valorFechado: valorFechado,
+        qtdFechado: qtdFechado,
+        taxaConversao: totalOps > 0 ? (qtdFechado / totalOps) * 100 : 0,
+        ticketMedio: qtdFechado > 0 ? valorFechado / qtdFechado : 0
+      });
+
+      setFunil(novoFunil);
+    }
     setLoading(false);
   };
 
-  const parseMoney = (valor: any) => {
-    if (typeof valor === 'number') return valor;
-    if (!valor) return 0;
-    const limpo = String(valor).replace('R$', '').replace(/\s/g, '').replace(',', '.');
-    return parseFloat(limpo) || 0;
-  };
-
-  const carregarProdutosDaAPI = async () => {
-    setLoadingProdutos(true);
-    try {
-        const res = await fetch(`${API_PRODUTOS_URL}?path=produtos`);
-        const json = await res.json();
-        
-        if (json.success && Array.isArray(json.data)) {
-            const produtosLimpos = json.data.map((p: any) => ({
-                ativo: p.ativo ? p.ativo.trim() : 'Sem Nome',
-                preco_grama: parseMoney(p.preco_grama), 
-                peso_formula: parseMoney(p.peso_formula) || 13.2
-            }));
-            setProdutosApi(produtosLimpos.sort((a: any, b: any) => a.ativo.localeCompare(b.ativo)));
-        }
-    } catch (e) { console.error("Erro API Planilha:", e); }
-    setLoadingProdutos(false);
-  };
-
-  const carregarExclusividades = async () => {
-    const { data } = await supabase.from('exclusividades').select('*');
-    setExclusividades(data || []);
-  };
-
-  const carregarOportunidades = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data } = await supabase.from('pipeline').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
-      setOportunidades(data || []);
-    }
-  };
-
-  const produtosDisponiveis = produtosApi.filter(prod => {
-    const nomeProduto = prod.ativo;
-    const ufAtual = (formData.uf_exclusividade || '').toUpperCase().trim();
-    const cidadeAtual = (formData.cidade_exclusividade || '').toUpperCase().trim();
-
-    if (!ufAtual) return true;
-
-    const bloqueado = exclusividades.some(ex => 
-      ex.produto === nomeProduto && 
-      ex.uf === ufAtual && 
-      (ex.cidade === cidadeAtual || ex.cidade === 'TODAS') &&
-      ex.nome_cliente !== formData.nome_cliente
-    );
-
-    return !bloqueado; 
+  // --- FILTRO DA LISTA ---
+  const listaFiltrada = listaCompleta.filter(item => {
+    if (filtroStatus === 'todos') return true;
+    if (filtroStatus === 'fechados') return item.status === 'fechado';
+    if (filtroStatus === 'abertos') return item.status !== 'fechado' && item.status !== 'perdido';
+    return true;
   });
 
-  useEffect(() => {
-    if (!formData.produto) return;
-    const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
-    if (produtoSelecionado) {
-        const precoAtual = parseMoney(formData.valor_g_tabela);
-        if (precoAtual === 0 || !formData.valor_g_tabela) {
-             setFormData(prev => ({ 
-                ...prev, 
-                valor_g_tabela: produtoSelecionado.preco_grama.toFixed(2).replace('.', ','), 
-                peso_formula_g: produtoSelecionado.peso_formula.toString()
-            }));
-        }
-    }
-  }, [formData.produto, produtosApi]);
+  // --- GERADOR DE PDF PAISAGEM ---
+  const gerarRelatorioGerencial = () => {
+    const doc = new jsPDF('l', 'mm', 'a4'); // 'l' = Landscape (Paisagem)
+    
+    // Cabeçalho
+    doc.setFontSize(18);
+    doc.setTextColor(40, 40, 40);
+    doc.text("Relatório Gerencial de Vendas", 14, 15);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')} | Filtro: ${filtroStatus.toUpperCase()}`, 14, 22);
 
-  useEffect(() => {
-    const precoG = parseMoney(formData.valor_g_tabela);
-    const kg = parseMoney(formData.kg_proposto);
-    const vTotal = (precoG * 1000 * kg).toFixed(2);
-
-    setFormData(prev => {
-        if (prev.valor === vTotal) return prev; 
-        return { ...prev, valor: vTotal };
-    });
-  }, [formData.valor_g_tabela, formData.kg_proposto]);
-
-
-  const buscarDadosCNPJ = async () => {
-    const cnpjLimpo = formData.cnpj?.replace(/\D/g, '');
-    if (cnpjLimpo?.length !== 14) return;
-    setLoadingCNPJ(true);
-    try {
-      const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`);
-      const data = await res.json();
-      setFormData(prev => ({ 
-        ...prev, 
-        nome_cliente: data.nome_fantasia || data.razao_social || '',
-        cidade_exclusividade: data.municipio || '',
-        uf_exclusividade: data.uf || '',
-        telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : prev.telefone
-      }));
-    } catch (e) {}
-    setLoadingCNPJ(false);
-  };
-
-  const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-
-  const cleanHtmlForPdf = (html: string) => {
-    if (!html) return "";
-    let text = html.replace(/<p>/g, "").replace(/<\/p>/g, "\n").replace(/<br\s*\/?>/gi, "\n");
-    text = text.replace(/<li>/g, "• ").replace(/<\/li>/g, "\n");
-    text = text.replace(/<[^>]+>/g, "");
-    text = text.replace(/&nbsp;/g, " ").replace(/\n\s*\n/g, "\n").trim();
-    return text;
-  };
-
-  const gerarPDFPremium = (item: any) => {
-    const doc = new jsPDF();
-    const verdeEscuro: [number, number, number] = [20, 83, 45];
-    const verdeMedio: [number, number, number] = [34, 139, 34];
-    const cinzaSuave: [number, number, number] = [243, 244, 246];
-    const textoCinza: [number, number, number] = [60, 60, 60];
-
-    try { doc.addImage("/logo.jpg", "JPEG", 20, 12, 50, 20); } catch (e) {}
-
-    doc.setFont("helvetica", "bold"); doc.setFontSize(24);
-    doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
-    doc.text("PROPOSTA COMERCIAL", 190, 20, { align: 'right' });
-    doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(120);
-    doc.text("YellowLeaf – Nutraceuticals Company", 190, 26, { align: 'right' });
-    doc.setFillColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
-    doc.rect(0, 35, 210, 2, 'F');
-
-    doc.setFillColor(cinzaSuave[0], cinzaSuave[1], cinzaSuave[2]);
-    doc.rect(20, 45, 170, 25, 'F');
-    doc.setDrawColor(220); doc.rect(20, 45, 170, 25, 'S');
-    doc.setFontSize(11); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
-    doc.setFont("helvetica", "bold"); doc.text("DADOS DO CLIENTE", 25, 52);
-    doc.setFontSize(10); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-    doc.text(`Razão Social: ${item.nome_cliente || 'N/A'}`, 25, 58);
-    doc.text(`Contato: ${item.contato || 'N/A'}  |  Tel: ${item.telefone || 'N/A'}`, 25, 63);
-    doc.text(`Cidade/UF: ${item.cidade_exclusividade || 'N/A'} / ${item.uf_exclusividade || ''}`, 25, 68);
-
-    doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
-    doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 20, 83);
-    const totalKG = Number(item.kg_proposto) + Number(item.kg_bonificado);
-    const vGramaReal = (Number(item.valor) / (totalKG * 1000)) || 0;
-    const vParc = (Number(item.valor) / Number(item.parcelas)) || 0;
-    const valorGExibicao = parseMoney(item.valor_g_tabela);
+    // Dados da Tabela para o PDF
+    const tableBody = listaFiltrada.map(item => [
+        item.nome_cliente || 'Sem Nome',
+        item.produto || '-',
+        LABELS_STATUS[item.status] || item.status,
+        formatCurrency(item.valor || 0),
+        formatDate(item.data_entrada),
+        item.canal_contato || 'N/D',
+        // Corta a observação se for muito longa para não quebrar a tabela
+        item.observacoes ? item.observacoes.substring(0, 40) + (item.observacoes.length > 40 ? '...' : '') : '' 
+    ]);
 
     autoTable(doc, {
-      startY: 88, margin: { left: 20, right: 20 },
-      head: [['DESCRIÇÃO', 'VALORES']],
-      body: [
-        ['Ativo/Insumo', item.produto || 'Insumo'],
-        ['Preço por grama (g)', formatCurrency(valorGExibicao)], 
-        ['Quantidade da proposta (kg)', `${item.kg_proposto} kg`],
-        ['Quantidade bonificada (kg)', `${item.kg_bonificado} kg`],
-        ['Investimento Total (R$)', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold' } }],
-        ['Preço do grama c/ bonificação (g)', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold', textColor: textoCinza } }],
-        ['Condição de Pagamento ', `${item.parcelas} parcelas de ${formatCurrency(vParc)}`],
-        ['Vencimento 1ª Parcela', `${item.dias_primeira_parcela} dias`]
-      ],
-      theme: 'grid',
-      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
-      styles: { fontSize: 10, cellPadding: 2, textColor: textoCinza },
-      columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right', fontStyle: 'bold' } }
-    });
-
-    const paybackY = (doc as any).lastAutoTable.finalY + 8;
-    const custoF = (vGramaReal * (Number(item.peso_formula_g) || 13.2));
-    const precoV = (custoF * (Number(item.fator_lucro) || 5));
-    const formulasDia = vParc > 0 ? ((vParc / precoV) / 22) : 0;
-
-    autoTable(doc, {
-      startY: paybackY, margin: { left: 20, right: 20 },
-      head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
-      body: [
-        ['Custo por fórmula (R$) (Manipulado)', formatCurrency(custoF)],
-        ['Sugestão de Venda (R$) (Fator 5)', formatCurrency(precoV)],
-        [{ content: 'META DE VIABILIDADE', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: verdeMedio, fontSize: 12, halign: 'right' } }]
-      ],
-      theme: 'grid',
-      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
-      styles: { fontSize: 10, cellPadding: 2, textColor: textoCinza },
-      columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right' } }
-    });
-
-    let currentY = (doc as any).lastAutoTable.finalY + 8; 
-    
-    if (item.observacoes_proposta) {
-        const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
-        autoTable(doc, {
-            startY: currentY,
-            margin: { left: 20, right: 20 },
-            head: [['CONDIÇÕES GERAIS DA PROPOSTA']],
-            body: [[notasTexto]],
-            theme: 'grid',
-            headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'left' },
-            styles: { fontSize: 9, cellPadding: 3, textColor: textoCinza, valign: 'middle', overflow: 'linebreak' },
-            columnStyles: { 0: { cellWidth: 'auto' } }
-        });
-        currentY = (doc as any).lastAutoTable.finalY + 8;
-    } else { currentY += 8; }
-
-    const certY = currentY; 
-    doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
-    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
-
-    const textY = certY + 5;
-    doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-    const certText = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e promovemos sua comercialização com responsabilidade e ética.";
-    const splitCertText = doc.splitTextToSize(certText, 170);
-    doc.text(splitCertText, 105, textY, { align: 'center' });
-
-    const imgY = textY + (splitCertText.length * 4) + 3; 
-    try {
-      const imgW = 90; const imgH = 15; const xPos = (210 - imgW) / 2;
-      if (imgY + imgH < 280) { doc.addImage("/selo.jpg", "JPEG", xPos, imgY, imgW, imgH); } 
-      else { doc.addPage(); doc.addImage("/selo.jpg", "JPEG", xPos, 20, imgW, imgH); }
-    } catch (e) {}
-
-    const fY = 285; doc.setFontSize(7); doc.setTextColor(150);
-    doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
-    doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 20, fY + 4);
-    doc.text("Dionatan Hoegen - Representante Comercial", 190, fY, { align: 'right' });
-    doc.text(`WhatsApp: (44) 99102-7642 | @dionatan.magistral`, 190, fY + 4, { align: 'right' });
-
-    doc.save(`Proposta Comercial - ${item.nome_cliente}.pdf`);
-  };
-
-  const handleSave = async () => {
-    if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
-    
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    // --- LÓGICA DE BLOQUEIO CNPJ CORRIGIDA ---
-    const cnpjLimpo = formData.cnpj.replace(/\D/g, ''); // 07218...
-    // Cria formato XX.XXX.XXX/XXXX-XX manualmente
-    const cnpjFormatado = cnpjLimpo.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
-
-    if (cnpjLimpo.length === 14) {
-        // BUSCA DUPLA: Procura pelo formato limpo OU formatado
-        const { data: clientesExistentes } = await supabase
-            .from('pipeline')
-            .select('id, user_id, nome_cliente, cnpj')
-            .or(`cnpj.eq.${cnpjLimpo},cnpj.eq.${cnpjFormatado}`);
-
-        if (clientesExistentes && clientesExistentes.length > 0) {
-            // Se estou editando, ignoro meu próprio registro
-            const conflitosReais = clientesExistentes.filter(c => editingOp ? c.id !== editingOp.id : true);
-            
-            // Verifica se pertence a OUTRO usuário
-            const donoDiferente = conflitosReais.find(c => c.user_id !== user?.id);
-            
-            if (donoDiferente) {
-                alert(`🚫 AÇÃO BLOQUEADA!\n\nO cliente ${donoDiferente.nome_cliente}\nCNPJ: ${donoDiferente.cnpj}\n\nJá pertence à carteira de outro representante.\nNão é permitido duplicar este cadastro.`);
-                return;
-            }
+        startY: 28,
+        head: [['Cliente', 'Produto', 'Estágio', 'Valor', 'Entrada', 'Canal', 'Obs. Interna']],
+        body: tableBody,
+        theme: 'grid',
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [20, 83, 45], textColor: 255, fontStyle: 'bold' }, // Verde YellowLeaf
+        columnStyles: {
+            0: { cellWidth: 50 }, // Cliente
+            1: { cellWidth: 40 }, // Produto
+            2: { cellWidth: 30 }, // Estágio
+            3: { cellWidth: 30, halign: 'right' }, // Valor
+            4: { cellWidth: 25, halign: 'center' }, // Data
+            5: { cellWidth: 30 }, // Canal
+            6: { cellWidth: 'auto' } // Obs (restante)
         }
-    }
+    });
 
-    const payload = {
-      ...formData,
-      user_id: user?.id,
-      valor: parseFloat(String(formData.valor).replace('R$', '').replace(/\./g, '').replace(',', '.')) || 0,
-      valor_g_tabela: parseFloat(String(formData.valor_g_tabela).replace(',', '.')) || 0,
-      kg_proposto: parseFloat(String(formData.kg_proposto)) || 0,
-      kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
-      parcelas: parseInt(String(formData.parcelas)) || 1,
-      dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45,
-      data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null,
-      data_entrada: formData.data_entrada || getLocalData(),
-      canal_contato: formData.canal_contato,
-      observacoes: formData.observacoes,
-      observacoes_proposta: formData.observacoes_proposta 
-    };
+    // Rodapé com Totais
+    const finalY = (doc as any).lastAutoTable.finalY + 10;
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    const totalDestaPagina = listaFiltrada.reduce((acc, i) => acc + (Number(i.valor)||0), 0);
+    doc.text(`TOTAL DESTE RELATÓRIO: ${formatCurrency(totalDestaPagina)}`, 14, finalY);
 
-    const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
-    
-    if (!error) { setModalOpen(false); carregarOportunidades(); } 
-    else { console.error("Erro banco:", error); alert(`Erro ao salvar: ${error.message}`); }
+    doc.save(`Relatorio_Vendas_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
-  const handleDelete = async () => {
-    if (confirm('Deseja excluir este registro permanentemente?')) {
-        const { error } = await supabase.from('pipeline').delete().eq('id', editingOp.id);
-        if (!error) { carregarOportunidades(); setModalOpen(false); } 
-        else { alert("Erro ao excluir."); }
-    }
-  };
-
-  const renderCard = (op: any) => {
-    const hoje = getLocalData(); 
-    const dataLembrete = op.data_lembrete; 
-    
-    const isAtrasado = dataLembrete && dataLembrete < hoje;
-    const isHoje = dataLembrete === hoje; 
-    
-    let borderClass = 'border-slate-100 hover:border-blue-300';
-    let bgClass = 'bg-white';
-    let textClass = 'text-slate-400';
-    let label = 'Ligar: ';
-
-    if (isAtrasado) {
-        borderClass = 'border-red-200';
-        bgClass = 'bg-red-50/30';
-        textClass = 'text-red-500';
-        label = 'Atrasado: ';
-    } else if (isHoje) {
-        borderClass = 'border-red-500 border-2 animate-pulse'; 
-        textClass = 'text-red-600 font-bold';
-        label = 'HOJE: ';
-    }
-    
-    return (
-        <div key={op.id} onClick={() => { setEditingOp(op); setFormData(op); setModalOpen(true); }} className={`p-4 rounded-xl border cursor-pointer shadow-sm transition hover:-translate-y-1 ${bgClass} ${borderClass}`}>
-            <h4 className="font-bold text-slate-700 text-sm uppercase truncate">{op.nome_cliente}</h4>
-            <div className="flex justify-between items-center mt-2">
-                <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg font-bold truncate max-w-[50%]">{op.produto}</span>
-                <span className="text-xs font-black text-slate-600">{formatCurrency(op.valor)}</span>
-            </div>
-            {op.data_lembrete && (
-                <div className={`mt-3 pt-2 border-t flex items-center gap-1 text-[10px] font-bold ${textClass}`}>
-                    <Clock size={10} />
-                    {label}
-                    {op.data_lembrete.split('-').reverse().join('/')} 
-                </div>
-            )}
-        </div>
-    );
-  }
+  if (loading) return <div className="p-8 text-center text-slate-400 font-bold animate-pulse">Carregando dados...</div>;
 
   return (
-    <div className="w-full p-4">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-2xl font-black text-[#1e293b] italic uppercase tracking-tighter">Pipeline YellowLeaf</h1>
-        <button onClick={() => { setEditingOp(null); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0'}); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95">+ Nova Oportunidade</button>
-      </div>
+    <div className="p-6 md:p-8 bg-slate-50 min-h-screen font-sans text-slate-800">
+      <div className="max-w-7xl mx-auto">
+        
+        {/* CABEÇALHO */}
+        <div className="mb-8 flex flex-col md:flex-row justify-between items-end gap-4">
+           <div className="flex items-center gap-3">
+             <div className="p-3 bg-slate-800 text-white rounded-xl shadow-lg shadow-slate-200">
+               <BarChart3 size={32}/>
+             </div>
+             <div>
+               <h1 className="text-3xl font-black text-slate-900 tracking-tight">Dashboard Comercial</h1>
+               <p className="text-slate-500">Panorama geral de performance e resultados.</p>
+             </div>
+           </div>
+           <button onClick={carregarDados} className="bg-white text-blue-600 px-4 py-2 rounded-lg text-sm font-bold border border-blue-100 hover:bg-blue-50 transition shadow-sm">
+             Atualizar Dados ↻
+           </button>
+        </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 h-[calc(100vh-180px)] overflow-x-auto pb-4">
-        {ESTAGIOS.map(est => (
-          <div key={est.id} className="bg-slate-50/50 rounded-2xl border flex flex-col min-w-[250px] overflow-hidden">
-            <div className={`p-4 border-b-2 ${est.color} bg-white flex justify-between items-center`}><h3 className={`font-black text-xs uppercase ${est.text}`}>{est.label}</h3></div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-3">
-              {oportunidades.filter(o => o.status === est.id).map(op => renderCard(op))}
+        {/* 1. KPIs PRINCIPAIS */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+           <CardMetric 
+             icon={<DollarSign size={24}/>} 
+             label="Pipeline Total" 
+             value={formatCurrency(metrics.valorTotalPipeline)} 
+             color="text-blue-600" bg="bg-blue-50" border="border-blue-100"
+           />
+           <CardMetric 
+             icon={<CheckCircle2 size={24}/>} 
+             label="Vendas Fechadas" 
+             value={formatCurrency(metrics.valorFechado)} 
+             subValue={`${metrics.qtdFechado} contratos`}
+             color="text-green-600" bg="bg-green-50" border="border-green-100"
+           />
+           <CardMetric 
+             icon={<TrendingUp size={24}/>} 
+             label="Conversão" 
+             value={`${metrics.taxaConversao.toFixed(1)}%`} 
+             subValue="Eficiência"
+             color="text-purple-600" bg="bg-purple-50" border="border-purple-100"
+           />
+           <CardMetric 
+             icon={<Users size={24}/>} 
+             label="Ticket Médio" 
+             value={formatCurrency(metrics.ticketMedio)} 
+             color="text-orange-600" bg="bg-orange-50" border="border-orange-100"
+           />
+        </div>
+
+        {/* 2. GRÁFICOS E FUNIL */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-10">
+          <div className="lg:col-span-2 bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+            <h3 className="font-bold text-lg text-slate-800 mb-6 flex items-center gap-2">
+              <PieChart size={20} className="text-slate-400"/> Funil de Vendas (Volume)
+            </h3>
+            <div className="space-y-4">
+              {Object.values(funil).map((f: any) => {
+                const percent = metrics.totalOportunidades > 0 ? (f.qtd / metrics.totalOportunidades) * 100 : 0;
+                return (
+                  <div key={f.label}>
+                    <div className="flex justify-between text-xs font-bold text-slate-600 mb-1 uppercase">
+                      <span>{f.label}</span>
+                      <span>{f.qtd} ({percent.toFixed(0)}%)</span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                      <div className={`h-full rounded-full ${f.color}`} style={{ width: `${percent}%`, minWidth: percent > 0 ? '5px' : '0' }}></div>
+                    </div>
+                    <div className="text-right text-[10px] font-bold text-slate-400 mt-1">
+                      {formatCurrency(f.valor)}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
-        ))}
-      </div>
 
-      {modalOpen && mounted && createPortal(
-        <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-5xl rounded-[2.5rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95">
-            <div className="bg-[#242f3e] p-6 flex justify-between items-center text-white shrink-0">
-              <h2 className="text-lg font-bold flex items-center gap-2">✨ {editingOp ? 'Editar Oportunidade' : 'Nova Oportunidade'}</h2>
-              <div className="flex gap-2">
-                {editingOp && <button onClick={() => gerarPDFPremium(formData)} className="bg-green-600 px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase shadow-lg"><Download size={14}/> PDF Premium</button>}
-                <button onClick={() => setModalOpen(false)} className="hover:bg-white/10 p-1 rounded-full"><X/></button>
-              </div>
-            </div>
-
-            <div className="p-8 grid grid-cols-1 md:grid-cols-4 gap-5 overflow-y-auto bg-white flex-1">
-              <div className="md:col-span-4 border-b pb-2 flex justify-between items-center">
-                  <h3 className="text-[10px] font-black text-blue-600 uppercase">1. Identificação e Status</h3>
-                  <select className="bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold px-3 py-1 rounded-lg outline-none" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
-                      {ESTAGIOS.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
-                  </select>
-              </div>
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">CNPJ</label><div className="flex gap-2"><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} onBlur={buscarDadosCNPJ}/><button onClick={buscarDadosCNPJ} className="bg-blue-50 text-blue-600 p-3 rounded-xl border"><Search size={20}/></button></div></div>
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Razão Social</label><input className="w-full bg-slate-50 border rounded-xl p-3 font-bold uppercase" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Cidade</label><input className="w-full bg-slate-100 border rounded-xl p-3" value={formData.cidade_exclusividade} readOnly/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">UF</label><input className="w-full bg-slate-100 border rounded-xl p-3" value={formData.uf_exclusividade} readOnly/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Contato</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">WhatsApp</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})}/></div>
-
-              <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta e Payback</h3></div>
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase flex justify-between">Ativo {loadingProdutos ? '(Carregando...)' : ''}</label><select className="w-full bg-slate-50 border rounded-xl p-3 font-bold disabled:opacity-50" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})} disabled={loadingProdutos}><option value="">Selecione...</option>{produtosDisponiveis.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}</select></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor G (Tabela)</label><input type="text" className="w-full bg-slate-50 border rounded-xl p-3 font-bold text-blue-700" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} /></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Proposto</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Total R$</label><input className="w-full bg-slate-100 border text-slate-600 rounded-xl p-3 font-bold" value={formData.valor} readOnly /></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Bônus</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Parcelas</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª Parc</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
-
-              <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100"><label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><FileText size={14}/> Notas e Condições (Para o PDF)</label><div className="bg-white rounded-xl overflow-hidden border border-blue-100 text-slate-700"><ReactQuill theme="snow" value={formData.observacoes_proposta} onChange={(val) => setFormData({...formData, observacoes_proposta: val})} modules={{ toolbar: [['bold', 'italic', 'underline'], [{'list': 'ordered'}, {'list': 'bullet'}], ['clean']] }} /></div></div>
-
-              <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-orange-600 uppercase">3. Gestão e Acompanhamento (Interno)</h3></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Data Entrada</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_entrada} onChange={e => setFormData({...formData, data_entrada: e.target.value})} /></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Próximo Contato</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} /></div>
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Canal de Contato</label><select className="w-full bg-slate-50 border rounded-xl p-3" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-              <div className="md:col-span-4"><label className="text-[10px] font-bold text-slate-400 uppercase flex gap-2"><MessageSquare size={14}/> Anotações Internas (Não sai no PDF)</label><textarea className="w-full bg-slate-50 border rounded-xl p-3 h-20 resize-none" placeholder="Ex: Cliente pediu desconto, ligar novamente semana que vem..." value={formData.observacoes} onChange={e => setFormData({...formData, observacoes: e.target.value})} /></div>
-            </div>
-
-            <div className="p-6 bg-slate-50 border-t flex justify-end items-center shrink-0 gap-2">
-              {editingOp && <button onClick={handleDelete} className="text-red-500 font-bold text-xs uppercase px-4 py-2 hover:bg-red-50 rounded-lg">Excluir</button>}
-              <button onClick={() => setModalOpen(false)} className="px-6 font-bold text-slate-400">CANCELAR</button>
-              <button onClick={handleSave} className="bg-[#2563eb] text-white px-12 py-3 rounded-xl font-bold uppercase active:scale-95 transition">Salvar Dados</button>
-            </div>
+          {/* PAINEL META */}
+          <div className="bg-slate-800 text-white p-6 rounded-3xl shadow-xl flex flex-col justify-between relative overflow-hidden">
+             <div className="relative z-10">
+               <h3 className="font-bold text-lg mb-2">Meta vs Realizado</h3>
+               <div className="text-4xl font-black mb-1">{formatCurrency(metrics.valorFechado)}</div>
+               <p className="text-green-400 text-xs font-bold uppercase tracking-wider mb-8">Já Faturado</p>
+               <div className="p-4 bg-white/10 rounded-xl backdrop-blur-sm border border-white/10">
+                 <p className="text-xs text-slate-300 mb-1 font-bold uppercase">Potencial na Mesa</p>
+                 <p className="text-xl font-bold">{formatCurrency(metrics.valorTotalPipeline - metrics.valorFechado)}</p>
+               </div>
+             </div>
+             <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-green-500 rounded-full blur-[80px] opacity-20"></div>
           </div>
-        </div>, document.body
-      )}
+        </div>
+
+        {/* 3. RELATÓRIO DETALHADO (NOVA SEÇÃO) */}
+        <div className="bg-white rounded-3xl shadow-lg border border-slate-100 overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-50/50">
+                <div>
+                    <h3 className="font-black text-lg text-slate-800 flex items-center gap-2"><FileText size={20} className="text-blue-600"/> Relatório Detalhado</h3>
+                    <p className="text-xs text-slate-500">Visualize e exporte os dados para apresentar à diretoria.</p>
+                </div>
+                <div className="flex gap-2">
+                    {/* FILTROS */}
+                    <div className="flex bg-white border border-slate-200 rounded-lg p-1">
+                        <button onClick={() => setFiltroStatus('abertos')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${filtroStatus === 'abertos' ? 'bg-blue-100 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>Abertos</button>
+                        <button onClick={() => setFiltroStatus('fechados')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${filtroStatus === 'fechados' ? 'bg-green-100 text-green-700' : 'text-slate-500 hover:bg-slate-50'}`}>Fechados</button>
+                        <button onClick={() => setFiltroStatus('todos')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${filtroStatus === 'todos' ? 'bg-slate-200 text-slate-700' : 'text-slate-500 hover:bg-slate-50'}`}>Todos</button>
+                    </div>
+                    {/* BOTÃO EXPORTAR */}
+                    <button onClick={gerarRelatorioGerencial} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm transition active:scale-95">
+                        <Download size={14}/> Baixar PDF
+                    </button>
+                </div>
+            </div>
+
+            <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-500 font-bold uppercase border-b border-slate-100">
+                        <tr>
+                            <th className="p-4">Cliente</th>
+                            <th className="p-4">Produto</th>
+                            <th className="p-4">Estágio</th>
+                            <th className="p-4">Valor</th>
+                            <th className="p-4">Data Entrada</th>
+                            <th className="p-4">Canal</th>
+                            <th className="p-4">Obs. Interna</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {listaFiltrada.length === 0 && (
+                            <tr><td colSpan={7} className="p-8 text-center text-slate-400">Nenhum registro encontrado para este filtro.</td></tr>
+                        )}
+                        {listaFiltrada.map(item => (
+                            <tr key={item.id} className="hover:bg-slate-50 transition">
+                                <td className="p-4 font-bold text-slate-700">{item.nome_cliente}</td>
+                                <td className="p-4 text-slate-600"><span className="bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-100">{item.produto}</span></td>
+                                <td className="p-4 font-bold text-slate-500 uppercase">{LABELS_STATUS[item.status]}</td>
+                                <td className="p-4 font-bold text-slate-700">{formatCurrency(item.valor)}</td>
+                                <td className="p-4 text-slate-500">{formatDate(item.data_entrada)}</td>
+                                <td className="p-4 text-slate-500">{item.canal_contato || '-'}</td>
+                                <td className="p-4 text-slate-400 italic max-w-[200px] truncate" title={item.observacoes}>{item.observacoes || '-'}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+            <div className="p-4 bg-slate-50 border-t border-slate-100 text-right text-xs font-bold text-slate-500">
+                Mostrando {listaFiltrada.length} registros
+            </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+function CardMetric({ icon, label, value, subValue, color, bg, border }: any) {
+  return (
+    <div className={`bg-white p-6 rounded-2xl border shadow-sm ${border} hover:shadow-md transition`}>
+      <div className={`w-10 h-10 ${bg} ${color} rounded-lg flex items-center justify-center mb-4`}>
+        {icon}
+      </div>
+      <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">{label}</p>
+      <h2 className="text-2xl font-black text-slate-800">{value}</h2>
+      {subValue && <p className="text-xs text-slate-400 mt-2 font-medium">{subValue}</p>}
     </div>
   );
 }
