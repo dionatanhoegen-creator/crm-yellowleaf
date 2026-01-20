@@ -29,8 +29,8 @@ export default function FaturamentoPage() {
       // Se for "todos", manda vazio para a API entender que é geral
       params.append("ano", anoSelecionado === "todos" ? "" : anoSelecionado);
       if (vendedorSelecionado) params.append("representante", vendedorSelecionado);
-
-      const res = await fetch(`${API_URL}?${params.toString()}`);
+    // Adiciona um timestamp (&t=...) para evitar cache
+      const res = await fetch(`${API_URL}?${params.toString()}&t=${new Date().getTime()}`);
       const json = await res.json();
       
       if (json.success) {
