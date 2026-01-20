@@ -26,6 +26,7 @@ export default function FaturamentoPage() {
     try {
       const params = new URLSearchParams();
       params.append("path", "dashboard/faturamento");
+      // Se for "todos", manda vazio para a API entender que é geral
       params.append("ano", anoSelecionado === "todos" ? "" : anoSelecionado);
       if (vendedorSelecionado) params.append("representante", vendedorSelecionado);
 
@@ -34,11 +35,23 @@ export default function FaturamentoPage() {
       
       if (json.success) {
         setDados(json.data);
-        if (listaVendedores.length === 0 && json.data.rankings?.vendedores) {
+        
+        // --- CORREÇÃO IMPORTANTE AQUI ---
+        // Prioriza a "listaVendedores" que vem separada do Backend V23
+        // Isso impede que os vendedores sumam do filtro ao mudar o ano
+        if (json.data.listaVendedores && json.data.listaVendedores.length > 0) {
+            setListaVendedores(json.data.listaVendedores);
+        } 
+        // Fallback para versões antigas da API
+        else if (listaVendedores.length === 0 && json.data.rankings?.vendedores) {
             setListaVendedores(json.data.rankings.vendedores);
         }
       }
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fmtBRL = (v: number) => v?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -47,7 +60,7 @@ export default function FaturamentoPage() {
   const anosDisponiveis = Array.from({ length: 5 }, (_, i) => (new Date().getFullYear() + 1 - i).toString());
   const coresPorAno: any = { "2024": "#cbd5e1", "2025": "#3b82f6", "2026": "#10b981", "2027": "#8b5cf6" };
 
-  if (loading && !dados) return <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-slate-400 font-medium animate-pulse"><Activity size={32} className="mb-4 text-blue-500"/> Carregando Inteligência...</div>;
+  if (loading && !dados) return <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-slate-400 font-medium animate-pulse"><Activity size={32} className="mb-4 text-blue-500"/> Processando Inteligência...</div>;
   if (!dados && !loading) return <div className="p-8 text-center text-red-500">Erro de conexão. Tente recarregar.</div>;
 
   const { kpi, grafico, rankings } = dados || { kpi: {}, grafico: [], rankings: {} };
@@ -90,7 +103,7 @@ export default function FaturamentoPage() {
                     className="appearance-none pl-9 pr-8 py-2.5 bg-white border border-slate-200 hover:border-blue-400 rounded-lg text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 transition cursor-pointer min-w-[220px]"
                 >
                     <option value="">Todos os Representantes</option>
-                    {(listaVendedores.length > 0 ? listaVendedores : rankings.vendedores).map((v: any, i: number) => (
+                    {(listaVendedores.length > 0 ? listaVendedores : (rankings.vendedores || [])).map((v: any, i: number) => (
                         <option key={i} value={v.nome}>{v.nome}</option>
                     ))}
                 </select>
