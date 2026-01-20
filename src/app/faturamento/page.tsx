@@ -36,13 +36,12 @@ export default function FaturamentoPage() {
       if (json.success) {
         setDados(json.data);
         
-        // --- CORREÇÃO IMPORTANTE AQUI ---
-        // Prioriza a "listaVendedores" que vem separada do Backend V23
-        // Isso impede que os vendedores sumam do filtro ao mudar o ano
-        if (json.data.listaVendedores && json.data.listaVendedores.length > 0) {
-            setListaVendedores(json.data.listaVendedores);
+        // --- AQUI ESTÁ A CORREÇÃO DO FILTRO ---
+        // Se a API mandar a lista completa (V24), usamos ela.
+        if (json.data.rankings?.listaVendedores && json.data.rankings.listaVendedores.length > 0) {
+            setListaVendedores(json.data.rankings.listaVendedores);
         } 
-        // Fallback para versões antigas da API
+        // Fallback: Se não tiver lista completa, usa o ranking (mas só se a lista estiver vazia para não sobrescrever)
         else if (listaVendedores.length === 0 && json.data.rankings?.vendedores) {
             setListaVendedores(json.data.rankings.vendedores);
         }
@@ -60,7 +59,7 @@ export default function FaturamentoPage() {
   const anosDisponiveis = Array.from({ length: 5 }, (_, i) => (new Date().getFullYear() + 1 - i).toString());
   const coresPorAno: any = { "2024": "#cbd5e1", "2025": "#3b82f6", "2026": "#10b981", "2027": "#8b5cf6" };
 
-  if (loading && !dados) return <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-slate-400 font-medium animate-pulse"><Activity size={32} className="mb-4 text-blue-500"/> Processando Inteligência...</div>;
+  if (loading && !dados) return <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-slate-400 font-medium animate-pulse"><Activity size={32} className="mb-4 text-blue-500"/> Carregando Inteligência...</div>;
   if (!dados && !loading) return <div className="p-8 text-center text-red-500">Erro de conexão. Tente recarregar.</div>;
 
   const { kpi, grafico, rankings } = dados || { kpi: {}, grafico: [], rankings: {} };
@@ -82,7 +81,7 @@ export default function FaturamentoPage() {
           </div>
         </div>
 
-        {/* FILTROS MINIMALISTAS */}
+        {/* FILTROS */}
         <div className="flex flex-wrap items-center gap-3 mb-8">
             <div className="relative group">
                 <select 
@@ -103,7 +102,8 @@ export default function FaturamentoPage() {
                     className="appearance-none pl-9 pr-8 py-2.5 bg-white border border-slate-200 hover:border-blue-400 rounded-lg text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 transition cursor-pointer min-w-[220px]"
                 >
                     <option value="">Todos os Representantes</option>
-                    {(listaVendedores.length > 0 ? listaVendedores : (rankings.vendedores || [])).map((v: any, i: number) => (
+                    {/* Agora usamos listaVendedores, que contém todo mundo! */}
+                    {listaVendedores.map((v: any, i: number) => (
                         <option key={i} value={v.nome}>{v.nome}</option>
                     ))}
                 </select>
@@ -117,7 +117,7 @@ export default function FaturamentoPage() {
             )}
         </div>
 
-        {/* KPI GRID - CLEAN */}
+        {/* KPI GRID */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <KpiCard title="Faturamento Total" value={fmtBRL(kpi.faturamentoAno)} sub={vendedorSelecionado ? "Filtrado" : "Período Selecionado"} trend="up" />
           <KpiCard title="Ticket Médio" value={fmtBRL(kpi.ticketMedio)} sub="Por transação" />
@@ -125,10 +125,10 @@ export default function FaturamentoPage() {
           <KpiCard title="Carteira Ativa" value={kpi.churn?.ativos || 0} sub="Compraram < 6 meses" icon={<Activity size={18} className="text-emerald-500"/>} />
         </div>
 
-        {/* ÁREA PRINCIPAL: GRÁFICO + CHURN */}
+        {/* ÁREA PRINCIPAL */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
           
-          {/* GRÁFICO PRINCIPAL */}
+          {/* GRÁFICO */}
           <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex justify-between items-center mb-8">
                 <div>
@@ -171,7 +171,7 @@ export default function FaturamentoPage() {
             </div>
           </div>
 
-          {/* PAINEL DE RISCO (CHURN) - REDESENHADO */}
+          {/* PAINEL CHURN */}
           <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow flex flex-col">
             <div className="mb-6">
                 <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">Risco de Churn</h3>
@@ -193,7 +193,7 @@ export default function FaturamentoPage() {
           </div>
         </div>
 
-        {/* 3. RANKINGS (LADO A LADO) */}
+        {/* RANKINGS */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
             <RankingCard title="Top Regiões" items={rankings.estados} type="uf" />
             <RankingCard title="Performance Equipe" items={rankings.vendedores} type="vendedor" highlight={vendedorSelecionado} />
@@ -203,8 +203,6 @@ export default function FaturamentoPage() {
     </div>
   );
 }
-
-// --- SUB-COMPONENTES PARA ORGANIZAÇÃO E BELEZA ---
 
 function KpiCard({ title, value, sub, icon, trend }: any) {
     return (
