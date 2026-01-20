@@ -11,6 +11,7 @@ const API_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zE
 export default function FaturamentoPage() {
   const [dados, setDados] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
 
   // Filtros
   const [anoSelecionado, setAnoSelecionado] = useState<string>(new Date().getFullYear().toString());
@@ -23,47 +24,68 @@ export default function FaturamentoPage() {
 
   const carregarDados = async () => {
     setLoading(true);
+    setErro(null);
     try {
       const params = new URLSearchParams();
       params.append("path", "dashboard/faturamento");
-      // Se for "todos", manda vazio para a API entender que é geral
       params.append("ano", anoSelecionado === "todos" ? "" : anoSelecionado);
       if (vendedorSelecionado) params.append("representante", vendedorSelecionado);
-    // Adiciona um timestamp (&t=...) para evitar cache
+
+      // Adiciona timestamp para evitar cache do navegador
       const res = await fetch(`${API_URL}?${params.toString()}&t=${new Date().getTime()}`);
+      
+      if (!res.ok) throw new Error("Falha na comunicação com a planilha");
+      
       const json = await res.json();
       
-      if (json.success) {
-        setDados(json.data);
+      if (json.success || json.data) { // Aceita se tiver success:true ou se tiver data direto
+        const dataFinal = json.data || json; // Compatibilidade com versões diferentes do backend
+        setDados(dataFinal);
         
-        // --- AQUI ESTÁ A CORREÇÃO DO FILTRO ---
-        // Se a API mandar a lista completa (V24), usamos ela.
-        if (json.data.rankings?.listaVendedores && json.data.rankings.listaVendedores.length > 0) {
-            setListaVendedores(json.data.rankings.listaVendedores);
-        } 
-        // Fallback: Se não tiver lista completa, usa o ranking (mas só se a lista estiver vazia para não sobrescrever)
-        else if (listaVendedores.length === 0 && json.data.rankings?.vendedores) {
-            setListaVendedores(json.data.rankings.vendedores);
+        // --- LÓGICA DE LISTA DE VENDEDORES (PROTEGIDA) ---
+        // Verifica dentro de rankings ou na raiz
+        const listaNova = dataFinal.rankings?.listaVendedores || dataFinal.listaVendedores;
+        
+        if (Array.isArray(listaNova) && listaNova.length > 0) {
+            setListaVendedores(listaNova);
+        } else if (listaVendedores.length === 0 && dataFinal.rankings?.vendedores) {
+            setListaVendedores(dataFinal.rankings.vendedores);
         }
+      } else {
+          setErro("Dados inválidos recebidos da API");
       }
     } catch (e) {
       console.error(e);
+      setErro("Erro ao carregar dados. Verifique sua conexão.");
     } finally {
       setLoading(false);
     }
   };
 
-  const fmtBRL = (v: number) => v?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const fmtBRL = (v: number) => v?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) || "R$ 0,00";
   const fmtCompact = (v: number) => `R$ ${(v / 1000).toFixed(0)}k`;
 
   const anosDisponiveis = Array.from({ length: 5 }, (_, i) => (new Date().getFullYear() + 1 - i).toString());
   const coresPorAno: any = { "2024": "#cbd5e1", "2025": "#3b82f6", "2026": "#10b981", "2027": "#8b5cf6" };
 
   if (loading && !dados) return <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-slate-400 font-medium animate-pulse"><Activity size={32} className="mb-4 text-blue-500"/> Carregando Inteligência...</div>;
-  if (!dados && !loading) return <div className="p-8 text-center text-red-500">Erro de conexão. Tente recarregar.</div>;
+  
+  if (erro) return (
+    <div className="min-h-screen flex flex-col items-center justify-center text-red-500 gap-4">
+        <AlertTriangle size={48} />
+        <p className="font-bold">{erro}</p>
+        <button onClick={carregarDados} className="px-4 py-2 bg-blue-500 text-white rounded-lg">Tentar Novamente</button>
+    </div>
+  );
 
-  const { kpi, grafico, rankings } = dados || { kpi: {}, grafico: [], rankings: {} };
-  const graficoRecente = grafico || [];
+  if (!dados) return null;
+
+  // --- PROTEÇÃO CONTRA DADOS NULOS (ISSO EVITA O ERRO "CLIENT SIDE EXCEPTION") ---
+  const kpi = dados.kpi || {};
+  const churn = kpi.churn || {};
+  const graficoRecente = Array.isArray(dados.grafico) ? dados.grafico : [];
+  const rankings = dados.rankings || { estados: [], produtos: [], vendedores: [] };
+  
   const isVisaoAnual = anoSelecionado === "todos";
 
   return (
@@ -81,7 +103,7 @@ export default function FaturamentoPage() {
           </div>
         </div>
 
-        {/* FILTROS */}
+        {/* FILTROS MINIMALISTAS */}
         <div className="flex flex-wrap items-center gap-3 mb-8">
             <div className="relative group">
                 <select 
@@ -102,8 +124,8 @@ export default function FaturamentoPage() {
                     className="appearance-none pl-9 pr-8 py-2.5 bg-white border border-slate-200 hover:border-blue-400 rounded-lg text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 transition cursor-pointer min-w-[220px]"
                 >
                     <option value="">Todos os Representantes</option>
-                    {/* Agora usamos listaVendedores, que contém todo mundo! */}
-                    {listaVendedores.map((v: any, i: number) => (
+                    {/* Proteção no Map */}
+                    {(listaVendedores.length > 0 ? listaVendedores : (rankings.vendedores || [])).map((v: any, i: number) => (
                         <option key={i} value={v.nome}>{v.nome}</option>
                     ))}
                 </select>
@@ -117,18 +139,18 @@ export default function FaturamentoPage() {
             )}
         </div>
 
-        {/* KPI GRID */}
+        {/* KPI GRID - CLEAN */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <KpiCard title="Faturamento Total" value={fmtBRL(kpi.faturamentoAno)} sub={vendedorSelecionado ? "Filtrado" : "Período Selecionado"} trend="up" />
-          <KpiCard title="Ticket Médio" value={fmtBRL(kpi.ticketMedio)} sub="Por transação" />
+          <KpiCard title="Faturamento Total" value={fmtBRL(kpi.faturamentoAno || 0)} sub={vendedorSelecionado ? "Filtrado" : "Período Selecionado"} trend="up" />
+          <KpiCard title="Ticket Médio" value={fmtBRL(kpi.ticketMedio || 0)} sub="Por transação" />
           <KpiCard title="Novos Clientes" value={kpi.novosClientes || 0} sub="Cadastrados no período" icon={<Users size={18} className="text-blue-500"/>} />
-          <KpiCard title="Carteira Ativa" value={kpi.churn?.ativos || 0} sub="Compraram < 6 meses" icon={<Activity size={18} className="text-emerald-500"/>} />
+          <KpiCard title="Carteira Ativa" value={churn.ativos || 0} sub="Compraram < 6 meses" icon={<Activity size={18} className="text-emerald-500"/>} />
         </div>
 
-        {/* ÁREA PRINCIPAL */}
+        {/* ÁREA PRINCIPAL: GRÁFICO + CHURN */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
           
-          {/* GRÁFICO */}
+          {/* GRÁFICO PRINCIPAL */}
           <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex justify-between items-center mb-8">
                 <div>
@@ -171,7 +193,7 @@ export default function FaturamentoPage() {
             </div>
           </div>
 
-          {/* PAINEL CHURN */}
+          {/* PAINEL CHURN (PROTEGIDO) */}
           <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow flex flex-col">
             <div className="mb-6">
                 <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">Risco de Churn</h3>
@@ -179,30 +201,32 @@ export default function FaturamentoPage() {
             </div>
             
             <div className="space-y-3 flex-1">
-                <ChurnRow label="6 a 12 Meses" count={kpi.churn?.inativos6m || 0} color="bg-yellow-500" risk="Moderado" />
-                <ChurnRow label="1 a 2 Anos" count={kpi.churn?.inativos12m || 0} color="bg-orange-500" risk="Alto" />
-                <ChurnRow label="+2 Anos" count={kpi.churn?.perdidos || 0} color="bg-red-500" risk="Crítico" />
+                <ChurnRow label="6 a 12 Meses" count={churn.inativos6m || 0} color="bg-yellow-500" risk="Moderado" />
+                <ChurnRow label="1 a 2 Anos" count={churn.inativos12m || 0} color="bg-orange-500" risk="Alto" />
+                <ChurnRow label="+2 Anos" count={churn.perdidos || 0} color="bg-red-500" risk="Crítico" />
             </div>
             
             <div className="mt-6 pt-4 border-t border-slate-50 text-center">
                 <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">Total na Base</p>
                 <p className="text-2xl font-black text-slate-700">
-                    {(kpi.churn?.ativos || 0) + (kpi.churn?.inativos6m || 0) + (kpi.churn?.inativos12m || 0) + (kpi.churn?.perdidos || 0)}
+                    {(churn.ativos || 0) + (churn.inativos6m || 0) + (churn.inativos12m || 0) + (churn.perdidos || 0)}
                 </p>
             </div>
           </div>
         </div>
 
-        {/* RANKINGS */}
+        {/* RANKINGS (PROTEGIDO) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            <RankingCard title="Top Regiões" items={rankings.estados} type="uf" />
-            <RankingCard title="Performance Equipe" items={rankings.vendedores} type="vendedor" highlight={vendedorSelecionado} />
+            <RankingCard title="Top Regiões" items={rankings.estados || []} type="uf" />
+            <RankingCard title="Performance Equipe" items={rankings.vendedores || []} type="vendedor" highlight={vendedorSelecionado} />
         </div>
 
       </div>
     </div>
   );
 }
+
+// --- SUB-COMPONENTES ---
 
 function KpiCard({ title, value, sub, icon, trend }: any) {
     return (
@@ -237,7 +261,7 @@ function RankingCard({ title, items, type, highlight }: any) {
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
             <h3 className="text-sm font-bold uppercase tracking-wide text-slate-800 mb-5">{title}</h3>
             <div className="space-y-4">
-                {items?.slice(0, 5).map((item: any, i: number) => (
+                {items && items.length > 0 ? items.slice(0, 5).map((item: any, i: number) => (
                     <div key={i} className={`flex items-center justify-between text-sm ${highlight === item.nome ? 'bg-blue-50 p-2 rounded-lg -mx-2' : ''}`}>
                         <div className="flex items-center gap-3">
                             <span className="font-mono font-bold text-slate-300 w-4">0{i+1}</span>
@@ -254,7 +278,7 @@ function RankingCard({ title, items, type, highlight }: any) {
                             </span>
                         </div>
                     </div>
-                ))}
+                )) : <p className="text-xs text-slate-400 italic">Sem dados disponíveis.</p>}
             </div>
         </div>
     )
