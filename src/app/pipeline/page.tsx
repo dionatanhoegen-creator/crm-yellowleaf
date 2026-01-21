@@ -6,7 +6,7 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -29,14 +29,13 @@ const ESTAGIOS = [
   { id: 'perdido', label: 'Perdido', color: 'border-red-500', text: 'text-red-700' },
 ];
 
-// Mapeamento de cores para o PDF (RGB)
 const STAGE_COLORS: any = {
-    prospeccao: [37, 99, 235],   // Azul
-    qualificacao: [147, 51, 234], // Roxo
-    apresentacao: [219, 39, 119], // Rosa
-    negociacao: [234, 179, 8],    // Amarelo/Ouro
-    fechado: [22, 163, 74],       // Verde
-    perdido: [220, 38, 38]        // Vermelho
+    prospeccao: [37, 99, 235],   
+    qualificacao: [147, 51, 234], 
+    apresentacao: [219, 39, 119], 
+    negociacao: [234, 179, 8],    
+    fechado: [22, 163, 74],       
+    perdido: [220, 38, 38]        
 };
 
 const CANAIS_CONTATO = ['WhatsApp', 'Ligação', 'E-mail', 'Visita Presencial', 'Instagram'];
@@ -62,10 +61,11 @@ export default function PipelinePage() {
       open: false, message: '', onConfirm: () => {}, onCancel: () => {}
   });
 
-  // NOVO: Modal de Configuração do Relatório
   const [reportConfigOpen, setReportConfigOpen] = useState(false);
-  // NOVO: Estado para a ordenação do relatório
   const [reportSort, setReportSort] = useState('numero'); 
+
+  // NOVO: Estado para a NOVA anotação que está sendo digitada
+  const [novaNotaInput, setNovaNotaInput] = useState("");
 
   const [reportColumns, setReportColumns] = useState({
       numero: true,
@@ -303,7 +303,19 @@ export default function PipelinePage() {
 
   const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // --- NOVO: GERAR RELATÓRIO GERAL (PAISAGEM + CORES + FILTRO + ORDENAÇÃO) ---
+  // --- NOVA FUNÇÃO PARA ADICIONAR NOTA AO HISTÓRICO ---
+  const adicionarNotaAoHistorico = () => {
+      if (!novaNotaInput.trim()) return;
+
+      const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      // Cria a nova linha de log
+      const novaEntrada = `📅 ${dataHora} | 💬 ${novaNotaInput}\n────────────────────────────────────────\n${formData.observacoes || ''}`;
+      
+      setFormData({ ...formData, observacoes: novaEntrada });
+      setNovaNotaInput(""); // Limpa o campo de nova nota
+  };
+
+  // --- GERAR RELATÓRIO GERAL (PAISAGEM + CORES + FILTRO + ORDENAÇÃO) ---
   const gerarRelatorioGeral = () => {
     const doc = new jsPDF({ orientation: "landscape" });
     
@@ -317,7 +329,6 @@ export default function PipelinePage() {
     doc.setTextColor(100);
     doc.text(`Gerado em: ${new Date().toLocaleDateString()} às ${new Date().toLocaleTimeString()}`, 14, 21);
 
-    // 1. Lógica de Ordenação
     let dadosOrdenados = [...oportunidades];
     
     if (reportSort === 'cliente') {
@@ -326,11 +337,9 @@ export default function PipelinePage() {
         const ordemEstagios = ESTAGIOS.map(e => e.id);
         dadosOrdenados.sort((a, b) => ordemEstagios.indexOf(a.status) - ordemEstagios.indexOf(b.status));
     } else {
-        // Default: Número da proposta (Decrescente - mais recente primeiro)
         dadosOrdenados.sort((a, b) => (b.numero_proposta || 0) - (a.numero_proposta || 0));
     }
 
-    // 2. Monta Cabeçalhos
     let headers = [];
     let dataKeys: any[] = [];
 
@@ -345,7 +354,6 @@ export default function PipelinePage() {
     if (reportColumns.entrada) { headers.push('Entrada'); dataKeys.push('entrada'); }
     if (reportColumns.canal) { headers.push('Canal'); dataKeys.push('canal'); }
 
-    // 3. Prepara os dados (usando a lista ordenada)
     const tableBody = dadosOrdenados.map(op => {
         let row: any[] = [];
         if (reportColumns.numero) row.push(formatPropostaId(op.numero_proposta));
@@ -518,10 +526,19 @@ export default function PipelinePage() {
 
   const handleSave = async () => {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
-    if (!formData.observacoes || formData.observacoes.trim() === "") {
+    
+    // VALIDACAO: Ou tem historico gravado, ou tem nota nova sendo adicionada
+    if ((!formData.observacoes || formData.observacoes.trim() === "") && !novaNotaInput.trim()) {
         return alert("O campo 'Anotações Internas' é obrigatório. Registre o andamento da negociação.");
     }
     
+    // Se tiver nota nova digitada e o usuário clicar em Salvar, já insere automaticamente
+    let obsFinal = formData.observacoes || "";
+    if (novaNotaInput.trim()) {
+        const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        obsFinal = `📅 ${dataHora} | 💬 ${novaNotaInput}\n────────────────────────────────────────\n${obsFinal}`;
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     
     let valorFinal = 0;
@@ -559,7 +576,7 @@ export default function PipelinePage() {
       data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null,
       data_entrada: formData.data_entrada || getLocalData(),
       canal_contato: formData.canal_contato,
-      observacoes: formData.observacoes,
+      observacoes: obsFinal, // Salva o histórico atualizado
       observacoes_proposta: formData.observacoes_proposta 
     };
 
@@ -567,6 +584,7 @@ export default function PipelinePage() {
     
     if (!error) { 
       setModalOpen(false); 
+      setNovaNotaInput(""); // Limpa o input
       carregarOportunidades(); 
     } else { 
       console.error("Erro banco:", error); 
@@ -620,7 +638,7 @@ export default function PipelinePage() {
     }
     
     return (
-        <div key={op.id} onClick={() => { setEditingOp(op); setFormData(op); setModalOpen(true); }} className={`p-4 rounded-xl border cursor-pointer shadow-sm transition hover:-translate-y-1 ${bgClass} ${borderClass}`}>
+        <div key={op.id} onClick={() => { setEditingOp(op); setFormData(op); setNovaNotaInput(""); setModalOpen(true); }} className={`p-4 rounded-xl border cursor-pointer shadow-sm transition hover:-translate-y-1 ${bgClass} ${borderClass}`}>
             <div className="flex justify-between items-start">
                 <div className="max-w-[80%]">
                     <span className="text-[10px] font-mono text-slate-400 block">#{formatPropostaId(op.numero_proposta)}</span>
@@ -646,9 +664,10 @@ export default function PipelinePage() {
                         <MapPin size={10} /> {op.cidade_exclusividade} - {op.uf_exclusividade}
                     </div>
                 )}
+                {/* Mostra apenas a primeira linha do histórico (última interação) */}
                 {op.observacoes && (
                     <p className="text-[10px] text-slate-400 italic truncate" title={op.observacoes}>
-                        "{op.observacoes}"
+                        "{op.observacoes.split('\n')[0]}"
                     </p>
                 )}
             </div>
@@ -710,7 +729,7 @@ export default function PipelinePage() {
                 <Printer size={16} /> Relatório
             </button>
 
-            <button onClick={() => { setEditingOp(null); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0}); setModalOpen(true); }} className="bg-[#2563eb] text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-sm flex items-center gap-2">
+            <button onClick={() => { setEditingOp(null); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0}); setNovaNotaInput(""); setModalOpen(true); }} className="bg-[#2563eb] text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-sm flex items-center gap-2">
                 <Plus size={16} /> Novo
             </button>
         </div>
@@ -769,7 +788,38 @@ export default function PipelinePage() {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Data Entrada</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_entrada} onChange={e => setFormData({...formData, data_entrada: e.target.value})} /></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Próximo Contato</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} /></div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Canal de Contato</label><select className="w-full bg-slate-50 border rounded-xl p-3" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-              <div className="md:col-span-4"><label className="text-[10px] font-bold text-slate-400 uppercase flex gap-2"><MessageSquare size={14}/> Anotações Internas (OBRIGATÓRIO)</label><textarea className="w-full bg-slate-50 border rounded-xl p-3 h-20 resize-none" placeholder="Ex: Cliente pediu desconto, ligar novamente semana que vem..." value={formData.observacoes} onChange={e => setFormData({...formData, observacoes: e.target.value})} /></div>
+              
+              {/* --- NOVO LAYOUT DE ANOTAÇÕES (LOG) --- */}
+              <div className="md:col-span-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase flex gap-2"><MessageSquare size={14}/> Histórico de Interações</label>
+                  </div>
+                  
+                  {/* Campo de Nova Nota */}
+                  <div className="flex gap-2">
+                      <input 
+                          className="flex-1 bg-white border-2 border-blue-100 rounded-xl p-3 focus:border-blue-500 outline-none text-sm"
+                          placeholder="Digite uma nova anotação aqui..."
+                          value={novaNotaInput}
+                          onChange={(e) => setNovaNotaInput(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && adicionarNotaAoHistorico()}
+                      />
+                      <button onClick={adicionarNotaAoHistorico} className="bg-blue-100 text-blue-600 p-3 rounded-xl hover:bg-blue-200 transition font-bold" title="Adicionar Nota">
+                          <Send size={18}/>
+                      </button>
+                  </div>
+
+                  {/* Campo de Histórico (Read Only) */}
+                  <div className="relative">
+                      <textarea 
+                          className="w-full bg-slate-50 border rounded-xl p-3 h-32 resize-none text-xs text-slate-600 font-mono leading-relaxed" 
+                          value={formData.observacoes} 
+                          readOnly
+                          placeholder="O histórico aparecerá aqui..."
+                      />
+                      <div className="absolute top-3 right-3 text-slate-300"><History size={16}/></div>
+                  </div>
+              </div>
             </div>
 
             <div className="p-6 bg-slate-50 border-t flex justify-end items-center shrink-0 gap-2">
