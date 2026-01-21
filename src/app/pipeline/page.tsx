@@ -36,8 +36,8 @@ export default function PipelinePage() {
   
   const [oportunidades, setOportunidades] = useState<any[]>([]);
   const [produtosApi, setProdutosApi] = useState<any[]>([]); 
-  const [exclusividades, setExclusividades] = useState<any[]>([]); // RECUPERADO
-  const [baseClientesExterna, setBaseClientesExterna] = useState<any[]>([]); // PARA BLOQUEIO
+  const [exclusividades, setExclusividades] = useState<any[]>([]); 
+  const [baseClientesExterna, setBaseClientesExterna] = useState<any[]>([]); 
   
   const [loading, setLoading] = useState(true);
   const [loadingProdutos, setLoadingProdutos] = useState(true);
@@ -81,7 +81,7 @@ export default function PipelinePage() {
     await Promise.all([
         carregarOportunidades(), 
         carregarProdutosDaAPI(), 
-        carregarExclusividades(), // RECUPERADO
+        carregarExclusividades(), 
         carregarBaseClientesOficial()
     ]);
     setLoading(false);
@@ -90,7 +90,6 @@ export default function PipelinePage() {
   const parseMoney = (valor: any) => {
     if (typeof valor === 'number') return valor;
     if (!valor) return 0;
-    // Tenta ser inteligente: se tem vírgula, assume padrão BR. Se só tem ponto, padrão US.
     let str = String(valor).replace('R$', '').trim();
     if (str.includes(',')) {
         str = str.replace(/\./g, '').replace(',', '.');
@@ -98,13 +97,11 @@ export default function PipelinePage() {
     return parseFloat(str) || 0;
   };
 
-  // 1. CARREGA EXCLUSIVIDADES (RECUPERADO)
   const carregarExclusividades = async () => {
     const { data } = await supabase.from('exclusividades').select('*');
     setExclusividades(data || []);
   };
 
-  // 2. CARREGA BASE OFICIAL (PARA BLOQUEIO)
   const carregarBaseClientesOficial = async () => {
     try {
         const res = await fetch(`${API_CLIENTES_URL}?path=clientes`);
@@ -138,7 +135,6 @@ export default function PipelinePage() {
     setOportunidades(data || []);
   };
 
-  // --- FILTRO DE EXCLUSIVIDADES (RECUPERADO) ---
   const produtosDisponiveis = produtosApi.filter(prod => {
     const nomeProduto = prod.ativo;
     const ufAtual = (formData.uf_exclusividade || '').toUpperCase().trim();
@@ -174,7 +170,7 @@ export default function PipelinePage() {
   useEffect(() => {
     const precoG = parseMoney(formData.valor_g_tabela);
     const kg = parseMoney(formData.kg_proposto);
-    const vTotal = (precoG * 1000 * kg).toFixed(2); // Retorna string "10000.00"
+    const vTotal = (precoG * 1000 * kg).toFixed(2); 
 
     setFormData(prev => {
         if (prev.valor === vTotal) return prev; 
@@ -183,14 +179,12 @@ export default function PipelinePage() {
   }, [formData.valor_g_tabela, formData.kg_proposto]);
 
 
-  // --- BUSCA CNPJ COM BLOQUEIO ANTECIPADO (MODAL VERMELHO) ---
   const buscarDadosCNPJ = async () => {
     const cnpjLimpo = formData.cnpj?.replace(/\D/g, '');
     if (cnpjLimpo?.length !== 14) return;
     
     setLoadingCNPJ(true);
 
-    // 1. CHECAGEM DE BLOQUEIO (NA BASE EXTERNA)
     const clienteNaBase = baseClientesExterna.find(c => {
         const cnpjBase = String(c.cnpj || '').replace(/\D/g, '');
         return cnpjBase === cnpjLimpo;
@@ -222,7 +216,6 @@ export default function PipelinePage() {
         }
     }
 
-    // 2. SE PASSOU, BUSCA NA BRASIL API
     try {
       const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`);
       if (!res.ok) throw new Error("Erro CNPJ");
@@ -242,7 +235,6 @@ export default function PipelinePage() {
 
   const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // --- PDF ---
   const cleanHtmlForPdf = (html: string) => {
     if (!html) return "";
     let text = html.replace(/<p>/g, "").replace(/<\/p>/g, "\n").replace(/<br\s*\/?>/gi, "\n");
@@ -313,7 +305,7 @@ export default function PipelinePage() {
       body: [
         ['Custo por fórmula (R$) (Manipulado)', formatCurrency(custoF)],
         ['Sugestão de Venda (R$) (Fator 5)', formatCurrency(precoV)],
-        [{ content: 'META DE VIABILIDADE', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: verdeMedio, fontSize: 12, halign: 'right' } }]
+        [{ content: 'META DE VIABILIDADE', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: [0, 128, 0], fontSize: 12, halign: 'right' } }]
       ],
       theme: 'grid',
       headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
@@ -367,15 +359,10 @@ export default function PipelinePage() {
     
     const { data: { user } } = await supabase.auth.getUser();
     
-    // --- CORREÇÃO: Tratamento do Valor para evitar erro de 1 Milhão ---
-    // O valor vem como "10000.00" do toFixed(2), que é uma string COM PONTO.
-    // Se usarmos replace(/\./g, ''), vira "1000000".
-    // Então, se já está no formato de ponto, apenas converte.
     let valorFinal = 0;
     if (String(formData.valor).includes('.')) {
         valorFinal = parseFloat(String(formData.valor));
     } else {
-        // Fallback para caso venha com vírgula (digitado manualmente)
         valorFinal = parseFloat(String(formData.valor).replace('R$', '').replace(/\./g, '').replace(',', '.')) || 0;
     }
 
@@ -413,10 +400,18 @@ export default function PipelinePage() {
     }
   };
 
-  // --- CARD COM PISCA-PISCA E ATRASADO (RECUPERADO) ---
+  const openWhatsApp = (e: React.MouseEvent, telefone: string) => {
+    e.stopPropagation();
+    if (!telefone) return alert("Número de telefone não disponível.");
+    const num = telefone.replace(/\D/g, '');
+    window.open(`https://wa.me/55${num}`, '_blank');
+  };
+
+  // --- CARD COM PISCA-PISCA E ATRASADO (MODIFICADO) ---
   const renderCard = (op: any) => {
     const hoje = getLocalData(); 
     const dataLembrete = op.data_lembrete; 
+    const isPerdido = op.status === 'perdido';
     
     const isAtrasado = dataLembrete && dataLembrete < hoje;
     const isHoje = dataLembrete === hoje; 
@@ -425,33 +420,79 @@ export default function PipelinePage() {
     let bgClass = 'bg-white';
     let textClass = 'text-slate-400';
     let label = 'Ligar: ';
+    let dateStyle = {};
 
-    if (isAtrasado) {
-        borderClass = 'border-red-200';
-        bgClass = 'bg-red-50/30';
-        textClass = 'text-red-500';
-        label = 'Atrasado: ';
-    } else if (isHoje) {
-        borderClass = 'border-red-500 border-2 animate-pulse'; 
-        textClass = 'text-red-600 font-bold';
-        label = 'HOJE: ';
+    if (isPerdido) {
+        // Se estiver perdido, não alerta, apenas risca a data
+        borderClass = 'border-slate-200';
+        bgClass = 'bg-gray-50';
+        textClass = 'text-slate-400';
+        if (dataLembrete) dateStyle = { textDecoration: 'line-through' };
+    } else {
+        if (isAtrasado) {
+            borderClass = 'border-red-200';
+            bgClass = 'bg-red-50'; // Vermelho simples, sem piscar
+            textClass = 'text-red-600 font-bold';
+            label = 'Atrasado: ';
+        } else if (isHoje) {
+            borderClass = 'border-red-400'; // Borda vermelha mais forte
+            bgClass = 'bg-red-50'; // Vermelho simples
+            textClass = 'text-red-700 font-bold';
+            label = 'HOJE: ';
+        }
     }
     
     return (
         <div key={op.id} onClick={() => { setEditingOp(op); setFormData(op); setModalOpen(true); }} className={`p-4 rounded-xl border cursor-pointer shadow-sm transition hover:-translate-y-1 ${bgClass} ${borderClass}`}>
-            <h4 className="font-bold text-slate-700 text-sm uppercase truncate">{op.nome_cliente}</h4>
+            <div className="flex justify-between items-start">
+                <h4 className="font-bold text-slate-700 text-sm uppercase truncate max-w-[80%]">{op.nome_cliente}</h4>
+                {op.telefone && (
+                    <button 
+                        onClick={(e) => openWhatsApp(e, op.telefone)} 
+                        className="text-green-500 hover:text-green-600 transition-colors p-1"
+                        title="Abrir WhatsApp"
+                    >
+                        <MessageCircle size={16} />
+                    </button>
+                )}
+            </div>
             <div className="flex justify-between items-center mt-2">
                 <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg font-bold truncate max-w-[50%]">{op.produto}</span>
                 <span className="text-xs font-black text-slate-600">{formatCurrency(op.valor)}</span>
             </div>
             {op.data_lembrete && (
-                <div className={`mt-3 pt-2 border-t flex items-center gap-1 text-[10px] font-bold ${textClass}`}>
+                <div className={`mt-3 pt-2 border-t flex items-center gap-1 text-[10px] font-bold ${textClass}`} style={dateStyle}>
                     <Clock size={10} /> {label} {op.data_lembrete.split('-').reverse().join('/')} 
                 </div>
             )}
         </div>
     );
   }
+
+  // Ordenação personalizada para Prospecção
+  const getSortedOpportunities = (estagioId: string) => {
+    const ops = oportunidades.filter(o => o.status === estagioId);
+    
+    if (estagioId === 'prospeccao') {
+        const hoje = getLocalData();
+        return ops.sort((a, b) => {
+            const dataA = a.data_lembrete || '9999-99-99';
+            const dataB = b.data_lembrete || '9999-99-99';
+            
+            // Prioridade para atrasados e hoje
+            const isAtrasadoOuHojeA = dataA <= hoje;
+            const isAtrasadoOuHojeB = dataB <= hoje;
+
+            if (isAtrasadoOuHojeA && !isAtrasadoOuHojeB) return -1;
+            if (!isAtrasadoOuHojeA && isAtrasadoOuHojeB) return 1;
+            
+            // Se ambos forem prioritários ou ambos não forem, ordena por data (mais antigo primeiro)
+            return dataA.localeCompare(dataB);
+        });
+    }
+    
+    return ops;
+  };
 
   return (
     <div className="w-full p-4">
@@ -465,7 +506,7 @@ export default function PipelinePage() {
           <div key={est.id} className="bg-slate-50/50 rounded-2xl border flex flex-col min-w-[250px] overflow-hidden">
             <div className={`p-4 border-b-2 ${est.color} bg-white flex justify-between items-center`}><h3 className={`font-black text-xs uppercase ${est.text}`}>{est.label}</h3></div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
-              {oportunidades.filter(o => o.status === est.id).map(op => renderCard(op))}
+              {getSortedOpportunities(est.id).map(op => renderCard(op))}
             </div>
           </div>
         ))}
@@ -523,7 +564,6 @@ export default function PipelinePage() {
         </div>, document.body
       )}
 
-      {/* --- MODAL DE BLOQUEIO (CENTRO) --- */}
       {blockModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in duration-300">
            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
