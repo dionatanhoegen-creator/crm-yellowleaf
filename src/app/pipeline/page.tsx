@@ -6,7 +6,7 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Hash
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -16,7 +16,6 @@ import dynamic from 'next/dynamic';
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 import 'react-quill-new/dist/quill.snow.css';
 
-// URLs DAS APIs
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 const API_CLIENTES_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
@@ -41,6 +40,7 @@ export default function PipelinePage() {
   
   const [loading, setLoading] = useState(true);
   const [loadingProdutos, setLoadingProdutos] = useState(true);
+  const [buscaTermo, setBuscaTermo] = useState(""); // NOVO: Estado para busca
   
   // MODAIS
   const [modalOpen, setModalOpen] = useState(false);
@@ -50,7 +50,6 @@ export default function PipelinePage() {
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
   
-  // --- DATA CORRETA ---
   const getLocalData = () => {
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60000;
@@ -68,7 +67,8 @@ export default function PipelinePage() {
     status: 'prospeccao',
     kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45',
     peso_formula_g: '13.2', fator_lucro: '5', cidade_exclusividade: '', uf_exclusividade: '', 
-    valor_g_tabela: '0'
+    valor_g_tabela: '0',
+    numero_proposta: 0 // NOVO CAMPO
   });
 
   useEffect(() => { 
@@ -185,6 +185,29 @@ export default function PipelinePage() {
     
     setLoadingCNPJ(true);
 
+    // 1. VERIFICAÇÃO DE PROPOSTA EXISTENTE (NOVO)
+    // Se não estivermos editando (é uma nova proposta), verifica se já existe
+    if (!editingOp) {
+        const propostaExistente = oportunidades.find(op => {
+            const opCnpj = op.cnpj?.replace(/\D/g, '') || '';
+            return opCnpj === cnpjLimpo;
+        });
+
+        if (propostaExistente) {
+            // Encontra o label do status para ficar bonito na mensagem
+            const statusLabel = ESTAGIOS.find(e => e.id === propostaExistente.status)?.label || propostaExistente.status;
+            
+            const confirmar = window.confirm(`ATENÇÃO:\nVocê já tem uma proposta para este CNPJ no status "${statusLabel.toUpperCase()}".\n\nDeseja realmente abrir uma NOVA proposta?`);
+            
+            if (!confirmar) {
+                setFormData(prev => ({ ...prev, cnpj: '' })); // Limpa o campo
+                setLoadingCNPJ(false);
+                return; // Para tudo
+            }
+        }
+    }
+
+    // 2. VERIFICAÇÃO BASE EXTERNA (BLOQUEIOS)
     const clienteNaBase = baseClientesExterna.find(c => {
         const cnpjBase = String(c.cnpj || '').replace(/\D/g, '');
         return cnpjBase === cnpjLimpo;
@@ -223,9 +246,9 @@ export default function PipelinePage() {
       const data = await res.json();
       setFormData(prev => ({ 
         ...prev, 
-        nome_cliente: (data.nome_fantasia || data.razao_social || '').toUpperCase(), // FORÇAR UPPERCASE AQUI
-        cidade_exclusividade: (data.municipio || '').toUpperCase(), // FORÇAR UPPERCASE AQUI
-        uf_exclusividade: (data.uf || '').toUpperCase(), // FORÇAR UPPERCASE AQUI
+        nome_cliente: (data.nome_fantasia || data.razao_social || '').toUpperCase(),
+        cidade_exclusividade: (data.municipio || '').toUpperCase(),
+        uf_exclusividade: (data.uf || '').toUpperCase(),
         telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : prev.telefone
       }));
     } catch (e) { }
@@ -254,7 +277,7 @@ export default function PipelinePage() {
 
     doc.setFont("helvetica", "bold"); doc.setFontSize(24);
     doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
-    doc.text("PROPOSTA COMERCIAL", 190, 20, { align: 'right' });
+    doc.text(`PROPOSTA #${item.numero_proposta || '---'}`, 190, 20, { align: 'right' }); // MOSTRA NÚMERO NO PDF
     doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(120);
     doc.text("YellowLeaf – Nutraceuticals Company", 190, 26, { align: 'right' });
     doc.setFillColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
@@ -355,10 +378,7 @@ export default function PipelinePage() {
   };
 
   const handleSave = async () => {
-    // 1. VALIDAÇÃO NOME
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
-
-    // 2. VALIDAÇÃO NOVA: OBSERVAÇÕES OBRIGATÓRIAS
     if (!formData.observacoes || formData.observacoes.trim() === "") {
         return alert("O campo 'Anotações Internas' é obrigatório. Registre o andamento da negociação.");
     }
@@ -372,10 +392,24 @@ export default function PipelinePage() {
         valorFinal = parseFloat(String(formData.valor).replace('R$', '').replace(/\./g, '').replace(',', '.')) || 0;
     }
 
+    // --- LÓGICA DE NUMERAÇÃO DA PROPOSTA ---
+    let numeroFinal = formData.numero_proposta;
+    
+    // Se é uma NOVA proposta (não edição) e ainda não tem número
+    if (!editingOp) {
+        // Acha o maior número atual
+        const maiorNumero = oportunidades.reduce((max, op) => {
+            const num = Number(op.numero_proposta) || 0;
+            return num > max ? num : max;
+        }, 467); // Começa do 467 para o primeiro ser 468
+        
+        numeroFinal = maiorNumero + 1;
+    }
+
     const payload = {
       ...formData,
       user_id: user?.id,
-      // 3. FORÇAR MAIÚSCULAS NO BANCO DE DADOS
+      numero_proposta: numeroFinal, // SALVA O NÚMERO
       nome_cliente: formData.nome_cliente.toUpperCase(),
       contato: formData.contato ? formData.contato.toUpperCase() : '',
       cidade_exclusividade: formData.cidade_exclusividade ? formData.cidade_exclusividade.toUpperCase() : '',
@@ -419,7 +453,6 @@ export default function PipelinePage() {
     window.open(`https://wa.me/55${num}`, '_blank');
   };
 
-  // --- CARD COM PISCA-PISCA E ATRASADO (MODIFICADO) ---
   const renderCard = (op: any) => {
     const hoje = getLocalData(); 
     const dataLembrete = op.data_lembrete; 
@@ -454,7 +487,11 @@ export default function PipelinePage() {
     return (
         <div key={op.id} onClick={() => { setEditingOp(op); setFormData(op); setModalOpen(true); }} className={`p-4 rounded-xl border cursor-pointer shadow-sm transition hover:-translate-y-1 ${bgClass} ${borderClass}`}>
             <div className="flex justify-between items-start">
-                <h4 className="font-bold text-slate-700 text-sm uppercase truncate max-w-[80%]" title={op.nome_cliente}>{op.nome_cliente}</h4>
+                <div className="max-w-[80%]">
+                    {/* Exibe o número da proposta em cima */}
+                    <span className="text-[10px] font-mono text-slate-400 block">#{op.numero_proposta || '---'}</span>
+                    <h4 className="font-bold text-slate-700 text-sm uppercase truncate" title={op.nome_cliente}>{op.nome_cliente}</h4>
+                </div>
                 {op.telefone && (
                     <a 
                         href={`https://wa.me/55${op.telefone.replace(/\D/g, '')}`} 
@@ -496,8 +533,17 @@ export default function PipelinePage() {
     );
   }
 
+  // Ordenação + Filtro de Busca
   const getSortedOpportunities = (estagioId: string) => {
-    const ops = oportunidades.filter(o => o.status === estagioId);
+    // 1. Filtra por status e pelo termo de busca
+    const ops = oportunidades.filter(o => {
+        const matchesStatus = o.status === estagioId;
+        if (!matchesStatus) return false;
+        
+        const term = buscaTermo.toLowerCase();
+        // Busca por Nome ou Número da Proposta
+        return o.nome_cliente.toLowerCase().includes(term) || String(o.numero_proposta || '').includes(term);
+    });
     
     if (estagioId === 'prospeccao') {
         const hoje = getLocalData();
@@ -520,9 +566,24 @@ export default function PipelinePage() {
 
   return (
     <div className="w-full p-4">
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <h1 className="text-2xl font-black text-[#1e293b] italic uppercase tracking-tighter">Pipeline YellowLeaf</h1>
-        <button onClick={() => { setEditingOp(null); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0'}); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95">+ Nova Oportunidade</button>
+        
+        {/* BARRA DE BUSCA E BOTÃO */}
+        <div className="flex items-center gap-4 w-full md:w-auto">
+            <div className="relative flex-1 md:w-64">
+                <input 
+                    type="text" 
+                    placeholder="Buscar Cliente ou N° Proposta..." 
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 outline-none text-sm font-bold uppercase text-slate-600"
+                    value={buscaTermo}
+                    onChange={(e) => setBuscaTermo(e.target.value)}
+                />
+                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            </div>
+            
+            <button onClick={() => { setEditingOp(null); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0}); setModalOpen(true); }} className="bg-[#2563eb] text-white px-6 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap">+ Nova Oportunidade</button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3 h-[calc(100vh-180px)] overflow-x-auto pb-4">
@@ -540,7 +601,9 @@ export default function PipelinePage() {
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-5xl rounded-[2.5rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95">
             <div className="bg-[#242f3e] p-6 flex justify-between items-center text-white shrink-0">
-              <h2 className="text-lg font-bold flex items-center gap-2">✨ {editingOp ? 'Editar Oportunidade' : 'Nova Oportunidade'}</h2>
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                  ✨ {editingOp ? `Editar Proposta #${editingOp.numero_proposta}` : 'Nova Oportunidade'}
+              </h2>
               <div className="flex gap-2">
                 {editingOp && <button onClick={() => gerarPDFPremium(formData)} className="bg-green-600 px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase shadow-lg"><Download size={14}/> PDF Premium</button>}
                 <button onClick={() => setModalOpen(false)} className="hover:bg-white/10 p-1 rounded-full"><X/></button>
@@ -576,7 +639,7 @@ export default function PipelinePage() {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Data Entrada</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_entrada} onChange={e => setFormData({...formData, data_entrada: e.target.value})} /></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Próximo Contato</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} /></div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Canal de Contato</label><select className="w-full bg-slate-50 border rounded-xl p-3" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-              <div className="md:col-span-4"><label className="text-[10px] font-bold text-slate-400 uppercase flex gap-2"><MessageSquare size={14}/> Anotações Internas (Não sai no PDF)</label><textarea className="w-full bg-slate-50 border rounded-xl p-3 h-20 resize-none" placeholder="Ex: Cliente pediu desconto, ligar novamente semana que vem..." value={formData.observacoes} onChange={e => setFormData({...formData, observacoes: e.target.value})} /></div>
+              <div className="md:col-span-4"><label className="text-[10px] font-bold text-slate-400 uppercase flex gap-2"><MessageSquare size={14}/> Anotações Internas (OBRIGATÓRIO)</label><textarea className="w-full bg-slate-50 border rounded-xl p-3 h-20 resize-none" placeholder="Ex: Cliente pediu desconto, ligar novamente semana que vem..." value={formData.observacoes} onChange={e => setFormData({...formData, observacoes: e.target.value})} /></div>
             </div>
 
             <div className="p-6 bg-slate-50 border-t flex justify-end items-center shrink-0 gap-2">
