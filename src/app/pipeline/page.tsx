@@ -400,15 +400,7 @@ export default function PipelinePage() {
     }
   };
 
-  // --- NOVA FUNÇÃO PARA ABRIR O WHATSAPP ---
-  const openWhatsApp = (e: React.MouseEvent, telefone: string) => {
-    e.stopPropagation(); // Impede que o modal de edição abra
-    if (!telefone) return alert("Número de telefone não disponível.");
-    const num = telefone.replace(/\D/g, ''); // Remove tudo que não é número
-    window.open(`https://wa.me/55${num}`, '_blank');
-  };
-
-  // --- CARD COM PISCA-PISCA E MAIS INFORMAÇÕES ---
+  // --- CARD COM PISCA-PISCA E ATRASADO (MODIFICADO) ---
   const renderCard = (op: any) => {
     const hoje = getLocalData(); 
     const dataLembrete = op.data_lembrete; 
@@ -446,14 +438,17 @@ export default function PipelinePage() {
             <div className="flex justify-between items-start">
                 <h4 className="font-bold text-slate-700 text-sm uppercase truncate max-w-[80%]" title={op.nome_cliente}>{op.nome_cliente}</h4>
                 {op.telefone && (
-                    <button 
-                        onClick={(e) => openWhatsApp(e, op.telefone)} 
-                        className="text-green-500 hover:text-green-600 transition-colors p-1"
+                    <a 
+                        href={`https://wa.me/55${op.telefone.replace(/\D/g, '')}`} 
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()} 
+                        className="text-green-500 hover:text-green-600 transition-colors p-1 relative z-10"
                         title="Abrir WhatsApp"
                     >
-                        {/* Botão do Whats dentro do Card */}
+                        {/* Botão do Whats com Link direto */}
                         <MessageCircle size={18} />
-                    </button>
+                    </a>
                 )}
             </div>
             
