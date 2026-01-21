@@ -223,9 +223,9 @@ export default function PipelinePage() {
       const data = await res.json();
       setFormData(prev => ({ 
         ...prev, 
-        nome_cliente: data.nome_fantasia || data.razao_social || '',
-        cidade_exclusividade: data.municipio || '',
-        uf_exclusividade: data.uf || '',
+        nome_cliente: (data.nome_fantasia || data.razao_social || '').toUpperCase(), // FORÇAR UPPERCASE AQUI
+        cidade_exclusividade: (data.municipio || '').toUpperCase(), // FORÇAR UPPERCASE AQUI
+        uf_exclusividade: (data.uf || '').toUpperCase(), // FORÇAR UPPERCASE AQUI
         telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : prev.telefone
       }));
     } catch (e) { }
@@ -355,7 +355,13 @@ export default function PipelinePage() {
   };
 
   const handleSave = async () => {
+    // 1. VALIDAÇÃO NOME
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
+
+    // 2. VALIDAÇÃO NOVA: OBSERVAÇÕES OBRIGATÓRIAS
+    if (!formData.observacoes || formData.observacoes.trim() === "") {
+        return alert("O campo 'Anotações Internas' é obrigatório. Registre o andamento da negociação.");
+    }
     
     const { data: { user } } = await supabase.auth.getUser();
     
@@ -369,6 +375,12 @@ export default function PipelinePage() {
     const payload = {
       ...formData,
       user_id: user?.id,
+      // 3. FORÇAR MAIÚSCULAS NO BANCO DE DADOS
+      nome_cliente: formData.nome_cliente.toUpperCase(),
+      contato: formData.contato ? formData.contato.toUpperCase() : '',
+      cidade_exclusividade: formData.cidade_exclusividade ? formData.cidade_exclusividade.toUpperCase() : '',
+      uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '',
+      
       valor: valorFinal,
       valor_g_tabela: parseFloat(String(formData.valor_g_tabela).replace(',', '.')) || 0,
       kg_proposto: parseFloat(String(formData.kg_proposto)) || 0,
@@ -400,6 +412,13 @@ export default function PipelinePage() {
     }
   };
 
+  const openWhatsApp = (e: React.MouseEvent, telefone: string) => {
+    e.stopPropagation();
+    if (!telefone) return alert("Número de telefone não disponível.");
+    const num = telefone.replace(/\D/g, '');
+    window.open(`https://wa.me/55${num}`, '_blank');
+  };
+
   // --- CARD COM PISCA-PISCA E ATRASADO (MODIFICADO) ---
   const renderCard = (op: any) => {
     const hoje = getLocalData(); 
@@ -415,9 +434,8 @@ export default function PipelinePage() {
     let label = 'Ligar: ';
     let dateStyle = {};
 
-    // Efeito para atrasados: oscilar entre vermelho claro e branco
     if (isAtrasado && !isPerdido) {
-        bgClass = 'bg-red-50 animate-pulse'; // Pisca o fundo suavemente (OSCILAÇÃO SOLICITADA)
+        bgClass = 'bg-red-50 animate-pulse';
         borderClass = 'border-red-300';
         textClass = 'text-red-600 font-bold';
         label = 'Atrasado: ';
@@ -446,13 +464,11 @@ export default function PipelinePage() {
                         className="text-green-500 hover:text-green-600 transition-colors p-1 relative z-10"
                         title="Abrir WhatsApp"
                     >
-                        {/* Botão do Whats com Link direto */}
                         <MessageCircle size={18} />
                     </a>
                 )}
             </div>
             
-            {/* Informações adicionais solicitadas */}
             <div className="flex flex-col gap-1 mt-2 mb-2">
                 {(op.cidade_exclusividade || op.uf_exclusividade) && (
                     <div className="flex items-center gap-1 text-[10px] text-slate-500 font-medium">
@@ -480,7 +496,6 @@ export default function PipelinePage() {
     );
   }
 
-  // Ordenação personalizada para Prospecção
   const getSortedOpportunities = (estagioId: string) => {
     const ops = oportunidades.filter(o => o.status === estagioId);
     
@@ -490,14 +505,12 @@ export default function PipelinePage() {
             const dataA = a.data_lembrete || '9999-99-99';
             const dataB = b.data_lembrete || '9999-99-99';
             
-            // Prioridade para atrasados e hoje
             const isAtrasadoOuHojeA = dataA <= hoje;
             const isAtrasadoOuHojeB = dataB <= hoje;
 
             if (isAtrasadoOuHojeA && !isAtrasadoOuHojeB) return -1;
             if (!isAtrasadoOuHojeA && isAtrasadoOuHojeB) return 1;
             
-            // Se ambos forem prioritários ou ambos não forem, ordena por data (mais antigo primeiro)
             return dataA.localeCompare(dataB);
         });
     }
@@ -542,10 +555,10 @@ export default function PipelinePage() {
                   </select>
               </div>
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">CNPJ</label><div className="flex gap-2"><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} onBlur={buscarDadosCNPJ} placeholder="Digite para validar..."/><button onClick={buscarDadosCNPJ} className="bg-blue-50 text-blue-600 p-3 rounded-xl border"><Search size={20}/></button></div></div>
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Razão Social</label><input className="w-full bg-slate-50 border rounded-xl p-3 font-bold uppercase" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value})}/></div>
+              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Razão Social</label><input className="w-full bg-slate-50 border rounded-xl p-3 font-bold uppercase" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Cidade</label><input className="w-full bg-slate-100 border rounded-xl p-3" value={formData.cidade_exclusividade} readOnly/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">UF</label><input className="w-full bg-slate-100 border rounded-xl p-3" value={formData.uf_exclusividade} readOnly/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Contato</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value})}/></div>
+              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Contato</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value.toUpperCase()})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">WhatsApp</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})}/></div>
 
               <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta e Payback</h3></div>
