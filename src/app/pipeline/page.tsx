@@ -6,7 +6,7 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -29,6 +29,16 @@ const ESTAGIOS = [
   { id: 'perdido', label: 'Perdido', color: 'border-red-500', text: 'text-red-700' },
 ];
 
+// Mapeamento de cores para o PDF (RGB)
+const STAGE_COLORS: any = {
+    prospeccao: [37, 99, 235],   // Azul
+    qualificacao: [147, 51, 234], // Roxo
+    apresentacao: [219, 39, 119], // Rosa
+    negociacao: [234, 179, 8],    // Amarelo/Ouro
+    fechado: [22, 163, 74],       // Verde
+    perdido: [220, 38, 38]        // Vermelho
+};
+
 const CANAIS_CONTATO = ['WhatsApp', 'Ligação', 'E-mail', 'Visita Presencial', 'Instagram'];
 
 export default function PipelinePage() {
@@ -48,9 +58,26 @@ export default function PipelinePage() {
   const [editingOp, setEditingOp] = useState<any>(null);
   const [blockModal, setBlockModal] = useState({ open: false, title: '', message: '', motivo: '' });
   
-  // NOVO MODAL: Confirmação de Duplicidade
   const [confirmModal, setConfirmModal] = useState<{open: boolean, message: string, onConfirm: () => void, onCancel: () => void}>({
       open: false, message: '', onConfirm: () => {}, onCancel: () => {}
+  });
+
+  // NOVO: Modal de Configuração do Relatório
+  const [reportConfigOpen, setReportConfigOpen] = useState(false);
+  // NOVO: Estado para a ordenação do relatório
+  const [reportSort, setReportSort] = useState('numero'); 
+
+  const [reportColumns, setReportColumns] = useState({
+      numero: true,
+      cliente: true,
+      produto: true,
+      estagio: true,
+      valor: true,
+      entrada: true,
+      canal: true,
+      cidade: false,
+      uf: false,
+      contato: false
   });
 
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
@@ -103,7 +130,6 @@ export default function PipelinePage() {
     return parseFloat(str) || 0;
   };
 
-  // Helper para formatar ID com zeros (Ex: 00468)
   const formatPropostaId = (id: any) => {
       if (!id) return '';
       return String(id).padStart(5, '0');
@@ -197,7 +223,6 @@ export default function PipelinePage() {
     
     setLoadingCNPJ(true);
 
-    // 1. VERIFICAÇÃO DE PROPOSTA EXISTENTE (COM MODAL BONITO)
     if (!editingOp) {
         const propostaExistente = oportunidades.find(op => {
             const opCnpj = op.cnpj?.replace(/\D/g, '') || '';
@@ -207,30 +232,27 @@ export default function PipelinePage() {
         if (propostaExistente) {
             const statusLabel = ESTAGIOS.find(e => e.id === propostaExistente.status)?.label || propostaExistente.status;
             
-            // Abre o modal personalizado
             setConfirmModal({
                 open: true,
                 message: `Você já tem uma proposta para este CNPJ no status "${statusLabel.toUpperCase()}". Deseja realmente abrir uma NOVA proposta?`,
                 onConfirm: () => {
                     setConfirmModal(prev => ({ ...prev, open: false }));
-                    continuarBuscaCNPJ(cnpjLimpo); // Continua
+                    continuarBuscaCNPJ(cnpjLimpo); 
                 },
                 onCancel: () => {
                     setConfirmModal(prev => ({ ...prev, open: false }));
-                    setFormData(prev => ({ ...prev, cnpj: '' })); // Limpa
+                    setFormData(prev => ({ ...prev, cnpj: '' })); 
                     setLoadingCNPJ(false);
                 }
             });
-            return; // Para e espera
+            return; 
         }
     }
 
     continuarBuscaCNPJ(cnpjLimpo);
   };
 
-  // Função auxiliar de busca (usada após passar pelo modal ou direto)
   const continuarBuscaCNPJ = async (cnpjLimpo: string) => {
-    // 2. VERIFICAÇÃO BASE EXTERNA
     const clienteNaBase = baseClientesExterna.find(c => {
         const cnpjBase = String(c.cnpj || '').replace(/\D/g, '');
         return cnpjBase === cnpjLimpo;
@@ -281,45 +303,88 @@ export default function PipelinePage() {
 
   const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // --- NOVO: GERAR RELATÓRIO GERAL (TABELA) ---
+  // --- NOVO: GERAR RELATÓRIO GERAL (PAISAGEM + CORES + FILTRO + ORDENAÇÃO) ---
   const gerarRelatorioGeral = () => {
-    const doc = new jsPDF();
+    const doc = new jsPDF({ orientation: "landscape" });
     
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
     doc.setTextColor(30, 41, 59);
-    doc.text("RELATÓRIO GERAL DE PIPELINE", 14, 20);
+    doc.text("RELATÓRIO GERAL DE PIPELINE", 14, 15);
     
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100);
-    doc.text(`Gerado em: ${new Date().toLocaleDateString()} às ${new Date().toLocaleTimeString()}`, 14, 26);
+    doc.text(`Gerado em: ${new Date().toLocaleDateString()} às ${new Date().toLocaleTimeString()}`, 14, 21);
 
-    const tableBody = oportunidades.map(op => [
-        formatPropostaId(op.numero_proposta),
-        op.nome_cliente,
-        op.produto || '-',
-        ESTAGIOS.find(e => e.id === op.status)?.label || op.status,
-        formatCurrency(op.valor),
-        op.data_entrada ? new Date(op.data_entrada).toLocaleDateString() : '-',
-        op.canal_contato
-    ]);
+    // 1. Lógica de Ordenação
+    let dadosOrdenados = [...oportunidades];
+    
+    if (reportSort === 'cliente') {
+        dadosOrdenados.sort((a, b) => a.nome_cliente.localeCompare(b.nome_cliente));
+    } else if (reportSort === 'estagio') {
+        const ordemEstagios = ESTAGIOS.map(e => e.id);
+        dadosOrdenados.sort((a, b) => ordemEstagios.indexOf(a.status) - ordemEstagios.indexOf(b.status));
+    } else {
+        // Default: Número da proposta (Decrescente - mais recente primeiro)
+        dadosOrdenados.sort((a, b) => (b.numero_proposta || 0) - (a.numero_proposta || 0));
+    }
+
+    // 2. Monta Cabeçalhos
+    let headers = [];
+    let dataKeys: any[] = [];
+
+    if (reportColumns.numero) { headers.push('Nº'); dataKeys.push('numero'); }
+    if (reportColumns.cliente) { headers.push('Cliente'); dataKeys.push('cliente'); }
+    if (reportColumns.cidade) { headers.push('Cidade'); dataKeys.push('cidade'); }
+    if (reportColumns.uf) { headers.push('UF'); dataKeys.push('uf'); }
+    if (reportColumns.contato) { headers.push('Contato'); dataKeys.push('contato'); }
+    if (reportColumns.produto) { headers.push('Produto'); dataKeys.push('produto'); }
+    if (reportColumns.estagio) { headers.push('Estágio'); dataKeys.push('estagio'); }
+    if (reportColumns.valor) { headers.push('Valor'); dataKeys.push('valor'); }
+    if (reportColumns.entrada) { headers.push('Entrada'); dataKeys.push('entrada'); }
+    if (reportColumns.canal) { headers.push('Canal'); dataKeys.push('canal'); }
+
+    // 3. Prepara os dados (usando a lista ordenada)
+    const tableBody = dadosOrdenados.map(op => {
+        let row: any[] = [];
+        if (reportColumns.numero) row.push(formatPropostaId(op.numero_proposta));
+        if (reportColumns.cliente) row.push(op.nome_cliente);
+        if (reportColumns.cidade) row.push(op.cidade_exclusividade || '-');
+        if (reportColumns.uf) row.push(op.uf_exclusividade || '-');
+        if (reportColumns.contato) row.push(op.contato || '-');
+        if (reportColumns.produto) row.push(op.produto || '-');
+        if (reportColumns.estagio) row.push(ESTAGIOS.find(e => e.id === op.status)?.label || op.status);
+        if (reportColumns.valor) row.push(formatCurrency(op.valor));
+        if (reportColumns.entrada) row.push(op.data_entrada ? new Date(op.data_entrada).toLocaleDateString() : '-');
+        if (reportColumns.canal) row.push(op.canal_contato);
+        
+        (row as any)._statusId = op.status;
+        return row;
+    });
+
+    const stageColIndex = headers.indexOf('Estágio');
 
     autoTable(doc, {
-        startY: 35,
-        head: [['Nº', 'Cliente', 'Produto', 'Estágio', 'Valor', 'Entrada', 'Canal']],
+        startY: 30,
+        head: [headers],
         body: tableBody,
         theme: 'grid',
         headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
-        styles: { fontSize: 8, cellPadding: 3, textColor: 60 },
+        styles: { fontSize: 8, cellPadding: 2, textColor: 60 },
         alternateRowStyles: { fillColor: [248, 250, 252] },
-        columnStyles: { 
-            0: { cellWidth: 15, fontStyle: 'bold' }, 
-            4: { halign: 'right', fontStyle: 'bold' } 
+        didParseCell: (data) => {
+            if (data.section === 'body' && data.column.index === stageColIndex) {
+                const statusId = (data.row.raw as any)._statusId;
+                const color = STAGE_COLORS[statusId] || [60, 60, 60];
+                data.cell.styles.textColor = color;
+                data.cell.styles.fontStyle = 'bold';
+            }
         }
     });
 
     doc.save(`Relatorio_Pipeline_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`);
+    setReportConfigOpen(false); 
   };
 
   const cleanHtmlForPdf = (html: string) => {
@@ -341,18 +406,14 @@ export default function PipelinePage() {
 
     doc.setFont("helvetica", "bold"); doc.setFontSize(24);
     doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
-    
-    // TÍTULO LIMPO
     doc.text("PROPOSTA COMERCIAL", 190, 20, { align: 'right' });
     
-    // NÚMERO DISCRETO ABAIXO DO TÍTULO
     doc.setFontSize(10); doc.setTextColor(150);
     if(item.numero_proposta) {
         doc.text(`Nº ${formatPropostaId(item.numero_proposta)}`, 190, 26, { align: 'right' });
     }
 
     doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(120);
-    // Ajustei a posição vertical deste texto para não sobrepor o número
     doc.text("YellowLeaf – Nutraceuticals Company", 190, 32, { align: 'right' });
     
     doc.setFillColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
@@ -361,7 +422,7 @@ export default function PipelinePage() {
     doc.setFillColor(cinzaSuave[0], cinzaSuave[1], cinzaSuave[2]);
     doc.rect(20, 50, 170, 25, 'F');
     doc.setFont("helvetica", "bold"); 
-    doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); // Verde no título da caixa
+    doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); 
     doc.text("DADOS DO CLIENTE", 25, 57);
     
     doc.setFontSize(10); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
@@ -470,7 +531,6 @@ export default function PipelinePage() {
         valorFinal = parseFloat(String(formData.valor).replace('R$', '').replace(/\./g, '').replace(',', '.')) || 0;
     }
 
-    // --- LÓGICA DE NUMERAÇÃO DA PROPOSTA ---
     let numeroFinal = formData.numero_proposta;
     
     if (!editingOp) {
@@ -563,31 +623,24 @@ export default function PipelinePage() {
         <div key={op.id} onClick={() => { setEditingOp(op); setFormData(op); setModalOpen(true); }} className={`p-4 rounded-xl border cursor-pointer shadow-sm transition hover:-translate-y-1 ${bgClass} ${borderClass}`}>
             <div className="flex justify-between items-start">
                 <div className="max-w-[80%]">
-                    {/* Número Discreto no Topo Direito (Via Classe absolute se fosse relativo, mas flex funciona bem aqui) */}
+                    <span className="text-[10px] font-mono text-slate-400 block">#{formatPropostaId(op.numero_proposta)}</span>
+                    <h4 className="font-bold text-slate-700 text-sm uppercase truncate" title={op.nome_cliente}>{op.nome_cliente}</h4>
                 </div>
-                {/* Número discreto no topo direito do card */}
-                <div className="w-full flex justify-between items-start mb-1">
-                    <span className="text-[10px] font-mono text-slate-400 font-bold">
-                        {formatPropostaId(op.numero_proposta)}
-                    </span>
-                    {op.telefone && (
-                        <a 
-                            href={`https://wa.me/55${op.telefone.replace(/\D/g, '')}`} 
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()} 
-                            className="text-green-500 hover:text-green-600 transition-colors p-1 -mt-1 -mr-1"
-                            title="Abrir WhatsApp"
-                        >
-                            <MessageCircle size={16} />
-                        </a>
-                    )}
-                </div>
+                {op.telefone && (
+                    <a 
+                        href={`https://wa.me/55${op.telefone.replace(/\D/g, '')}`} 
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()} 
+                        className="text-green-500 hover:text-green-600 transition-colors p-1 relative z-10"
+                        title="Abrir WhatsApp"
+                    >
+                        <MessageCircle size={18} />
+                    </a>
+                )}
             </div>
             
-            <h4 className="font-bold text-slate-700 text-sm uppercase truncate mb-2" title={op.nome_cliente}>{op.nome_cliente}</h4>
-
-            <div className="flex flex-col gap-1 mt-1 mb-2">
+            <div className="flex flex-col gap-1 mt-2 mb-2">
                 {(op.cidade_exclusividade || op.uf_exclusividade) && (
                     <div className="flex items-center gap-1 text-[10px] text-slate-500 font-medium">
                         <MapPin size={10} /> {op.cidade_exclusividade} - {op.uf_exclusividade}
@@ -653,7 +706,7 @@ export default function PipelinePage() {
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             </div>
             
-            <button onClick={gerarRelatorioGeral} className="bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 flex items-center gap-2 whitespace-nowrap text-sm hover:bg-slate-900">
+            <button onClick={() => setReportConfigOpen(true)} className="bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 flex items-center gap-2 whitespace-nowrap text-sm hover:bg-slate-900">
                 <Printer size={16} /> Relatório
             </button>
 
@@ -728,7 +781,77 @@ export default function PipelinePage() {
         </div>, document.body
       )}
 
-      {/* MODAL DE BLOQUEIO VERMELHO */}
+      {/* MODAL CONFIGURAÇÃO RELATÓRIO */}
+      {reportConfigOpen && mounted && createPortal(
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
+           <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
+              <div className="bg-slate-800 p-5 flex justify-between items-center text-white">
+                 <h2 className="text-lg font-bold flex items-center gap-2"><Filter size={20}/> Configurar Relatório</h2>
+                 <button onClick={() => setReportConfigOpen(false)} className="hover:bg-white/10 p-1 rounded-full"><X size={20}/></button>
+              </div>
+              <div className="p-6">
+                 {/* SELEÇÃO DE ORDENAÇÃO */}
+                 <div className="mb-6">
+                    <p className="text-sm text-slate-500 mb-2 font-bold flex items-center gap-2"><ArrowUpDown size={14}/> Ordenar por:</p>
+                    <select 
+                        value={reportSort} 
+                        onChange={(e) => setReportSort(e.target.value)}
+                        className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 bg-slate-50 outline-none focus:ring-2 focus:ring-blue-500 transition"
+                    >
+                        <option value="numero">Número da Proposta (Mais recentes)</option>
+                        <option value="cliente">Cliente (A-Z)</option>
+                        <option value="estagio">Estágio do Pipeline</option>
+                    </select>
+                 </div>
+
+                 <p className="text-sm text-slate-500 mb-4 font-bold">Colunas visíveis:</p>
+                 <div className="grid grid-cols-2 gap-3">
+                    {Object.keys(reportColumns).map((key) => (
+                        <label key={key} className="flex items-center gap-3 p-3 border rounded-xl cursor-pointer hover:bg-slate-50 transition">
+                            <input 
+                                type="checkbox" 
+                                checked={(reportColumns as any)[key]} 
+                                onChange={(e) => setReportColumns({...reportColumns, [key]: e.target.checked})}
+                                className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                            />
+                            <span className="text-sm font-bold text-slate-700 capitalize">{key.replace('numero', 'Nº').replace('estagio', 'Estágio')}</span>
+                        </label>
+                    ))}
+                 </div>
+              </div>
+              <div className="p-5 bg-slate-50 border-t flex justify-end gap-3">
+                 <button onClick={() => setReportConfigOpen(false)} className="px-4 py-2 font-bold text-slate-500 hover:bg-slate-100 rounded-lg">Cancelar</button>
+                 <button onClick={gerarRelatorioGeral} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 flex items-center gap-2">
+                    <Printer size={18}/> Gerar PDF
+                 </button>
+              </div>
+           </div>
+        </div>, document.body
+      )}
+
+      {/* MODAL DUPLICIDADE */}
+      {confirmModal.open && mounted && createPortal(
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
+           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
+              <div className="p-8 text-center">
+                 <div className="mx-auto w-16 h-16 bg-yellow-50 text-yellow-600 rounded-full flex items-center justify-center mb-6">
+                    <AlertTriangle size={32} />
+                 </div>
+                 <h2 className="text-xl font-black text-slate-800 mb-3">ATENÇÃO: DUPLICIDADE</h2>
+                 <p className="text-slate-500 font-medium leading-relaxed">{confirmModal.message}</p>
+              </div>
+              <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
+                 <button onClick={confirmModal.onCancel} className="flex-1 bg-white border border-slate-200 text-slate-600 font-bold py-3 rounded-xl hover:bg-slate-100 transition">
+                    Não, Cancelar
+                 </button>
+                 <button onClick={confirmModal.onConfirm} className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-yellow-200 transition transform active:scale-95">
+                    Sim, Continuar
+                 </button>
+              </div>
+           </div>
+        </div>, document.body
+      )}
+
       {blockModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in duration-300">
            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
@@ -746,29 +869,6 @@ export default function PipelinePage() {
               <div className="p-4 bg-slate-50 border-t border-slate-100">
                  <button onClick={() => setBlockModal({ ...blockModal, open: false })} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-xl transition transform active:scale-[0.98]">
                     ENTENDIDO, FECHAR AVISO
-                 </button>
-              </div>
-           </div>
-        </div>, document.body
-      )}
-
-      {/* NOVO MODAL DE DUPLICIDADE (AMARELO) */}
-      {confirmModal.open && mounted && createPortal(
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
-           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
-              <div className="p-8 text-center">
-                 <div className="mx-auto w-16 h-16 bg-yellow-50 text-yellow-600 rounded-full flex items-center justify-center mb-6">
-                    <AlertTriangle size={32} />
-                 </div>
-                 <h2 className="text-xl font-black text-slate-800 mb-3">ATENÇÃO: DUPLICIDADE</h2>
-                 <p className="text-slate-500 font-medium leading-relaxed">{confirmModal.message}</p>
-              </div>
-              <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
-                 <button onClick={confirmModal.onCancel} className="flex-1 bg-white border border-slate-200 text-slate-600 font-bold py-3 rounded-xl hover:bg-slate-100 transition">
-                    Não, Cancelar
-                 </button>
-                 <button onClick={confirmModal.onConfirm} className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-yellow-200 transition transform active:scale-95">
-                    Sim, Continuar
                  </button>
               </div>
            </div>
