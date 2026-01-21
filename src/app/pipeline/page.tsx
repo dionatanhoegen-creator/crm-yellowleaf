@@ -29,13 +29,14 @@ const ESTAGIOS = [
   { id: 'perdido', label: 'Perdido', color: 'border-red-500', text: 'text-red-700' },
 ];
 
+// Mapeamento de cores para o PDF (RGB)
 const STAGE_COLORS: any = {
-    prospeccao: [37, 99, 235],   
-    qualificacao: [147, 51, 234], 
-    apresentacao: [219, 39, 119], 
-    negociacao: [234, 179, 8],    
-    fechado: [22, 163, 74],       
-    perdido: [220, 38, 38]        
+    prospeccao: [37, 99, 235],   // Azul
+    qualificacao: [147, 51, 234], // Roxo
+    apresentacao: [219, 39, 119], // Rosa
+    negociacao: [234, 179, 8],    // Amarelo/Ouro
+    fechado: [22, 163, 74],       // Verde
+    perdido: [220, 38, 38]        // Vermelho
 };
 
 const CANAIS_CONTATO = ['WhatsApp', 'Ligação', 'E-mail', 'Visita Presencial', 'Instagram'];
@@ -61,7 +62,9 @@ export default function PipelinePage() {
       open: false, message: '', onConfirm: () => {}, onCancel: () => {}
   });
 
+  // NOVO: Modal de Configuração do Relatório
   const [reportConfigOpen, setReportConfigOpen] = useState(false);
+  // NOVO: Estado para a ordenação do relatório
   const [reportSort, setReportSort] = useState('numero'); 
 
   // NOVO: Estado para a NOVA anotação que está sendo digitada
