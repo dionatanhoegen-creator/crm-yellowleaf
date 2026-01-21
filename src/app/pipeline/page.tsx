@@ -86,6 +86,7 @@ export default function PipelinePage() {
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
   
+  // Função ajustada para evitar fusos errados na criação
   const getLocalData = () => {
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60000;
@@ -318,7 +319,7 @@ export default function PipelinePage() {
       setNovaNotaInput(""); // Limpa o campo de nova nota
   };
 
-  // --- GERAR RELATÓRIO GERAL (PAISAGEM + CORES + FILTRO + ORDENAÇÃO) ---
+  // --- GERAR RELATÓRIO GERAL (CORREÇÃO DE DATA) ---
   const gerarRelatorioGeral = () => {
     const doc = new jsPDF({ orientation: "landscape" });
     
@@ -367,7 +368,13 @@ export default function PipelinePage() {
         if (reportColumns.produto) row.push(op.produto || '-');
         if (reportColumns.estagio) row.push(ESTAGIOS.find(e => e.id === op.status)?.label || op.status);
         if (reportColumns.valor) row.push(formatCurrency(op.valor));
-        if (reportColumns.entrada) row.push(op.data_entrada ? new Date(op.data_entrada).toLocaleDateString() : '-');
+        
+        // --- CORREÇÃO DA DATA AQUI (FIX TIMEZONE) ---
+        // Tratamos como string e invertemos manualmente para não sofrer alteração de fuso
+        if (reportColumns.entrada) {
+            row.push(op.data_entrada ? op.data_entrada.split('-').reverse().join('/') : '-');
+        }
+
         if (reportColumns.canal) row.push(op.canal_contato);
         
         (row as any)._statusId = op.status;
