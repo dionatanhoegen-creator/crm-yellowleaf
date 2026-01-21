@@ -400,14 +400,15 @@ export default function PipelinePage() {
     }
   };
 
+  // --- NOVA FUNÇÃO PARA ABRIR O WHATSAPP ---
   const openWhatsApp = (e: React.MouseEvent, telefone: string) => {
-    e.stopPropagation();
+    e.stopPropagation(); // Impede que o modal de edição abra
     if (!telefone) return alert("Número de telefone não disponível.");
-    const num = telefone.replace(/\D/g, '');
+    const num = telefone.replace(/\D/g, ''); // Remove tudo que não é número
     window.open(`https://wa.me/55${num}`, '_blank');
   };
 
-  // --- CARD COM PISCA-PISCA E ATRASADO (MODIFICADO) ---
+  // --- CARD COM PISCA-PISCA E MAIS INFORMAÇÕES ---
   const renderCard = (op: any) => {
     const hoje = getLocalData(); 
     const dataLembrete = op.data_lembrete; 
@@ -422,46 +423,61 @@ export default function PipelinePage() {
     let label = 'Ligar: ';
     let dateStyle = {};
 
-    if (isPerdido) {
-        // Se estiver perdido, não alerta, apenas risca a data
+    // Efeito para atrasados: oscilar entre vermelho claro e branco
+    if (isAtrasado && !isPerdido) {
+        bgClass = 'bg-red-50 animate-pulse'; // Pisca o fundo suavemente (OSCILAÇÃO SOLICITADA)
+        borderClass = 'border-red-300';
+        textClass = 'text-red-600 font-bold';
+        label = 'Atrasado: ';
+    } else if (isHoje && !isPerdido) {
+        borderClass = 'border-orange-400';
+        bgClass = 'bg-orange-50';
+        textClass = 'text-orange-600 font-bold';
+        label = 'HOJE: ';
+    } else if (isPerdido) {
         borderClass = 'border-slate-200';
-        bgClass = 'bg-gray-50';
+        bgClass = 'bg-gray-50 opacity-75';
         textClass = 'text-slate-400';
         if (dataLembrete) dateStyle = { textDecoration: 'line-through' };
-    } else {
-        if (isAtrasado) {
-            borderClass = 'border-red-200';
-            bgClass = 'bg-red-50'; // Vermelho simples, sem piscar
-            textClass = 'text-red-600 font-bold';
-            label = 'Atrasado: ';
-        } else if (isHoje) {
-            borderClass = 'border-red-400'; // Borda vermelha mais forte
-            bgClass = 'bg-red-50'; // Vermelho simples
-            textClass = 'text-red-700 font-bold';
-            label = 'HOJE: ';
-        }
     }
     
     return (
         <div key={op.id} onClick={() => { setEditingOp(op); setFormData(op); setModalOpen(true); }} className={`p-4 rounded-xl border cursor-pointer shadow-sm transition hover:-translate-y-1 ${bgClass} ${borderClass}`}>
             <div className="flex justify-between items-start">
-                <h4 className="font-bold text-slate-700 text-sm uppercase truncate max-w-[80%]">{op.nome_cliente}</h4>
+                <h4 className="font-bold text-slate-700 text-sm uppercase truncate max-w-[80%]" title={op.nome_cliente}>{op.nome_cliente}</h4>
                 {op.telefone && (
                     <button 
                         onClick={(e) => openWhatsApp(e, op.telefone)} 
                         className="text-green-500 hover:text-green-600 transition-colors p-1"
                         title="Abrir WhatsApp"
                     >
-                        <MessageCircle size={16} />
+                        {/* Botão do Whats dentro do Card */}
+                        <MessageCircle size={18} />
                     </button>
                 )}
             </div>
-            <div className="flex justify-between items-center mt-2">
+            
+            {/* Informações adicionais solicitadas */}
+            <div className="flex flex-col gap-1 mt-2 mb-2">
+                {(op.cidade_exclusividade || op.uf_exclusividade) && (
+                    <div className="flex items-center gap-1 text-[10px] text-slate-500 font-medium">
+                        <MapPin size={10} /> {op.cidade_exclusividade} - {op.uf_exclusividade}
+                    </div>
+                )}
+                {op.observacoes && (
+                    <p className="text-[10px] text-slate-400 italic truncate" title={op.observacoes}>
+                        "{op.observacoes}"
+                    </p>
+                )}
+            </div>
+
+            <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-100/50">
                 <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg font-bold truncate max-w-[50%]">{op.produto}</span>
                 <span className="text-xs font-black text-slate-600">{formatCurrency(op.valor)}</span>
             </div>
+            
             {op.data_lembrete && (
-                <div className={`mt-3 pt-2 border-t flex items-center gap-1 text-[10px] font-bold ${textClass}`} style={dateStyle}>
+                <div className={`mt-2 flex items-center gap-1 text-[10px] font-bold ${textClass}`} style={dateStyle}>
                     <Clock size={10} /> {label} {op.data_lembrete.split('-').reverse().join('/')} 
                 </div>
             )}
