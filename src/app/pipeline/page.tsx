@@ -29,14 +29,13 @@ const ESTAGIOS = [
   { id: 'perdido', label: 'Perdido', color: 'border-red-500', text: 'text-red-700' },
 ];
 
-// Mapeamento de cores para o PDF (RGB)
 const STAGE_COLORS: any = {
-    prospeccao: [37, 99, 235],   // Azul
-    qualificacao: [147, 51, 234], // Roxo
-    apresentacao: [219, 39, 119], // Rosa
-    negociacao: [234, 179, 8],    // Amarelo/Ouro
-    fechado: [22, 163, 74],       // Verde
-    perdido: [220, 38, 38]        // Vermelho
+    prospeccao: [37, 99, 235],   
+    qualificacao: [147, 51, 234], 
+    apresentacao: [219, 39, 119], 
+    negociacao: [234, 179, 8],    
+    fechado: [22, 163, 74],       
+    perdido: [220, 38, 38]        
 };
 
 const CANAIS_CONTATO = ['WhatsApp', 'Ligação', 'E-mail', 'Visita Presencial', 'Instagram'];
@@ -62,9 +61,7 @@ export default function PipelinePage() {
       open: false, message: '', onConfirm: () => {}, onCancel: () => {}
   });
 
-  // NOVO: Modal de Configuração do Relatório
   const [reportConfigOpen, setReportConfigOpen] = useState(false);
-  // NOVO: Estado para a ordenação do relatório
   const [reportSort, setReportSort] = useState('numero'); 
 
   // NOVO: Estado para a NOVA anotação que está sendo digitada
@@ -86,7 +83,6 @@ export default function PipelinePage() {
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
   
-  // Função ajustada para evitar fusos errados na criação
   const getLocalData = () => {
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60000;
@@ -541,6 +537,11 @@ export default function PipelinePage() {
     if ((!formData.observacoes || formData.observacoes.trim() === "") && !novaNotaInput.trim()) {
         return alert("O campo 'Anotações Internas' é obrigatório. Registre o andamento da negociação.");
     }
+
+    // NOVA VALIDAÇÃO: DATA DE RETORNO OBRIGATÓRIA
+    if (!formData.data_lembrete || formData.data_lembrete.trim() === "") {
+        return alert("Por favor, selecione uma data para 'Próximo Contato'. É obrigatório definir um retorno.");
+    }
     
     // Se tiver nota nova digitada e o usuário clicar em Salvar, já insere automaticamente
     let obsFinal = formData.observacoes || "";
@@ -696,12 +697,25 @@ export default function PipelinePage() {
     );
   }
 
+  // --- MELHORIA: BUSCA ABRANGENTE ---
   const getSortedOpportunities = (estagioId: string) => {
     const ops = oportunidades.filter(o => {
         const matchesStatus = o.status === estagioId;
         if (!matchesStatus) return false;
+        
+        // Se não tiver termo de busca, retorna todos do status
+        if (!buscaTermo) return true;
+
         const term = buscaTermo.toLowerCase();
-        return o.nome_cliente.toLowerCase().includes(term) || String(o.numero_proposta || '').includes(term);
+        
+        // Verifica em múltiplos campos: Nome, Número Proposta, CNPJ (apenas números), Telefone, Contato
+        const matchNome = o.nome_cliente?.toLowerCase().includes(term);
+        const matchNumero = String(o.numero_proposta || '').includes(term);
+        const matchCNPJ = o.cnpj?.replace(/\D/g, '').includes(term); // Busca CNPJ limpo
+        const matchTelefone = o.telefone?.replace(/\D/g, '').includes(term); // Busca Telefone limpo
+        const matchContato = o.contato?.toLowerCase().includes(term); // Busca Nome do Contato
+
+        return matchNome || matchNumero || matchCNPJ || matchTelefone || matchContato;
     });
     
     if (estagioId === 'prospeccao') {
@@ -727,7 +741,7 @@ export default function PipelinePage() {
             <div className="relative flex-1 md:w-64">
                 <input 
                     type="text" 
-                    placeholder="Buscar Cliente ou N°..." 
+                    placeholder="Buscar (Nome, CNPJ, Contato, Nº...)" 
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 outline-none text-sm font-bold uppercase text-slate-600"
                     value={buscaTermo}
                     onChange={(e) => setBuscaTermo(e.target.value)}
@@ -796,16 +810,20 @@ export default function PipelinePage() {
 
               <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-orange-600 uppercase">3. Gestão e Acompanhamento (Interno)</h3></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Data Entrada</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_entrada} onChange={e => setFormData({...formData, data_entrada: e.target.value})} /></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Próximo Contato</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} /></div>
+              
+              {/* CAMPO DE DATA DE RETORNO (OBRIGATÓRIO AGORA) */}
+              <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">Próximo Contato <span className="text-red-500">*</span></label>
+                  <input type="date" className="w-full bg-slate-50 border rounded-xl p-3 focus:ring-2 focus:ring-orange-200 outline-none" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} />
+              </div>
+              
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Canal de Contato</label><select className="w-full bg-slate-50 border rounded-xl p-3" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
               
-              {/* --- NOVO LAYOUT DE ANOTAÇÕES (LOG) --- */}
               <div className="md:col-span-4 space-y-3">
                   <div className="flex items-center justify-between">
                       <label className="text-[10px] font-bold text-slate-400 uppercase flex gap-2"><MessageSquare size={14}/> Histórico de Interações</label>
                   </div>
                   
-                  {/* Campo de Nova Nota */}
                   <div className="flex gap-2">
                       <input 
                           className="flex-1 bg-white border-2 border-blue-100 rounded-xl p-3 focus:border-blue-500 outline-none text-sm"
@@ -819,7 +837,6 @@ export default function PipelinePage() {
                       </button>
                   </div>
 
-                  {/* Campo de Histórico (Read Only) */}
                   <div className="relative">
                       <textarea 
                           className="w-full bg-slate-50 border rounded-xl p-3 h-32 resize-none text-xs text-slate-600 font-mono leading-relaxed" 
@@ -850,7 +867,6 @@ export default function PipelinePage() {
                  <button onClick={() => setReportConfigOpen(false)} className="hover:bg-white/10 p-1 rounded-full"><X size={20}/></button>
               </div>
               <div className="p-6">
-                 {/* SELEÇÃO DE ORDENAÇÃO */}
                  <div className="mb-6">
                     <p className="text-sm text-slate-500 mb-2 font-bold flex items-center gap-2"><ArrowUpDown size={14}/> Ordenar por:</p>
                     <select 
