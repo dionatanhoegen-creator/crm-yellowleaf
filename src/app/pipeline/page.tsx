@@ -365,8 +365,6 @@ export default function PipelinePage() {
         if (reportColumns.estagio) row.push(ESTAGIOS.find(e => e.id === op.status)?.label || op.status);
         if (reportColumns.valor) row.push(formatCurrency(op.valor));
         
-        // --- CORREÇÃO DA DATA AQUI (FIX TIMEZONE) ---
-        // Tratamos como string e invertemos manualmente para não sofrer alteração de fuso
         if (reportColumns.entrada) {
             row.push(op.data_entrada ? op.data_entrada.split('-').reverse().join('/') : '-');
         }
@@ -707,13 +705,17 @@ export default function PipelinePage() {
         if (!buscaTermo) return true;
 
         const term = buscaTermo.toLowerCase();
-        
-        // Verifica em múltiplos campos: Nome, Número Proposta, CNPJ (apenas números), Telefone, Contato
+        const termClean = term.replace(/\D/g, ''); // Termo só com números para comparar CNPJ/Tel
+
+        // Verifica em múltiplos campos: Nome, Número Proposta, CNPJ (limpo), Telefone (limpo), Contato
         const matchNome = o.nome_cliente?.toLowerCase().includes(term);
         const matchNumero = String(o.numero_proposta || '').includes(term);
-        const matchCNPJ = o.cnpj?.replace(/\D/g, '').includes(term); // Busca CNPJ limpo
-        const matchTelefone = o.telefone?.replace(/\D/g, '').includes(term); // Busca Telefone limpo
-        const matchContato = o.contato?.toLowerCase().includes(term); // Busca Nome do Contato
+        
+        // Verifica CNPJ e Telefone apenas se houver números na busca
+        const matchCNPJ = termClean.length > 0 && o.cnpj?.replace(/\D/g, '').includes(termClean); 
+        const matchTelefone = termClean.length > 0 && o.telefone?.replace(/\D/g, '').includes(termClean);
+        
+        const matchContato = o.contato?.toLowerCase().includes(term); 
 
         return matchNome || matchNumero || matchCNPJ || matchTelefone || matchContato;
     });
