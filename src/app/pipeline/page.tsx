@@ -518,7 +518,7 @@ const cleanHtmlForPdf = (html: string) => {
     }
 
     paybackBody.push([`Custo Total por Fórmula (Manipulado)`, { content: formatCurrency(custoTotalFarmacia), styles: { fontStyle: 'bold' } }]);
-    paybackBody.push([`Sugestão de Venda (Fator ${item.fator_lucro || 5} no Ativo + Custo Fixo)`, formatCurrency(precoVendaSugestao)]);
+    paybackBody.push([`Sugestão de Venda (Fator ${item.fator_lucro || 5} no Ativo)`, formatCurrency(precoVendaSugestao)]);
     paybackBody.push([{ content: 'META DE VIABILIDADE', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: [0, 128, 0], fontSize: 12, halign: 'right' } }]);
 
     autoTable(doc, {
