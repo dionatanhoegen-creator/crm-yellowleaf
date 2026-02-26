@@ -414,7 +414,6 @@ const cleanHtmlForPdf = (html: string) => {
     text = text.replace(/<\/li>/gi, "\n");
 
     // 3. TRUQUE DO NEGRITO E SUBLINHADO:
-    // Converte palavras em negrito para MAIÚSCULAS para dar destaque visual no PDF
     text = text.replace(/<strong[^>]*>(.*?)<\/strong>/gi, (match, p1) => p1.toUpperCase());
     text = text.replace(/<b[^>]*>(.*?)<\/b>/gi, (match, p1) => p1.toUpperCase());
     
@@ -424,9 +423,9 @@ const cleanHtmlForPdf = (html: string) => {
     // 4. Remove todas as outras tags HTML (itálico, etc) que sobraram
     text = text.replace(/<[^>]+>/g, "");
     
-    // 5. Decodifica espaços e caracteres especiais
-    text = text.replace(/&nbsp;/g, " ");
-    text = text.replace(/&amp;/g, "&");
+    // 5. Decodifica espaços e caracteres especiais (CORREÇÃO: Adicionado 'i' de insensitive)
+    text = text.replace(/&nbsp;/gi, " ");
+    text = text.replace(/&amp;/gi, "&");
     
     // 6. Limpa excesso de espaços em branco (deixa no máximo 2 enter seguidos)
     text = text.replace(/\n{3,}/g, "\n\n").trim();
