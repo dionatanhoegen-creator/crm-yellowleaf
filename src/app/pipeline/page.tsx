@@ -63,8 +63,6 @@ export default function PipelinePage() {
 
   const [reportConfigOpen, setReportConfigOpen] = useState(false);
   const [reportSort, setReportSort] = useState('numero'); 
-
-  // NOVO: Estado para a NOVA anotação que está sendo digitada
   const [novaNotaInput, setNovaNotaInput] = useState("");
 
   const [reportColumns, setReportColumns] = useState({
@@ -89,6 +87,7 @@ export default function PipelinePage() {
     return new Date(now.getTime() - offset).toISOString().split('T')[0];
   };
 
+  // ADICIONADO O CAMPO custo_fixo_operacional NO ESTADO INICIAL
   const [formData, setFormData] = useState({
     cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '',
     aplicacao: '', valor: '', 
@@ -99,7 +98,8 @@ export default function PipelinePage() {
     observacoes_proposta: '', 
     status: 'prospeccao',
     kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45',
-    peso_formula_g: '13.2', fator_lucro: '5', cidade_exclusividade: '', uf_exclusividade: '', 
+    peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', 
+    cidade_exclusividade: '', uf_exclusividade: '', 
     valor_g_tabela: '0',
     numero_proposta: 0
   });
@@ -199,7 +199,7 @@ export default function PipelinePage() {
              setFormData(prev => ({ 
                 ...prev, 
                 valor_g_tabela: produtoSelecionado.preco_grama.toFixed(2).replace('.', ','), 
-                peso_formula_g: produtoSelecionado.peso_formula.toString()
+                peso_formula_g: produtoSelecionado.peso_formula.toString() // Puxa o padrão, mas agora o usuário pode editar depois
             }));
         }
     }
@@ -303,19 +303,16 @@ export default function PipelinePage() {
 
   const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // --- NOVA FUNÇÃO PARA ADICIONAR NOTA AO HISTÓRICO ---
   const adicionarNotaAoHistorico = () => {
       if (!novaNotaInput.trim()) return;
 
       const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-      // Cria a nova linha de log
       const novaEntrada = `📅 ${dataHora} | 💬 ${novaNotaInput}\n────────────────────────────────────────\n${formData.observacoes || ''}`;
       
       setFormData({ ...formData, observacoes: novaEntrada });
-      setNovaNotaInput(""); // Limpa o campo de nova nota
+      setNovaNotaInput(""); 
   };
 
-  // --- GERAR RELATÓRIO GERAL (CORREÇÃO DE DATA) ---
   const gerarRelatorioGeral = () => {
     const doc = new jsPDF({ orientation: "landscape" });
     
@@ -469,18 +466,32 @@ export default function PipelinePage() {
     });
 
     const paybackY = (doc as any).lastAutoTable.finalY + 8;
-    const custoF = (vGramaReal * (Number(item.peso_formula_g) || 13.2));
-    const precoV = (custoF * (Number(item.fator_lucro) || 5));
-    const formulasDia = vParc > 0 ? ((vParc / precoV) / 22) : 0;
+    
+    // --- NOVA MATEMÁTICA DE PAYBACK FLEXÍVEL ---
+    const doseSugerida = Number(item.peso_formula_g) || 13.2; // O "peso_formula_g" agora atua como Dose Sugerida
+    const custoMatPrimaFormula = vGramaReal * doseSugerida;
+    const custoFixoOp = parseMoney(item.custo_fixo_operacional);
+    const custoTotalManipulado = custoMatPrimaFormula + custoFixoOp;
+    const precoVendaSugestao = custoTotalManipulado * (Number(item.fator_lucro) || 5);
+    const formulasDia = vParc > 0 ? ((vParc / precoVendaSugestao) / 22) : 0;
+
+    // Monta o corpo da tabela condicionalmente
+    const paybackBody: any[] = [
+        [`Custo Matéria-Prima (Dose ${doseSugerida}g)`, formatCurrency(custoMatPrimaFormula)],
+    ];
+
+    if (custoFixoOp > 0) {
+        paybackBody.push([`Custo Fixo Operacional (Embalagem, etc)`, formatCurrency(custoFixoOp)]);
+    }
+
+    paybackBody.push([`Custo Total por Fórmula (Manipulado)`, { content: formatCurrency(custoTotalManipulado), styles: { fontStyle: 'bold' } }]);
+    paybackBody.push([`Sugestão de Venda (Fator ${item.fator_lucro || 5})`, formatCurrency(precoVendaSugestao)]);
+    paybackBody.push([{ content: 'META DE VIABILIDADE', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: [0, 128, 0], fontSize: 12, halign: 'right' } }]);
 
     autoTable(doc, {
       startY: paybackY, margin: { left: 20, right: 20 },
       head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
-      body: [
-        ['Custo por fórmula (R$) (Manipulado)', formatCurrency(custoF)],
-        ['Sugestão de Venda (R$) (Fator 5)', formatCurrency(precoV)],
-        [{ content: 'META DE VIABILIDADE', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: [0, 128, 0], fontSize: 12, halign: 'right' } }]
-      ],
+      body: paybackBody,
       theme: 'grid',
       headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
       styles: { fontSize: 10, cellPadding: 2, textColor: textoCinza },
@@ -531,17 +542,14 @@ export default function PipelinePage() {
   const handleSave = async () => {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     
-    // VALIDACAO: Ou tem historico gravado, ou tem nota nova sendo adicionada
     if ((!formData.observacoes || formData.observacoes.trim() === "") && !novaNotaInput.trim()) {
         return alert("O campo 'Anotações Internas' é obrigatório. Registre o andamento da negociação.");
     }
 
-    // NOVA VALIDAÇÃO: DATA DE RETORNO OBRIGATÓRIA
     if (!formData.data_lembrete || formData.data_lembrete.trim() === "") {
         return alert("Por favor, selecione uma data para 'Próximo Contato'. É obrigatório definir um retorno.");
     }
     
-    // Se tiver nota nova digitada e o usuário clicar em Salvar, já insere automaticamente
     let obsFinal = formData.observacoes || "";
     if (novaNotaInput.trim()) {
         const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -582,10 +590,13 @@ export default function PipelinePage() {
       kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
       parcelas: parseInt(String(formData.parcelas)) || 1,
       dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45,
+      peso_formula_g: String(formData.peso_formula_g).replace(',', '.'), // Salva a dose editada
+      fator_lucro: String(formData.fator_lucro).replace(',', '.'),       // Salva o fator de lucro
+      custo_fixo_operacional: parseFloat(String(formData.custo_fixo_operacional).replace('R$', '').replace(',', '.')) || 0, // NOVO
       data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null,
       data_entrada: formData.data_entrada || getLocalData(),
       canal_contato: formData.canal_contato,
-      observacoes: obsFinal, // Salva o histórico atualizado
+      observacoes: obsFinal, 
       observacoes_proposta: formData.observacoes_proposta 
     };
 
@@ -593,7 +604,7 @@ export default function PipelinePage() {
     
     if (!error) { 
       setModalOpen(false); 
-      setNovaNotaInput(""); // Limpa o input
+      setNovaNotaInput(""); 
       carregarOportunidades(); 
     } else { 
       console.error("Erro banco:", error); 
@@ -647,7 +658,7 @@ export default function PipelinePage() {
     }
     
     return (
-        <div key={op.id} onClick={() => { setEditingOp(op); setFormData(op); setNovaNotaInput(""); setModalOpen(true); }} className={`p-4 rounded-xl border cursor-pointer shadow-sm transition hover:-translate-y-1 ${bgClass} ${borderClass}`}>
+        <div key={op.id} onClick={() => { setEditingOp(op); setFormData({...formData, ...op, custo_fixo_operacional: op.custo_fixo_operacional || '0'}); setNovaNotaInput(""); setModalOpen(true); }} className={`p-4 rounded-xl border cursor-pointer shadow-sm transition hover:-translate-y-1 ${bgClass} ${borderClass}`}>
             <div className="flex justify-between items-start">
                 <div className="max-w-[80%]">
                     <span className="text-[10px] font-mono text-slate-400 block">#{formatPropostaId(op.numero_proposta)}</span>
@@ -673,7 +684,6 @@ export default function PipelinePage() {
                         <MapPin size={10} /> {op.cidade_exclusividade} - {op.uf_exclusividade}
                     </div>
                 )}
-                {/* Mostra apenas a primeira linha do histórico (última interação) */}
                 {op.observacoes && (
                     <p className="text-[10px] text-slate-400 italic truncate" title={op.observacoes}>
                         "{op.observacoes.split('\n')[0]}"
@@ -695,26 +705,20 @@ export default function PipelinePage() {
     );
   }
 
-  // --- MELHORIA: BUSCA ABRANGENTE ---
   const getSortedOpportunities = (estagioId: string) => {
     const ops = oportunidades.filter(o => {
         const matchesStatus = o.status === estagioId;
         if (!matchesStatus) return false;
         
-        // Se não tiver termo de busca, retorna todos do status
         if (!buscaTermo) return true;
 
         const term = buscaTermo.toLowerCase();
-        const termClean = term.replace(/\D/g, ''); // Termo só com números para comparar CNPJ/Tel
+        const termClean = term.replace(/\D/g, ''); 
 
-        // Verifica em múltiplos campos: Nome, Número Proposta, CNPJ (limpo), Telefone (limpo), Contato
         const matchNome = o.nome_cliente?.toLowerCase().includes(term);
         const matchNumero = String(o.numero_proposta || '').includes(term);
-        
-        // Verifica CNPJ e Telefone apenas se houver números na busca
-        const matchCNPJ = termClean.length > 0 && o.cnpj?.replace(/\D/g, '').includes(termClean); 
-        const matchTelefone = termClean.length > 0 && o.telefone?.replace(/\D/g, '').includes(termClean);
-        
+        const matchCNPJ = termClean.length > 0 && (o.cnpj || '').replace(/\D/g, '').includes(termClean); 
+        const matchTelefone = termClean.length > 0 && (o.telefone || '').replace(/\D/g, '').includes(termClean);
         const matchContato = o.contato?.toLowerCase().includes(term); 
 
         return matchNome || matchNumero || matchCNPJ || matchTelefone || matchContato;
@@ -755,7 +759,7 @@ export default function PipelinePage() {
                 <Printer size={16} /> Relatório
             </button>
 
-            <button onClick={() => { setEditingOp(null); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0}); setNovaNotaInput(""); setModalOpen(true); }} className="bg-[#2563eb] text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-sm flex items-center gap-2">
+            <button onClick={() => { setEditingOp(null); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0}); setNovaNotaInput(""); setModalOpen(true); }} className="bg-[#2563eb] text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-sm flex items-center gap-2">
                 <Plus size={16} /> Novo
             </button>
         </div>
@@ -808,12 +812,25 @@ export default function PipelinePage() {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Parcelas</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª Parc</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
 
+              {/* --- NOVOS CAMPOS PARA FLEXIBILIDADE DE PAYBACK --- */}
+              <div className="bg-slate-100 p-4 rounded-xl border border-slate-200">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1" title="Dose diária recomendada em gramas">Dose Sugerida (g) <AlertCircle size={12}/></label>
+                  <input type="text" className="w-full bg-white border rounded-lg p-2 text-sm mt-1 focus:border-green-400 outline-none" value={formData.peso_formula_g} onChange={e => setFormData({...formData, peso_formula_g: e.target.value})}/>
+              </div>
+              <div className="bg-slate-100 p-4 rounded-xl border border-slate-200">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1" title="Custo extra da farmácia: Pote, Cápsula, Excipiente, Mão de Obra">Custo Fixo (R$) <AlertCircle size={12}/></label>
+                  <input type="number" step="0.01" className="w-full bg-white border rounded-lg p-2 text-sm mt-1 focus:border-green-400 outline-none" value={formData.custo_fixo_operacional} onChange={e => setFormData({...formData, custo_fixo_operacional: e.target.value})}/>
+              </div>
+              <div className="md:col-span-2 bg-slate-100 p-4 rounded-xl border border-slate-200">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1" title="Multiplicador para Sugestão de Preço de Venda">Fator de Lucro (Ex: 5) <AlertCircle size={12}/></label>
+                  <input type="number" step="0.1" className="w-full bg-white border rounded-lg p-2 text-sm mt-1 focus:border-green-400 outline-none" value={formData.fator_lucro} onChange={e => setFormData({...formData, fator_lucro: e.target.value})}/>
+              </div>
+
               <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100"><label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><FileText size={14}/> Notas e Condições (Para o PDF)</label><div className="bg-white rounded-xl overflow-hidden border border-blue-100 text-slate-700"><ReactQuill theme="snow" value={formData.observacoes_proposta} onChange={(val) => setFormData({...formData, observacoes_proposta: val})} modules={{ toolbar: [['bold', 'italic', 'underline'], [{'list': 'ordered'}, {'list': 'bullet'}], ['clean']] }} /></div></div>
 
               <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-orange-600 uppercase">3. Gestão e Acompanhamento (Interno)</h3></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Data Entrada</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_entrada} onChange={e => setFormData({...formData, data_entrada: e.target.value})} /></div>
               
-              {/* CAMPO DE DATA DE RETORNO (OBRIGATÓRIO AGORA) */}
               <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">Próximo Contato <span className="text-red-500">*</span></label>
                   <input type="date" className="w-full bg-slate-50 border rounded-xl p-3 focus:ring-2 focus:ring-orange-200 outline-none" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} />
