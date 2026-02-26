@@ -395,12 +395,34 @@ export default function PipelinePage() {
     setReportConfigOpen(false); 
   };
 
-  const cleanHtmlForPdf = (html: string) => {
+const cleanHtmlForPdf = (html: string) => {
     if (!html) return "";
-    let text = html.replace(/<p>/g, "").replace(/<\/p>/g, "\n").replace(/<br\s*\/?>/gi, "\n");
-    text = text.replace(/<li>/g, "• ").replace(/<\/li>/g, "\n");
+    let text = html;
+    
+    // 1. Preserva parágrafos vazios e quebras de linha
+    text = text.replace(/<p><br><\/p>/gi, "\n\n");
+    text = text.replace(/<br\s*\/?>/gi, "\n");
+    text = text.replace(/<\/p>/gi, "\n\n");
+    text = text.replace(/<p>/gi, "");
+    
+    // 2. Trata as listas (bolinhas e números) com recuo
+    text = text.replace(/<ul>/gi, "");
+    text = text.replace(/<\/ul>/gi, "\n");
+    text = text.replace(/<ol>/gi, "");
+    text = text.replace(/<\/ol>/gi, "\n");
+    text = text.replace(/<li>/gi, "   • ");
+    text = text.replace(/<\/li>/gi, "\n");
+    
+    // 3. Remove todas as outras tags HTML (negrito, itálico, etc)
     text = text.replace(/<[^>]+>/g, "");
-    text = text.replace(/&nbsp;/g, " ").replace(/\n\s*\n/g, "\n").trim();
+    
+    // 4. Decodifica espaços e caracteres especiais
+    text = text.replace(/&nbsp;/g, " ");
+    text = text.replace(/&amp;/g, "&");
+    
+    // 5. Limpa excesso de espaços em branco (deixa no máximo 2 enter seguidos)
+    text = text.replace(/\n{3,}/g, "\n\n").trim();
+    
     return text;
   };
 
