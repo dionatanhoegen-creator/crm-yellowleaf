@@ -38,12 +38,17 @@ export default function FaturamentoPage() {
       
       const json = await res.json();
       
-      if (json.success || json.data) { // Aceita se tiver success:true ou se tiver data direto
-        const dataFinal = json.data || json; // Compatibilidade com versões diferentes do backend
+      if (json.success || json.data) {
+        // --- AQUI ESTÁ A CORREÇÃO MÁGICA ---
+        // Se a planilha mandou "data" dentro de "data", a gente desempacota!
+        let dataFinal = json.data || json;
+        if (dataFinal && dataFinal.data && dataFinal.data.kpi) {
+             dataFinal = dataFinal.data;
+        }
+
         setDados(dataFinal);
         
-        // --- LÓGICA DE LISTA DE VENDEDORES (PROTEGIDA) ---
-        // Verifica dentro de rankings ou na raiz
+        // --- LÓGICA DE LISTA DE VENDEDORES ---
         const listaNova = dataFinal.rankings?.listaVendedores || dataFinal.listaVendedores;
         
         if (Array.isArray(listaNova) && listaNova.length > 0) {
@@ -80,7 +85,7 @@ export default function FaturamentoPage() {
 
   if (!dados) return null;
 
-  // --- PROTEÇÃO CONTRA DADOS NULOS (ISSO EVITA O ERRO "CLIENT SIDE EXCEPTION") ---
+  // --- PROTEÇÃO CONTRA DADOS NULOS ---
   const kpi = dados.kpi || {};
   const churn = kpi.churn || {};
   const graficoRecente = Array.isArray(dados.grafico) ? dados.grafico : [];
@@ -124,7 +129,6 @@ export default function FaturamentoPage() {
                     className="appearance-none pl-9 pr-8 py-2.5 bg-white border border-slate-200 hover:border-blue-400 rounded-lg text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 transition cursor-pointer min-w-[220px]"
                 >
                     <option value="">Todos os Representantes</option>
-                    {/* Proteção no Map */}
                     {(listaVendedores.length > 0 ? listaVendedores : (rankings.vendedores || [])).map((v: any, i: number) => (
                         <option key={i} value={v.nome}>{v.nome}</option>
                     ))}
@@ -193,7 +197,7 @@ export default function FaturamentoPage() {
             </div>
           </div>
 
-          {/* PAINEL CHURN (PROTEGIDO) */}
+          {/* PAINEL CHURN */}
           <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow flex flex-col">
             <div className="mb-6">
                 <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">Risco de Churn</h3>
@@ -215,7 +219,7 @@ export default function FaturamentoPage() {
           </div>
         </div>
 
-        {/* RANKINGS (PROTEGIDO) */}
+        {/* RANKINGS */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
             <RankingCard title="Top Regiões" items={rankings.estados || []} type="uf" />
             <RankingCard title="Performance Equipe" items={rankings.vendedores || []} type="vendedor" highlight={vendedorSelecionado} />
