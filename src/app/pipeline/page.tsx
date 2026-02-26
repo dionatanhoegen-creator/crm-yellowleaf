@@ -87,7 +87,6 @@ export default function PipelinePage() {
     return new Date(now.getTime() - offset).toISOString().split('T')[0];
   };
 
-  // ADICIONADO O CAMPO custo_fixo_operacional NO ESTADO INICIAL
   const [formData, setFormData] = useState({
     cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '',
     aplicacao: '', valor: '', 
@@ -199,7 +198,7 @@ export default function PipelinePage() {
              setFormData(prev => ({ 
                 ...prev, 
                 valor_g_tabela: produtoSelecionado.preco_grama.toFixed(2).replace('.', ','), 
-                peso_formula_g: produtoSelecionado.peso_formula.toString() // Puxa o padrão, mas agora o usuário pode editar depois
+                peso_formula_g: produtoSelecionado.peso_formula.toString() 
             }));
         }
     }
@@ -467,15 +466,20 @@ export default function PipelinePage() {
 
     const paybackY = (doc as any).lastAutoTable.finalY + 8;
     
-    // --- NOVA MATEMÁTICA DE PAYBACK FLEXÍVEL ---
-    const doseSugerida = Number(item.peso_formula_g) || 13.2; // O "peso_formula_g" agora atua como Dose Sugerida
+    // --- MATEMÁTICA CORRIGIDA ---
+    const doseSugerida = Number(item.peso_formula_g) || 13.2; 
     const custoMatPrimaFormula = vGramaReal * doseSugerida;
     const custoFixoOp = parseMoney(item.custo_fixo_operacional);
-    const custoTotalManipulado = custoMatPrimaFormula + custoFixoOp;
-    const precoVendaSugestao = custoTotalManipulado * (Number(item.fator_lucro) || 5);
+    
+    // Custo Total que a Farmácia tem pra produzir
+    const custoTotalFarmacia = custoMatPrimaFormula + custoFixoOp;
+    
+    // Fator aplicado APENAS sobre a matéria prima, e o custo fixo é somado depois.
+    const precoVendaSugestao = (custoMatPrimaFormula * (Number(item.fator_lucro) || 5)) + custoFixoOp;
+    
     const formulasDia = vParc > 0 ? ((vParc / precoVendaSugestao) / 22) : 0;
 
-    // Monta o corpo da tabela condicionalmente
+    // Monta o corpo da tabela 
     const paybackBody: any[] = [
         [`Custo Matéria-Prima (Dose ${doseSugerida}g)`, formatCurrency(custoMatPrimaFormula)],
     ];
@@ -484,8 +488,8 @@ export default function PipelinePage() {
         paybackBody.push([`Custo Fixo Operacional (Embalagem, etc)`, formatCurrency(custoFixoOp)]);
     }
 
-    paybackBody.push([`Custo Total por Fórmula (Manipulado)`, { content: formatCurrency(custoTotalManipulado), styles: { fontStyle: 'bold' } }]);
-    paybackBody.push([`Sugestão de Venda (Fator ${item.fator_lucro || 5})`, formatCurrency(precoVendaSugestao)]);
+    paybackBody.push([`Custo Total por Fórmula (Manipulado)`, { content: formatCurrency(custoTotalFarmacia), styles: { fontStyle: 'bold' } }]);
+    paybackBody.push([`Sugestão de Venda (Fator ${item.fator_lucro || 5} no Ativo + Custo Fixo)`, formatCurrency(precoVendaSugestao)]);
     paybackBody.push([{ content: 'META DE VIABILIDADE', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: [0, 128, 0], fontSize: 12, halign: 'right' } }]);
 
     autoTable(doc, {
@@ -590,9 +594,9 @@ export default function PipelinePage() {
       kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
       parcelas: parseInt(String(formData.parcelas)) || 1,
       dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45,
-      peso_formula_g: String(formData.peso_formula_g).replace(',', '.'), // Salva a dose editada
-      fator_lucro: String(formData.fator_lucro).replace(',', '.'),       // Salva o fator de lucro
-      custo_fixo_operacional: parseFloat(String(formData.custo_fixo_operacional).replace('R$', '').replace(',', '.')) || 0, // NOVO
+      peso_formula_g: String(formData.peso_formula_g).replace(',', '.'), 
+      fator_lucro: String(formData.fator_lucro).replace(',', '.'),       
+      custo_fixo_operacional: parseFloat(String(formData.custo_fixo_operacional).replace('R$', '').replace(',', '.')) || 0, 
       data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null,
       data_entrada: formData.data_entrada || getLocalData(),
       canal_contato: formData.canal_contato,
