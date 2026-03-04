@@ -4,8 +4,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Search, Users, UserX, UserPlus, AlertOctagon, 
-  MapPin, X, MessageCircle, ShoppingBag 
+  MapPin, X, MessageCircle, ShoppingBag, Printer, Download, Filter 
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
@@ -15,6 +17,23 @@ export default function ClientesPage() {
   const [loading, setLoading] = useState(true);
   const [clienteSelecionado, setClienteSelecionado] = useState<any>(null);
   const [mounted, setMounted] = useState(false);
+
+  // --- ESTADOS DO NOVO RELATÓRIO ---
+  const [modalRelatorioOpen, setModalRelatorioOpen] = useState(false);
+  const [filtroUF, setFiltroUF] = useState("");
+  const [filtroCidade, setFiltroCidade] = useState("");
+  const [filtroStatusRelatorio, setFiltroStatusRelatorio] = useState("todos"); 
+  
+  const [colunasRelatorio, setColunasRelatorio] = useState({
+      fantasia: true,
+      razao: true,
+      cnpj: true,
+      cidade: true,
+      uf: true,
+      vendedor: true,
+      ultima_compra: true,
+      recencia: true,
+  });
 
   useEffect(() => {
     setMounted(true);
@@ -64,6 +83,19 @@ export default function ClientesPage() {
     );
   });
 
+  // --- FILTROS DINÂMICOS PARA O RELATÓRIO ---
+  const ufsDisponiveis = useMemo(() => {
+      const ufs = clientes.map(c => c.uf).filter(Boolean);
+      return Array.from(new Set(ufs)).sort();
+  }, [clientes]);
+
+  const cidadesDisponiveis = useMemo(() => {
+      let clis = clientes;
+      if (filtroUF) clis = clis.filter(c => c.uf === filtroUF);
+      const cids = clis.map(c => c.cidade).filter(Boolean);
+      return Array.from(new Set(cids)).sort();
+  }, [clientes, filtroUF]);
+
   const getInitials = (name: string) => name ? name.substring(0, 2).toUpperCase() : "CL";
   
   const abrirWhats = (numero: string) => {
@@ -88,14 +120,113 @@ export default function ClientesPage() {
     return isNaN(numero) ? "R$ 0,00" : numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
 
+  // --- FUNÇÃO PARA GERAR O RELATÓRIO PDF ---
+  const gerarRelatorioPDF = () => {
+      const doc = new jsPDF({ orientation: "landscape" });
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.setTextColor(30, 41, 59);
+      doc.text("RELATÓRIO DE CARTEIRA DE CLIENTES", 14, 15);
+
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100);
+      let subTitulo = `Gerado em: ${new Date().toLocaleDateString()} às ${new Date().toLocaleTimeString()}`;
+      if (filtroUF) subTitulo += ` | UF: ${filtroUF}`;
+      if (filtroCidade) subTitulo += ` | Cidade: ${filtroCidade}`;
+      if (filtroStatusRelatorio !== 'todos') subTitulo += ` | Filtro: ${filtroStatusRelatorio.toUpperCase()}`;
+      doc.text(subTitulo, 14, 21);
+
+      // 1. Aplica os filtros selecionados no modal
+      let dadosOrdenados = clientes.filter(c => {
+          if (filtroUF && c.uf !== filtroUF) return false;
+          if (filtroCidade && c.cidade !== filtroCidade) return false;
+          
+          if (filtroStatusRelatorio === 'bloqueados' && !c.bloqueado) return false;
+          if (filtroStatusRelatorio === 'inativos') {
+              if (!c.ultima_compra) return false; 
+              const diffTime = Math.abs(new Date().getTime() - new Date(c.ultima_compra).getTime());
+              const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+              if (diffDays <= 365) return false;
+          }
+          if (filtroStatusRelatorio === 'novos' && c.ultima_compra) return false;
+          
+          return true;
+      });
+
+      // 2. Ordena por nome Fantasia
+      dadosOrdenados.sort((a, b) => (a.fantasia || a.razao || "").localeCompare(b.fantasia || b.razao || ""));
+
+      // 3. Monta Cabeçalhos dinamicamente
+      let headers = [];
+      if (colunasRelatorio.fantasia) headers.push('Nome Fantasia');
+      if (colunasRelatorio.razao) headers.push('Razão Social');
+      if (colunasRelatorio.cnpj) headers.push('CNPJ');
+      if (colunasRelatorio.cidade) headers.push('Cidade');
+      if (colunasRelatorio.uf) headers.push('UF');
+      if (colunasRelatorio.vendedor) headers.push('Representante');
+      if (colunasRelatorio.ultima_compra) headers.push('Últ. Compra');
+      if (colunasRelatorio.recencia) headers.push('Status/Recência');
+
+      // 4. Monta o Corpo da Tabela
+      const tableBody = dadosOrdenados.map(c => {
+          let row: any[] = [];
+          if (colunasRelatorio.fantasia) row.push(c.fantasia || '-');
+          if (colunasRelatorio.razao) row.push(c.razao || '-');
+          if (colunasRelatorio.cnpj) row.push(c.cnpj || '-');
+          if (colunasRelatorio.cidade) row.push(c.cidade || '-');
+          if (colunasRelatorio.uf) row.push(c.uf || '-');
+          if (colunasRelatorio.vendedor) row.push(c.vendedor || '-');
+          
+          if (colunasRelatorio.ultima_compra) {
+              row.push(c.ultima_compra ? new Date(c.ultima_compra).toLocaleDateString('pt-BR') : 'Sem registro');
+          }
+
+          if (colunasRelatorio.recencia) {
+              if (c.bloqueado) {
+                  row.push({ content: 'BLOQUEADO', styles: { textColor: [220, 38, 38], fontStyle: 'bold' }});
+              } else if (!c.ultima_compra) {
+                  row.push({ content: 'NOVO/SEM HIST', styles: { textColor: [22, 163, 74], fontStyle: 'bold' }});
+              } else {
+                  const rec = calcularRecencia(c.ultima_compra);
+                  const isCritical = rec.dias && rec.dias > 365;
+                  row.push({ content: rec.texto, styles: { textColor: isCritical ? [234, 88, 12] : [71, 85, 105], fontStyle: isCritical ? 'bold' : 'normal' }});
+              }
+          }
+          return row;
+      });
+
+      autoTable(doc, {
+          startY: 28,
+          head: [headers],
+          body: tableBody,
+          theme: 'grid',
+          headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold' },
+          styles: { fontSize: 8, cellPadding: 2, textColor: 60 },
+          alternateRowStyles: { fillColor: [248, 250, 252] },
+      });
+
+      doc.save(`Relatorio_Clientes_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`);
+      setModalRelatorioOpen(false);
+  };
+
   return (
     <div className="p-6 bg-slate-50 min-h-screen font-sans text-slate-800">
       <div className="max-w-7xl mx-auto">
         
-        {/* HEADER E TÍTULO */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Carteira de Clientes</h1>
-          <p className="text-slate-500">Gestão de relacionamento e monitoramento de inatividade.</p>
+        {/* HEADER E TÍTULO COM BOTÃO DE RELATÓRIO */}
+        <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+          <div>
+              <h1 className="text-3xl font-black text-slate-900 tracking-tight">Carteira de Clientes</h1>
+              <p className="text-slate-500">Gestão de relacionamento e monitoramento de inatividade.</p>
+          </div>
+          <button 
+              onClick={() => setModalRelatorioOpen(true)} 
+              className="bg-slate-800 hover:bg-slate-900 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 flex items-center gap-2"
+          >
+              <Printer size={18} /> Relatório PDF
+          </button>
         </div>
 
         {/* --- MINI DASHBOARD --- */}
@@ -193,7 +324,90 @@ export default function ClientesPage() {
           </div>
         )}
 
-        {/* --- MODAL DETALHES --- */}
+        {/* --- MODAL DE CONFIGURAÇÃO DE RELATÓRIO --- */}
+        {modalRelatorioOpen && mounted && createPortal(
+          <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
+             <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
+                <div className="bg-slate-800 p-6 flex justify-between items-center text-white">
+                   <h2 className="text-xl font-bold flex items-center gap-2"><Filter size={24}/> Relatório de Clientes</h2>
+                   <button onClick={() => setModalRelatorioOpen(false)} className="hover:bg-white/10 p-2 rounded-full transition"><X size={20}/></button>
+                </div>
+                
+                <div className="p-8">
+                   {/* SEÇÃO DE FILTROS */}
+                   <h3 className="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">1. Filtrar Dados</h3>
+                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                      <div>
+                          <label className="text-xs font-bold text-slate-500 mb-1 block">Estado (UF)</label>
+                          <select 
+                              value={filtroUF} 
+                              onChange={(e) => { setFiltroUF(e.target.value); setFiltroCidade(""); }}
+                              className="w-full p-3 border border-slate-200 rounded-xl text-sm font-semibold bg-slate-50 outline-none focus:border-blue-500"
+                          >
+                              <option value="">Todas as UFs</option>
+                              {ufsDisponiveis.map(uf => <option key={uf} value={uf}>{uf}</option>)}
+                          </select>
+                      </div>
+                      <div>
+                          <label className="text-xs font-bold text-slate-500 mb-1 block">Cidade</label>
+                          <select 
+                              value={filtroCidade} 
+                              onChange={(e) => setFiltroCidade(e.target.value)}
+                              className="w-full p-3 border border-slate-200 rounded-xl text-sm font-semibold bg-slate-50 outline-none focus:border-blue-500 disabled:opacity-50"
+                              disabled={!filtroUF}
+                          >
+                              <option value="">Todas as Cidades</option>
+                              {cidadesDisponiveis.map(cid => <option key={cid} value={cid}>{cid}</option>)}
+                          </select>
+                      </div>
+                      <div>
+                          <label className="text-xs font-bold text-slate-500 mb-1 block">Status</label>
+                          <select 
+                              value={filtroStatusRelatorio} 
+                              onChange={(e) => setFiltroStatusRelatorio(e.target.value)}
+                              className="w-full p-3 border border-slate-200 rounded-xl text-sm font-semibold bg-slate-50 outline-none focus:border-blue-500"
+                          >
+                              <option value="todos">Todos</option>
+                              <option value="ativos">Apenas Ativos</option>
+                              <option value="inativos">Inativos (+1 ano)</option>
+                              <option value="bloqueados">Bloqueados</option>
+                              <option value="novos">Novos (Sem Compra)</option>
+                          </select>
+                      </div>
+                   </div>
+
+                   {/* SEÇÃO DE COLUNAS */}
+                   <h3 className="text-sm font-black text-slate-400 uppercase tracking-wider mb-4 border-t pt-6">2. Colunas do Relatório</h3>
+                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {Object.keys(colunasRelatorio).map((key) => {
+                          const label = key === 'ultima_compra' ? 'Última Compra' : key === 'recencia' ? 'Status/Dias' : key;
+                          return (
+                              <label key={key} className="flex items-center gap-3 p-3 border rounded-xl cursor-pointer hover:bg-slate-50 transition">
+                                  <input 
+                                      type="checkbox" 
+                                      checked={(colunasRelatorio as any)[key]} 
+                                      onChange={(e) => setColunasRelatorio({...colunasRelatorio, [key]: e.target.checked})}
+                                      className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                                  />
+                                  <span className="text-sm font-bold text-slate-700 capitalize">{label}</span>
+                              </label>
+                          )
+                      })}
+                   </div>
+                </div>
+
+                {/* BOTÕES DE AÇÃO */}
+                <div className="p-6 bg-slate-50 border-t flex justify-end gap-3 shrink-0">
+                   <button onClick={() => setModalRelatorioOpen(false)} className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-200 rounded-xl transition">Cancelar</button>
+                   <button onClick={gerarRelatorioPDF} className="bg-green-600 text-white px-8 py-3 rounded-xl font-black hover:bg-green-700 flex items-center gap-2 shadow-lg hover:shadow-green-200 transition transform active:scale-95">
+                      <Download size={20}/> Extrair PDF
+                   </button>
+                </div>
+             </div>
+          </div>, document.body
+        )}
+
+        {/* --- MODAL DETALHES (O ORIGINAL MANTIDO INTACTO) --- */}
         {clienteSelecionado && mounted && createPortal(
           <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="absolute inset-0" onClick={() => setClienteSelecionado(null)}></div>
