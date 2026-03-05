@@ -5,7 +5,7 @@ import { Outfit } from "next/font/google";
 import "./globals.css";
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'; // Importação do Supabase
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
   LayoutDashboard, Users, Trello, Package, Lock, 
   BarChart3, LogOut, Menu, X, ChevronRight,
@@ -14,63 +14,67 @@ import {
 
 const outfit = Outfit({ subsets: ["latin"] });
 
+// Definição original dos itens com a sua "chave" de acesso correspondente
+const MENU_BASE = [
+  { name: 'Dashboard', path: '/', icon: LayoutDashboard, key: 'faturamento' }, // Mapeado para faturamento (painel principal)
+  { name: 'Clientes', path: '/clientes', icon: Users, key: 'clientes' },
+  { name: 'Pipeline', path: '/pipeline', icon: Trello, key: 'pipeline' },
+  { name: 'Produtos', path: '/produtos', icon: Package, key: 'produtos' },
+  { name: 'Exclusividades', path: '/exclusividades', icon: Lock, key: 'exclusividades' },
+  { name: 'Faturamento', path: '/faturamento', icon: BarChart3, key: 'faturamento' },
+  { name: 'Relatórios', path: '/relatorios', icon: FileText, key: 'relatorios' }, 
+  { name: 'Equipe', path: '/equipe', icon: Shield, key: 'admin' }, // Mudei o nome e o path para bater com a tela nova
+];
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const supabase = createClientComponentClient(); // Cliente Supabase
+  const supabase = createClientComponentClient();
   
-  const [isOpen, setIsOpen] = useState(false); // Menu Lateral
-  const [isProfileOpen, setIsProfileOpen] = useState(false); // Menu do Perfil
-  const [userEmail, setUserEmail] = useState("Carregando..."); // Estado para o email
+  const [isOpen, setIsOpen] = useState(false); 
+  const [isProfileOpen, setIsProfileOpen] = useState(false); 
+  const [userEmail, setUserEmail] = useState("Carregando..."); 
+  const [menuPermitido, setMenuPermitido] = useState<any[]>([]); // O Menu agora é dinâmico!
 
-  // Verifica se é a página de login para não mostrar o menu
   const isLoginPage = pathname === '/login';
 
-  // ITENS DO MENU
-  const MENU = [
-    { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-    { name: 'Clientes', path: '/clientes', icon: Users },
-    { name: 'Pipeline', path: '/pipeline', icon: Trello },
-    { name: 'Produtos', path: '/produtos', icon: Package },
-    { name: 'Exclusividades', path: '/exclusividades', icon: Lock },
-    { name: 'Faturamento', path: '/faturamento', icon: BarChart3 },
-    { name: 'Relatórios', path: '/relatorios', icon: FileText }, 
-    { name: 'Admin', path: '/admin', icon: Shield }, 
-  ];
-
-  // --- EFEITO: BUSCAR USUÁRIO LOGADO ---
   useEffect(() => {
-    const getUser = async () => {
-      if (isLoginPage) return; // Não busca na tela de login
+    const carregarAcessos = async () => {
+      if (isLoginPage) return;
 
       const { data: { user } } = await supabase.auth.getUser();
+      
       if (user) {
         setUserEmail(user.email || "Usuário");
+        
+        // Vai buscar as chavinhas do perfil logado
+        const { data: perfil } = await supabase.from('perfis').select('acessos').eq('id', user.id).single();
+        
+        if (perfil && perfil.acessos) {
+            // Filtra o MENU_BASE: só fica o item que tem a chavinha = true
+            const menuFiltrado = MENU_BASE.filter(item => perfil.acessos[item.key] === true);
+            setMenuPermitido(menuFiltrado);
+        } else {
+            // Se der erro ou não tiver perfil, mostra o básico do básico por segurança
+            setMenuPermitido([]);
+        }
       } else {
-        // Se não tiver usuário e não for login, o middleware já deve ter barrado,
-        // mas por segurança limpamos o estado.
         setUserEmail("Visitante");
+        setMenuPermitido([]);
       }
     };
 
-    getUser();
+    carregarAcessos();
   }, [supabase, isLoginPage]);
 
 
-  // --- FUNÇÃO DE LOGOUT (ATUALIZADA) ---
   const handleLogout = async () => {
-    // 1. Avise o Supabase para encerrar a sessão no servidor
     await supabase.auth.signOut();
-    
-    // 2. Limpa qualquer lixo do navegador
     localStorage.clear();
-    
-    // 3. Atualiza a página para o Middleware pegar o logout e mandar pro login
     router.refresh();
     router.push('/login');
   };
 
-  // Se for a página de login, renderiza apenas o conteúdo limpo (sem header/menu)
   if (isLoginPage) {
     return (
       <html lang="pt-br">
@@ -89,7 +93,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="fixed top-0 left-0 right-0 h-16 bg-white border-b border-slate-200 z-[40] flex items-center px-4 justify-between shadow-sm">
           
           <div className="flex items-center gap-6">
-            {/* BLOCO ESQUERDA: MENU + LOGO */}
             <div className="flex items-center gap-3">
               <button 
                 onClick={() => setIsOpen(true)}
@@ -104,9 +107,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
             </div>
 
-            {/* --- BARRA DE NAVEGAÇÃO RÁPIDA (GLOBAL) --- */}
+            {/* --- BARRA DE NAVEGAÇÃO RÁPIDA (DINÂMICA) --- */}
             <div className="hidden md:flex items-center gap-2 pl-6 border-l border-slate-200 h-8">
-               {MENU.slice(0, 4).map((item) => {
+               {menuPermitido.slice(0, 4).map((item) => {
                  const active = pathname === item.path;
                  return (
                    <Link 
@@ -114,8 +117,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                      href={item.path} 
                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
                        active 
-                          ? 'bg-green-50 text-green-700 border border-green-200' 
-                          : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800 border border-transparent'
+                         ? 'bg-green-50 text-green-700 border border-green-200' 
+                         : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800 border border-transparent'
                      }`}
                    >
                       <item.icon size={14}/> {item.name}
@@ -132,7 +135,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 className="flex items-center gap-3 hover:bg-slate-50 p-2 rounded-xl transition"
              >
                  <div className="text-right hidden sm:block">
-                    {/* Agora mostra o email real do usuário logado */}
                     <p className="text-xs font-bold text-slate-700 max-w-[150px] truncate">{userEmail}</p>
                     <p className="text-[10px] text-green-600 font-bold">Usuário Conectado</p>
                  </div>
@@ -142,18 +144,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                  <ChevronDown size={16} className={`text-slate-400 transition-transform ${isProfileOpen ? 'rotate-180' : ''}`}/>
              </button>
 
-             {/* MENU SUSPENSO (DROPDOWN) */}
              {isProfileOpen && (
                <>
-                 <div className="fixed inset-0 z-[30]" onClick={() => setIsProfileOpen(false)}></div> {/* Fecha ao clicar fora */}
+                 <div className="fixed inset-0 z-[30]" onClick={() => setIsProfileOpen(false)}></div> 
                  <div className="absolute right-0 top-14 w-48 bg-white rounded-xl shadow-xl border border-slate-100 p-2 z-[40] animate-in fade-in slide-in-from-top-2">
                     <div className="px-3 py-2 border-b border-slate-100 mb-1">
                        <p className="text-xs font-bold text-slate-400 uppercase">Minha Conta</p>
                     </div>
-                    {/* Link Admin protegido visualmente (não quebra se clicar) */}
-                    <Link href="#" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-slate-400 cursor-not-allowed hover:bg-slate-50 rounded-lg transition font-medium">
-                       <Shield size={16}/> Admin (Em breve)
-                    </Link>
+                    {/* Link para a tela de Equipe, se o cara for Admin */}
+                    {menuPermitido.some(m => m.key === 'admin') && (
+                        <Link href="/equipe" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-lg transition font-medium">
+                           <Shield size={16}/> Gestão de Acessos
+                        </Link>
+                    )}
                     <button 
                        onClick={handleLogout}
                        className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition font-bold mt-1"
@@ -166,7 +169,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </header>
 
-        {/* --- 2. MENU LATERAL (DRAWER) --- */}
+        {/* --- 2. MENU LATERAL (DRAWER DINÂMICO) --- */}
         <div 
           className={`fixed inset-0 bg-black/60 z-[50] backdrop-blur-sm transition-opacity duration-300 ${
             isOpen ? 'opacity-100 visible' : 'opacity-0 invisible pointer-events-none'
@@ -180,12 +183,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }`}
         >
           <div className="p-6 flex justify-between items-center border-b border-white/10 h-16">
-            <span className="font-bold text-lg text-white tracking-wide">Menu Completo</span>
+            <span className="font-bold text-lg text-white tracking-wide">Menu de Módulos</span>
             <button onClick={() => setIsOpen(false)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 text-white transition"><X size={20} /></button>
           </div>
 
           <nav className="p-4 space-y-2 overflow-y-auto h-[calc(100vh-140px)]">
-            {MENU.map((item) => {
+            {menuPermitido.map((item) => {
               const active = pathname === item.path;
               return (
                 <Link 
@@ -204,6 +207,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </Link>
               );
             })}
+            
+            {/* Aviso se a pessoa não tiver nada liberado */}
+            {menuPermitido.length === 0 && (
+                <p className="text-center text-xs text-slate-500 mt-10 px-4">Seu usuário não possui módulos liberados. Fale com o Administrador.</p>
+            )}
           </nav>
 
           <div className="absolute bottom-0 left-0 right-0 p-6 bg-[#0a261d] border-t border-white/5">
