@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect } from 'react';
@@ -51,6 +52,9 @@ export default function PipelinePage() {
   const [loading, setLoading] = useState(true);
   const [loadingProdutos, setLoadingProdutos] = useState(true);
   const [buscaTermo, setBuscaTermo] = useState(""); 
+  
+  // --- ESTADOS DO USUÁRIO LOGADO ---
+  const [usuarioLogado, setUsuarioLogado] = useState<any>(null);
   
   // MODAIS
   const [modalOpen, setModalOpen] = useState(false);
@@ -110,12 +114,25 @@ export default function PipelinePage() {
 
   const inicializarDados = async () => {
     setLoading(true);
+    
+    // 1. PRIMEIRO: Descobre quem é o utilizador logado e qual o seu cargo
+    const { data: { user } } = await supabase.auth.getUser();
+    let perfilUsuario = null;
+    
+    if (user) {
+        const { data: perfil } = await supabase.from('perfis').select('*').eq('id', user.id).single();
+        perfilUsuario = perfil;
+        setUsuarioLogado(perfil);
+    }
+    
+    // 2. DEPOIS: Carrega os dados (passando o perfil para filtrar o pipeline)
     await Promise.all([
-        carregarOportunidades(), 
+        carregarOportunidades(perfilUsuario), 
         carregarProdutosDaAPI(), 
         carregarExclusividades(), 
         carregarBaseClientesOficial()
     ]);
+    
     setLoading(false);
   };
 
@@ -167,8 +184,16 @@ export default function PipelinePage() {
     setLoadingProdutos(false);
   };
 
-  const carregarOportunidades = async () => {
-    const { data } = await supabase.from('pipeline').select('*').order('created_at', { ascending: false });
+  // --- FILTRO DE TÚNEL DE VISÃO ---
+  const carregarOportunidades = async (perfil: any) => {
+    let query = supabase.from('pipeline').select('*').order('created_at', { ascending: false });
+    
+    // Se não for Admin, só puxa os dados DELE mesmo
+    if (perfil && perfil.cargo !== 'admin') {
+        query = query.eq('user_id', perfil.id);
+    }
+    
+    const { data } = await query;
     setOportunidades(data || []);
   };
 
@@ -271,15 +296,18 @@ export default function PipelinePage() {
         }
 
         if (clienteNaBase.vendedor && clienteNaBase.vendedor.trim() !== "") {
-            setBlockModal({
-                open: true,
-                title: 'CARTEIRA DEFINIDA',
-                message: 'Este cliente já pertence à carteira de outro representante.',
-                motivo: `Carteira exclusiva de: ${clienteNaBase.vendedor}`
-            });
-            setFormData(prev => ({ ...prev, cnpj: '' }));
-            setLoadingCNPJ(false);
-            return; 
+            // Se eu não for admin E o vendedor do sistema não for igual ao meu nome, bloqueia
+            if (usuarioLogado?.cargo !== 'admin' && clienteNaBase.vendedor.toLowerCase() !== usuarioLogado?.nome?.toLowerCase()) {
+                setBlockModal({
+                    open: true,
+                    title: 'CARTEIRA DEFINIDA',
+                    message: 'Este cliente já pertence à carteira de outro representante.',
+                    motivo: `Carteira exclusiva de: ${clienteNaBase.vendedor}`
+                });
+                setFormData(prev => ({ ...prev, cnpj: '' }));
+                setLoadingCNPJ(false);
+                return; 
+            }
         }
     }
 
@@ -323,7 +351,7 @@ export default function PipelinePage() {
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100);
-    doc.text(`Gerado em: ${new Date().toLocaleDateString()} às ${new Date().toLocaleTimeString()}`, 14, 21);
+    doc.text(`Gerado em: ${new Date().toLocaleDateString()} às ${new Date().toLocaleTimeString()} por ${usuarioLogado?.nome || 'Sistema'}`, 14, 21);
 
     let dadosOrdenados = [...oportunidades];
     
@@ -395,44 +423,32 @@ export default function PipelinePage() {
     setReportConfigOpen(false); 
   };
 
-const cleanHtmlForPdf = (html: string) => {
+  const cleanHtmlForPdf = (html: string) => {
     if (!html) return "";
     let text = html;
     
-    // 1. Preserva parágrafos vazios e quebras de linha
     text = text.replace(/<p><br><\/p>/gi, "\n\n");
     text = text.replace(/<br\s*\/?>/gi, "\n");
     text = text.replace(/<\/p>/gi, "\n\n");
     text = text.replace(/<p>/gi, "");
-    
-    // 2. Trata as listas (bolinhas e números) com recuo
     text = text.replace(/<ul>/gi, "");
     text = text.replace(/<\/ul>/gi, "\n");
     text = text.replace(/<ol>/gi, "");
     text = text.replace(/<\/ol>/gi, "\n");
     text = text.replace(/<li>/gi, "   • ");
     text = text.replace(/<\/li>/gi, "\n");
-
-    // 3. TRUQUE DO NEGRITO E SUBLINHADO:
     text = text.replace(/<strong[^>]*>(.*?)<\/strong>/gi, (match, p1) => p1.toUpperCase());
     text = text.replace(/<b[^>]*>(.*?)<\/b>/gi, (match, p1) => p1.toUpperCase());
-    
-    // Coloca _ underlines _ em palavras sublinhadas
     text = text.replace(/<u[^>]*>(.*?)<\/u>/gi, (match, p1) => `_${p1}_`);
-    
-    // 4. Remove todas as outras tags HTML (itálico, etc) que sobraram
     text = text.replace(/<[^>]+>/g, "");
-    
-    // 5. Decodifica espaços e caracteres especiais (CORREÇÃO: Adicionado 'i' de insensitive)
     text = text.replace(/&nbsp;/gi, " ");
     text = text.replace(/&amp;/gi, "&");
-    
-    // 6. Limpa excesso de espaços em branco (deixa no máximo 2 enter seguidos)
     text = text.replace(/\n{3,}/g, "\n\n").trim();
     
     return text;
   };
 
+  // --- PDF PREMIUM COM ASSINATURA DINÂMICA ---
   const gerarPDFPremium = (item: any) => {
     const doc = new jsPDF();
     const verdeEscuro: [number, number, number] = [20, 83, 45];
@@ -495,20 +511,14 @@ const cleanHtmlForPdf = (html: string) => {
 
     const paybackY = (doc as any).lastAutoTable.finalY + 8;
     
-    // --- MATEMÁTICA CORRIGIDA ---
     const doseSugerida = Number(item.peso_formula_g) || 13.2; 
     const custoMatPrimaFormula = vGramaReal * doseSugerida;
     const custoFixoOp = parseMoney(item.custo_fixo_operacional);
     
-    // Custo Total que a Farmácia tem pra produzir
     const custoTotalFarmacia = custoMatPrimaFormula + custoFixoOp;
-    
-    // Fator aplicado APENAS sobre a matéria prima, e o custo fixo é somado depois.
     const precoVendaSugestao = (custoMatPrimaFormula * (Number(item.fator_lucro) || 5)) + custoFixoOp;
-    
     const formulasDia = vParc > 0 ? ((vParc / precoVendaSugestao) / 22) : 0;
 
-    // Monta o corpo da tabela 
     const paybackBody: any[] = [
         [`Custo Matéria-Prima (Dose ${doseSugerida}g)`, formatCurrency(custoMatPrimaFormula)],
     ];
@@ -563,11 +573,16 @@ const cleanHtmlForPdf = (html: string) => {
       else { doc.addPage(); doc.addImage("/selo.jpg", "JPEG", xPos, 20, imgW, imgH); }
     } catch (e) {}
 
+    // --- ASSINATURA DINÂMICA BASEADA NO USUÁRIO LOGADO ---
+    const nomeAssinatura = usuarioLogado?.nome || 'Consultor Comercial';
+    const telAssinatura = usuarioLogado?.telefone || '';
+    
     const fY = 285; doc.setFontSize(7); doc.setTextColor(150);
     doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
     doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 20, fY + 4);
-    doc.text("Dionatan Hoegen - Representante Comercial", 190, fY, { align: 'right' });
-    doc.text(`WhatsApp: (44) 99102-7642 | @dionatan.magistral`, 190, fY + 4, { align: 'right' });
+    
+    doc.text(`${nomeAssinatura} - Comercial YellowLeaf`, 190, fY, { align: 'right' });
+    if(telAssinatura) doc.text(`WhatsApp: ${telAssinatura}`, 190, fY + 4, { align: 'right' });
 
     doc.save(`Proposta Comercial - ${item.nome_cliente}.pdf`);
   };
@@ -589,8 +604,6 @@ const cleanHtmlForPdf = (html: string) => {
         obsFinal = `📅 ${dataHora} | 💬 ${novaNotaInput}\n────────────────────────────────────────\n${obsFinal}`;
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    
     let valorFinal = 0;
     if (String(formData.valor).includes('.')) {
         valorFinal = parseFloat(String(formData.valor));
@@ -610,7 +623,7 @@ const cleanHtmlForPdf = (html: string) => {
 
     const payload = {
       ...formData,
-      user_id: user?.id,
+      user_id: usuarioLogado?.id, // Salva o ID da pessoa logada como dona da proposta!
       numero_proposta: numeroFinal,
       nome_cliente: formData.nome_cliente.toUpperCase(),
       contato: formData.contato ? formData.contato.toUpperCase() : '',
@@ -638,7 +651,7 @@ const cleanHtmlForPdf = (html: string) => {
     if (!error) { 
       setModalOpen(false); 
       setNovaNotaInput(""); 
-      carregarOportunidades(); 
+      carregarOportunidades(usuarioLogado); // Recarrega aplicando o filtro novamente
     } else { 
       console.error("Erro banco:", error); 
       alert(`Erro ao salvar: ${error.message}`); 
@@ -648,15 +661,8 @@ const cleanHtmlForPdf = (html: string) => {
   const handleDelete = async () => {
     if (confirm('Deseja excluir este registro permanentemente?')) {
         const { error } = await supabase.from('pipeline').delete().eq('id', editingOp.id);
-        if (!error) { carregarOportunidades(); setModalOpen(false); } 
+        if (!error) { carregarOportunidades(usuarioLogado); setModalOpen(false); } 
     }
-  };
-
-  const openWhatsApp = (e: React.MouseEvent, telefone: string) => {
-    e.stopPropagation();
-    if (!telefone) return alert("Número de telefone não disponível.");
-    const num = telefone.replace(/\D/g, '');
-    window.open(`https://wa.me/55${num}`, '_blank');
   };
 
   const renderCard = (op: any) => {
@@ -845,7 +851,6 @@ const cleanHtmlForPdf = (html: string) => {
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Parcelas</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
               <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª Parc</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
 
-              {/* --- NOVOS CAMPOS PARA FLEXIBILIDADE DE PAYBACK --- */}
               <div className="bg-slate-100 p-4 rounded-xl border border-slate-200">
                   <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1" title="Dose diária recomendada em gramas">Dose Sugerida (g) <AlertCircle size={12}/></label>
                   <input type="text" className="w-full bg-white border rounded-lg p-2 text-sm mt-1 focus:border-green-400 outline-none" value={formData.peso_formula_g} onChange={e => setFormData({...formData, peso_formula_g: e.target.value})}/>
@@ -884,7 +889,7 @@ const cleanHtmlForPdf = (html: string) => {
                           onChange={(e) => setNovaNotaInput(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && adicionarNotaAoHistorico()}
                       />
-                      <button onClick={adicionarNotaAoHistorico} className="bg-blue-100 text-blue-600 p-3 rounded-xl hover:bg-blue-200 transition font-bold" title="Adicionar Nota">
+                      <button type="button" onClick={adicionarNotaAoHistorico} className="bg-blue-100 text-blue-600 p-3 rounded-xl hover:bg-blue-200 transition font-bold" title="Adicionar Nota">
                           <Send size={18}/>
                       </button>
                   </div>
