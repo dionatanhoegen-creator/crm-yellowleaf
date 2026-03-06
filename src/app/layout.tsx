@@ -7,7 +7,6 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
-import { 
   LayoutDashboard, Users, Trello, Package, Lock, 
   BarChart3, LogOut, Menu, X, ChevronRight,
   FileText, Shield, ChevronDown, Stethoscope
@@ -19,7 +18,7 @@ const outfit = Outfit({ subsets: ["latin"] });
 const MENU_BASE = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard, key: 'faturamento' },
   { name: 'Clientes', path: '/clientes', icon: Users, key: 'clientes' },
-  { name: 'Prescritores', path: '/prescritores', icon: Stethoscope, key: 'prescritores' }, // <-- NOVA LINHA AQUI!
+  { name: 'Prescritores', path: '/prescritores', icon: Stethoscope, key: 'prescritores' },
   { name: 'Pipeline', path: '/pipeline', icon: Trello, key: 'pipeline' },
   { name: 'Produtos', path: '/produtos', icon: Package, key: 'produtos' },
   { name: 'Exclusividades', path: '/exclusividades', icon: Lock, key: 'exclusividades' },
