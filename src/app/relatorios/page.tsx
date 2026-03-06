@@ -33,6 +33,7 @@ export default function RelatoriosPage() {
   const [loading, setLoading] = useState(true);
   const [listaCompleta, setListaCompleta] = useState<any[]>([]);
   const [filtroStatus, setFiltroStatus] = useState('abertos'); 
+  const [usuarioLogado, setUsuarioLogado] = useState<any>(null); // Guardar quem está vendo o relatório
 
   // Métricas
   const [metrics, setMetrics] = useState({
@@ -52,7 +53,28 @@ export default function RelatoriosPage() {
 
   const carregarDados = async () => {
     setLoading(true);
-    const { data: pipeline } = await supabase.from('pipeline').select('*').order('created_at', { ascending: false });
+    
+    // 1. Descobre quem é o utilizador logado
+    const { data: { user } } = await supabase.auth.getUser();
+    let perfilUsuario = null;
+    
+    // 2. Prepara a query base
+    let query = supabase.from('pipeline').select('*').order('created_at', { ascending: false });
+    
+    // 3. Aplica a Visão de Túnel (RBAC)
+    if (user) {
+        const { data: perfil } = await supabase.from('perfis').select('cargo, id, nome').eq('id', user.id).single();
+        if (perfil) {
+            perfilUsuario = perfil;
+            setUsuarioLogado(perfil);
+            // Se não for admin, filtra só as propostas que ele mesmo criou
+            if (perfil.cargo !== 'admin') {
+                query = query.eq('user_id', perfil.id);
+            }
+        }
+    }
+
+    const { data: pipeline } = await query;
 
     if (pipeline) {
       setListaCompleta(pipeline);
@@ -116,12 +138,12 @@ export default function RelatoriosPage() {
     // 2. TÍTULO E DATAS
     doc.setFontSize(18);
     doc.setTextColor(40, 40, 40);
-    // Ajustei o Y para 30 para ficar abaixo do logo
     doc.text("Relatório Gerencial de Vendas", 14, 32);
     
     doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')} | Filtro: ${filtroStatus.toUpperCase()}`, 14, 38);
+    const nomeResponsavel = usuarioLogado?.cargo === 'admin' ? 'Visão Geral (Todos)' : `Visão de Carteira (${usuarioLogado?.nome || 'Consultor'})`;
+    doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')} | Filtro: ${filtroStatus.toUpperCase()} | ${nomeResponsavel}`, 14, 38);
 
     // 3. TABELA DE DADOS
     const tableBody = listaFiltrada.map(item => [
@@ -162,7 +184,7 @@ export default function RelatoriosPage() {
     doc.save(`Relatorio_Vendas_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
-  if (loading) return <div className="p-8 text-center text-slate-400 font-bold animate-pulse">Carregando dados...</div>;
+  if (loading) return <div className="p-8 text-center text-slate-400 font-bold animate-pulse">Carregando Inteligência...</div>;
 
   return (
     <div className="p-6 md:p-8 bg-slate-50 min-h-screen font-sans text-slate-800">
@@ -176,7 +198,9 @@ export default function RelatoriosPage() {
              </div>
              <div>
                <h1 className="text-3xl font-black text-slate-900 tracking-tight">Dashboard Comercial</h1>
-               <p className="text-slate-500">Panorama geral de performance e resultados.</p>
+               <p className="text-slate-500">
+                  {usuarioLogado?.cargo === 'admin' ? 'Panorama geral de toda a equipe.' : 'Acompanhamento do seu funil pessoal.'}
+               </p>
              </div>
            </div>
            <button onClick={carregarDados} className="bg-white text-blue-600 px-4 py-2 rounded-lg text-sm font-bold border border-blue-100 hover:bg-blue-50 transition shadow-sm">
@@ -261,7 +285,7 @@ export default function RelatoriosPage() {
             <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-50/50">
                 <div>
                     <h3 className="font-black text-lg text-slate-800 flex items-center gap-2"><FileText size={20} className="text-blue-600"/> Relatório Detalhado</h3>
-                    <p className="text-xs text-slate-500">Visualize e exporte os dados para apresentar à diretoria.</p>
+                    <p className="text-xs text-slate-500">Visualize e exporte os dados baseados no seu filtro atual.</p>
                 </div>
                 <div className="flex gap-2">
                     <div className="flex bg-white border border-slate-200 rounded-lg p-1">
@@ -290,7 +314,7 @@ export default function RelatoriosPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                         {listaFiltrada.length === 0 && (
-                            <tr><td colSpan={7} className="p-8 text-center text-slate-400">Nenhum registro encontrado.</td></tr>
+                            <tr><td colSpan={7} className="p-8 text-center text-slate-400">Nenhum registro encontrado no funil.</td></tr>
                         )}
                         {listaFiltrada.map(item => (
                             <tr key={item.id} className="hover:bg-slate-50 transition">

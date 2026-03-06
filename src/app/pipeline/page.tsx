@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useEffect } from 'react';
@@ -604,6 +603,8 @@ export default function PipelinePage() {
         obsFinal = `📅 ${dataHora} | 💬 ${novaNotaInput}\n────────────────────────────────────────\n${obsFinal}`;
     }
 
+    const { data: { user } } = await supabase.auth.getUser();
+
     let valorFinal = 0;
     if (String(formData.valor).includes('.')) {
         valorFinal = parseFloat(String(formData.valor));
@@ -614,16 +615,24 @@ export default function PipelinePage() {
     let numeroFinal = formData.numero_proposta;
     
     if (!editingOp) {
-        const maiorNumero = oportunidades.reduce((max, op) => {
-            const num = Number(op.numero_proposta) || 0;
-            return num > max ? num : max;
-        }, 467);
-        numeroFinal = maiorNumero + 1;
+        // --- CORREÇÃO DA SEQUÊNCIA GLOBAL ---
+        const { data: maxOp } = await supabase
+            .from('pipeline')
+            .select('numero_proposta')
+            .order('numero_proposta', { ascending: false })
+            .limit(1);
+            
+        let maiorNumeroGeral = 467; 
+        if (maxOp && maxOp.length > 0 && maxOp[0].numero_proposta) {
+            maiorNumeroGeral = Number(maxOp[0].numero_proposta);
+        }
+        
+        numeroFinal = maiorNumeroGeral + 1;
     }
 
     const payload = {
       ...formData,
-      user_id: usuarioLogado?.id, // Salva o ID da pessoa logada como dona da proposta!
+      user_id: user?.id, 
       numero_proposta: numeroFinal,
       nome_cliente: formData.nome_cliente.toUpperCase(),
       contato: formData.contato ? formData.contato.toUpperCase() : '',
@@ -651,7 +660,7 @@ export default function PipelinePage() {
     if (!error) { 
       setModalOpen(false); 
       setNovaNotaInput(""); 
-      carregarOportunidades(usuarioLogado); // Recarrega aplicando o filtro novamente
+      carregarOportunidades(usuarioLogado); 
     } else { 
       console.error("Erro banco:", error); 
       alert(`Erro ao salvar: ${error.message}`); 

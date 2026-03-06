@@ -12,7 +12,7 @@ export default function Dashboard() {
   
   // --- ESTADOS GERAIS ---
   const [loading, setLoading] = useState(true);
-  const [primeiroNome, setPrimeiroNome] = useState("Dionatan");
+  const [primeiroNome, setPrimeiroNome] = useState("Equipe"); // Mudado o default
   const [saudacao, setSaudacao] = useState("Olá");
   const [clima, setClima] = useState({ temp: 28, cidade: 'Maringá', condicao: 'Carregando...' });
   const [detalhesClima, setDetalhesClima] = useState<any>(null);
@@ -85,26 +85,54 @@ export default function Dashboard() {
   const carregarDados = async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
+    
     if (user) {
-      const emailBase = user.email?.split('@')[0] || "Dionatan";
-      setPrimeiroNome(emailBase.toLowerCase().replace('hoegen', '').charAt(0).toUpperCase() + emailBase.toLowerCase().replace('hoegen', '').slice(1));
+      // 1. Busca o Perfil para formatar o nome certinho
+      const { data: perfil } = await supabase.from('perfis').select('*').eq('id', user.id).single();
+      
+      if (perfil && perfil.nome) {
+          // Pega só o primeiro nome
+          const primeiroNomeCortado = perfil.nome.split(' ')[0];
+          // Formata com a primeira letra maiúscula e o resto minúsculo (Ex: RAFAELA -> Rafaela)
+          const nomeLimpo = primeiroNomeCortado.charAt(0).toUpperCase() + primeiroNomeCortado.slice(1).toLowerCase();
+          setPrimeiroNome(nomeLimpo);
+      } else {
+          // Se falhar, usa o email como antes
+          const emailBase = user.email?.split('@')[0] || "Usuário";
+          setPrimeiroNome(emailBase.charAt(0).toUpperCase() + emailBase.slice(1));
+      }
 
+      // 2. Busca a Meta do utilizador
       const { data: dMeta } = await supabase.from('metas').select('valor_meta').eq('user_id', user.id).single();
       if (dMeta) setMetaAlvo(dMeta.valor_meta);
 
-      const { data: pipe } = await supabase.from('pipeline').select('valor, status').eq('user_id', user.id);
+      // 3. Busca o Pipeline com a Visão de Túnel (Se não for admin, só o seu próprio)
+      let queryPipeline = supabase.from('pipeline').select('valor, status');
+      if (perfil && perfil.cargo !== 'admin') {
+          queryPipeline = queryPipeline.eq('user_id', perfil.id);
+      }
+      
+      const { data: pipe } = await queryPipeline;
+      
       if (pipe) {
         setValorFechado(pipe.filter(i => i.status?.toLowerCase() === 'fechado').reduce((acc, curr) => acc + (Number(curr.valor) || 0), 0));
         setQtdOportunidades(pipe.filter(i => ['prospeccao', 'qualificacao', 'apresentacao'].includes(i.status?.toLowerCase())).length);
         setValorNegociacao(pipe.filter(i => i.status?.toLowerCase() === 'negociacao').reduce((acc, curr) => acc + (Number(curr.valor) || 0), 0));
       }
 
-      const { count } = await supabase.from('base_clientes').select('*', { count: 'exact', head: true }).eq('user_id', user.id);
+      // 4. Busca Carteira de Clientes com Visão de Túnel
+      let queryClientes = supabase.from('base_clientes').select('*', { count: 'exact', head: true });
+      if (perfil && perfil.cargo !== 'admin') {
+          queryClientes = queryClientes.eq('user_id', perfil.id);
+      }
+      const { count } = await queryClientes;
       setTotalCarteira(count || 0);
 
+      // 5. Busca as Tarefas 
       const { data: t } = await supabase.from('tarefas').select('*, base_clientes(fantasia)').eq('user_id', user.id).order('created_at', { ascending: false });
       setTarefas(t || []);
     }
+    
     setLoading(false);
   };
 
@@ -161,6 +189,9 @@ export default function Dashboard() {
 
   const porcentagemMeta = Math.min(Math.round((valorFechado / metaAlvo) * 100), 100);
 
+  // Data atual formatada para o cabeçalho
+  const dataHojeFormatada = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+
   return (
     <div className="p-4 max-w-7xl mx-auto space-y-8 pb-20 md:pb-4 font-sans">
       
@@ -168,7 +199,7 @@ export default function Dashboard() {
       <div className="flex flex-col xl:flex-row items-center justify-between gap-6 bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
         <div className="text-center xl:text-left min-w-[200px]">
           <p className="text-slate-500 font-medium flex items-center justify-center xl:justify-start gap-2 mb-1 uppercase text-[10px] tracking-widest">
-             <Calendar size={14} className="text-green-600"/> segunda-feira, 5 de janeiro
+             <Calendar size={14} className="text-green-600"/> {dataHojeFormatada}
           </p>
           <h1 className="text-3xl font-black text-slate-800 tracking-tight">
             {saudacao}, <span className="text-green-700">{primeiroNome}!</span>
@@ -247,7 +278,7 @@ export default function Dashboard() {
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm h-fit">
           <h3 className="font-bold text-lg text-slate-700 mb-6">Próximos Eventos</h3>
           <div className="space-y-6">
-            <div className="flex gap-4"><div className="bg-slate-100 rounded-xl px-3 py-2 text-center min-w-[60px]"><p className="text-[10px] font-bold text-slate-400">JAN</p><p className="text-xl font-black text-slate-700">12</p></div><div><p className="font-bold text-slate-700 text-sm">Webinar SlimHaut®</p><p className="text-xs text-slate-400 mt-1">19:00 • Online</p></div></div>
+            <div className="flex gap-4"><div className="bg-slate-100 rounded-xl px-3 py-2 text-center min-w-[60px]"><p className="text-[10px] font-bold text-slate-400">MAR</p><p className="text-xl font-black text-slate-700">12</p></div><div><p className="font-bold text-slate-700 text-sm">Webinar SlimHaut®</p><p className="text-xs text-slate-400 mt-1">19:00 • Online</p></div></div>
           </div>
         </div>
       </div>
