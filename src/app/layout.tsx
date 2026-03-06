@@ -16,14 +16,15 @@ const outfit = Outfit({ subsets: ["latin"] });
 
 // Definição original dos itens com a sua "chave" de acesso correspondente
 const MENU_BASE = [
-  { name: 'Dashboard', path: '/', icon: LayoutDashboard, key: 'faturamento' }, // Mapeado para faturamento (painel principal)
+  { name: 'Dashboard', path: '/', icon: LayoutDashboard, key: 'faturamento' },
   { name: 'Clientes', path: '/clientes', icon: Users, key: 'clientes' },
+  { name: 'Prescritores', path: '/prescritores', icon: Stethoscope, key: 'prescritores' }, // <-- NOVA LINHA AQUI!
   { name: 'Pipeline', path: '/pipeline', icon: Trello, key: 'pipeline' },
   { name: 'Produtos', path: '/produtos', icon: Package, key: 'produtos' },
   { name: 'Exclusividades', path: '/exclusividades', icon: Lock, key: 'exclusividades' },
   { name: 'Faturamento', path: '/faturamento', icon: BarChart3, key: 'faturamento' },
   { name: 'Relatórios', path: '/relatorios', icon: FileText, key: 'relatorios' }, 
-  { name: 'Equipe', path: '/equipe', icon: Shield, key: 'admin' }, // Mudei o nome e o path para bater com a tela nova
+  { name: 'Equipe', path: '/equipe', icon: Shield, key: 'admin' },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
