@@ -9,7 +9,7 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
   LayoutDashboard, Users, Trello, Package, Lock, 
   BarChart3, LogOut, Menu, X, ChevronRight,
-  FileText, Shield, ChevronDown, Stethoscope
+  FileText, Shield, ChevronDown, Stethoscope, Lightbulb
 } from 'lucide-react';
 
 const outfit = Outfit({ subsets: ["latin"] });
@@ -17,6 +17,7 @@ const outfit = Outfit({ subsets: ["latin"] });
 // Definição original dos itens com a sua "chave" de acesso correspondente
 const MENU_BASE = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard, key: 'faturamento' },
+  { name: 'Inteligência', path: '/inteligencia', icon: Lightbulb, key: 'inteligencia' },
   { name: 'Clientes', path: '/clientes', icon: Users, key: 'clientes' },
   { name: 'Prescritores', path: '/prescritores', icon: Stethoscope, key: 'prescritores' },
   { name: 'Pipeline', path: '/pipeline', icon: Trello, key: 'pipeline' },

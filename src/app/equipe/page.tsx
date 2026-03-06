@@ -53,8 +53,8 @@ export default function GestaoEquipePage() {
   };
 
   const abrirEdicao = (membro: any) => {
-    // Garante que o JSON de acessos existe para não dar erro na tela (inclui 'prescritores')
-    const acessosPadrao = { pipeline: false, clientes: false, prescritores: false, faturamento: false, exclusividades: false, produtos: false, relatorios: false, admin: false };
+    // Garante que o JSON de acessos existe para não dar erro na tela (inclui inteligência)
+    const acessosPadrao = { pipeline: false, inteligencia: false, clientes: false, prescritores: false, faturamento: false, exclusividades: false, produtos: false, relatorios: false, admin: false };
     setUsuarioEditando({
       ...membro,
       acessos: typeof membro.acessos === 'object' && membro.acessos !== null ? { ...acessosPadrao, ...membro.acessos } : acessosPadrao
@@ -232,9 +232,10 @@ export default function GestaoEquipePage() {
                    <h3 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-4 border-b pb-2">2. Liberação de Telas (Menu)</h3>
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       
-                      {/* MAPEANDO AS TELAS (COM A NOVA DE PRESCRITORES) */}
+                      {/* MAPEANDO AS TELAS */}
                       {[
                         { key: 'pipeline', label: 'CRM / Pipeline', desc: 'Aba de negociações' },
+                        { key: 'inteligencia', label: 'Inteligência P&D', desc: 'Motor de busca de ativos' },
                         { key: 'faturamento', label: 'Faturamento', desc: 'Dashboard de vendas' },
                         { key: 'clientes', label: 'Carteira de Clientes', desc: 'Base de farmácias' },
                         { key: 'prescritores', label: 'P&D / Prescritores', desc: 'Gestão médica' },
