@@ -9,7 +9,6 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// Reutilizando as URLs do seu Pipeline
 const API_CLIENTES_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
@@ -19,13 +18,11 @@ export default function InteligenciaPage() {
   const [resultados, setResultados] = useState<any[]>([]);
   const [buscou, setBuscou] = useState(false);
 
-  // --- ESTADOS PARA BUSCA DE PRODUTOS ---
   const [produtosApi, setProdutosApi] = useState<string[]>([]);
   const [ativosSelecionados, setAtivosSelecionados] = useState<string[]>([]);
   const [termoProdutoDropdown, setTermoProdutoDropdown] = useState("");
   const [dropdownAberto, setDropdownAberto] = useState(false);
 
-  // --- ESTADOS PARA BUSCA DE FARMÁCIA ---
   const [termoFarmacia, setTermoFarmacia] = useState("");
 
   useEffect(() => {
@@ -38,7 +35,6 @@ export default function InteligenciaPage() {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
             const listaNomes = json.data.map((p: any) => p.ativo?.trim()).filter(Boolean);
-            // Remove duplicatas e ordena
             setProdutosApi(Array.from(new Set(listaNomes)).sort() as string[]);
         }
     } catch (e) { console.error("Erro API Produtos:", e); }
@@ -53,7 +49,16 @@ export default function InteligenciaPage() {
       setTermoProdutoDropdown("");
   };
 
-  // Simulação de busca na base
+  // FUNÇÃO MÁGICA: Limpa acentos, espaços e símbolos (® e ™) para a busca não falhar
+  const cleanText = (text: any) => {
+      if (!text) return "";
+      return String(text)
+          .toLowerCase()
+          .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove acentos
+          .replace(/[®™]/g, "") // Remove símbolos de marca
+          .trim();
+  };
+
   const realizarBusca = async () => {
     if (tipoBusca === 'produto' && ativosSelecionados.length === 0) return alert("Selecione pelo menos um ativo.");
     if (tipoBusca === 'farmacia' && !termoFarmacia.trim()) return alert("Digite o nome ou CNPJ da farmácia.");
@@ -63,7 +68,6 @@ export default function InteligenciaPage() {
     setDropdownAberto(false);
 
     try {
-      // Puxa os dados do ERP (Google Sheets)
       const res = await fetch(`${API_CLIENTES_URL}?path=clientes`);
       const json = await res.json();
       
@@ -75,31 +79,41 @@ export default function InteligenciaPage() {
       const resultadosFiltrados: any[] = [];
 
       baseDados.forEach((cliente: any) => {
-          // Mapeamento robusto dos dados principais
-          const nomeFarmacia = cliente.fantasia || cliente.nome_fantasia || cliente.razao_social || cliente.cliente || 'FARMÁCIA NÃO IDENTIFICADA';
-          const cnpj = cliente.cnpj || cliente.documento || 'CNPJ N/D';
-          const vendedor = cliente.vendedor || cliente.representante || cliente.consultor || 'Vendedor Não Atribuído';
-          const cidadeUf = `${cliente.municipio || cliente.cidade || '-'} / ${cliente.uf || '-'}`;
-          const ultimaCompra = cliente.ultima_compra || cliente.data_ultima_compra || 'Sem registro de data';
-          const status = cliente.bloqueado ? 'Bloqueado' : 'Ativo';
+          // NORMALIZA AS CHAVES DA PLANILHA (Transforma "Nome Fantasia" em "nome_fantasia")
+          const clienteLimpo: any = {};
+          Object.keys(cliente).forEach(k => {
+              const keyLimpa = cleanText(k).replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_');
+              clienteLimpo[keyLimpa] = cliente[k];
+          });
 
-          // Converte o objeto do cliente inteiro em uma string para busca profunda
-          const textoClienteCompleto = JSON.stringify(cliente).toLowerCase();
+          // Extração robusta de dados independentemente do nome da coluna na sua planilha
+          const nomeFarmacia = clienteLimpo.fantasia || clienteLimpo.nome_fantasia || clienteLimpo.razao_social || clienteLimpo.cliente || clienteLimpo.nome || 'FARMÁCIA NÃO IDENTIFICADA';
+          const cnpj = clienteLimpo.cnpj || clienteLimpo.documento || clienteLimpo.cpf_cnpj || 'CNPJ N/D';
+          const vendedor = clienteLimpo.vendedor || clienteLimpo.representante || clienteLimpo.consultor || 'N/D';
+          const cidadeUf = `${clienteLimpo.municipio || clienteLimpo.cidade || '-'} / ${clienteLimpo.uf || clienteLimpo.estado || '-'}`;
+          const ultimaCompra = clienteLimpo.ultima_compra || clienteLimpo.data_ultima_compra || clienteLimpo.data || '-';
+          const status = clienteLimpo.bloqueado ? 'Bloqueado' : 'Ativo';
+
+          // Converte o objeto inteiro limpo para string para busca profunda
+          const textoClienteCompleto = cleanText(JSON.stringify(cliente));
 
           if (tipoBusca === 'produto') {
               let encontrouAlgum = false;
               let detalhesCapturados: string[] = [];
 
               ativosSelecionados.forEach(ativo => {
-                  if (textoClienteCompleto.includes(ativo.toLowerCase())) {
+                  const ativoLimpo = cleanText(ativo);
+                  
+                  if (textoClienteCompleto.includes(ativoLimpo)) {
                       encontrouAlgum = true;
                       
-                      // Faz uma varredura nas chaves do cliente para ver exatamente ONDE o ativo foi mencionado
+                      // Procura em qual coluna o ativo apareceu
                       Object.entries(cliente).forEach(([chave, valor]) => {
-                          const valorStr = String(valor).toLowerCase();
-                          // Evita pegar nas chaves básicas se por acaso o nome da farmácia tiver o nome do ativo
-                          if (valorStr.includes(ativo.toLowerCase()) && !['fantasia', 'nome_fantasia', 'razao_social'].includes(chave.toLowerCase())) {
-                              detalhesCapturados.push(`${chave.replace(/_/g, ' ').toUpperCase()}: ${valor}`);
+                          const valorLimpo = cleanText(String(valor));
+                          const chaveLimpa = cleanText(chave);
+                          
+                          if (valorLimpo.includes(ativoLimpo) && !['fantasia', 'nome', 'razao'].some(term => chaveLimpa.includes(term))) {
+                              detalhesCapturados.push(`${chave.toUpperCase()}: ${valor}`);
                           }
                       });
                   }
@@ -112,19 +126,20 @@ export default function InteligenciaPage() {
                       cnpj: cnpj,
                       cidadeUf: cidadeUf,
                       vendedor: vendedor,
-                      // Remove duplicatas dos detalhes capturados
-                      detalhe: detalhesCapturados.length > 0 ? Array.from(new Set(detalhesCapturados)).join(' | ') : 'Encontrado no histórico oculto',
+                      detalhe: detalhesCapturados.length > 0 ? Array.from(new Set(detalhesCapturados)).join(' | ') : 'Encontrado no histórico da planilha',
                       ultima_compra: ultimaCompra,
                       status: status
                   });
               }
           } else {
               // Busca por Farmácia
-              const termoFarm = termoFarmacia.toLowerCase().trim();
-              if (nomeFarmacia.toLowerCase().includes(termoFarm) || cnpj.replace(/\D/g, '').includes(termoFarm.replace(/\D/g, ''))) {
-                  
-                  // Tenta capturar tudo que pareça um produto ou histórico
-                  let historico = cliente.produtos || cliente.historico || cliente.compras || 'Nenhum detalhe de produto especificado na planilha.';
+              const termoFarm = cleanText(termoFarmacia);
+              const nomeFarmLimpo = cleanText(nomeFarmacia);
+              const cnpjLimpo = cleanText(cnpj).replace(/\D/g, '');
+              const termoFarmNum = termoFarm.replace(/\D/g, '');
+
+              if (nomeFarmLimpo.includes(termoFarm) || (termoFarmNum && cnpjLimpo.includes(termoFarmNum))) {
+                  let historico = clienteLimpo.produtos || clienteLimpo.historico || clienteLimpo.compras || clienteLimpo.observacoes || 'Nenhum detalhe de compra listado.';
                   
                   resultadosFiltrados.push({
                       id: cnpj + Math.random(),
@@ -132,7 +147,7 @@ export default function InteligenciaPage() {
                       cnpj: cnpj,
                       cidadeUf: cidadeUf,
                       vendedor: vendedor,
-                      detalhe: historico,
+                      detalhe: typeof historico === 'object' ? JSON.stringify(historico) : String(historico),
                       ultima_compra: ultimaCompra,
                       status: status
                   });
@@ -143,14 +158,14 @@ export default function InteligenciaPage() {
       setResultados(resultadosFiltrados);
     } catch (e) {
       console.error("Erro ao buscar inteligência:", e);
-      alert("Falha ao cruzar os dados com o ERP. Verifique a conexão.");
+      alert("Falha ao cruzar os dados com o ERP. Tente novamente.");
     } finally {
       setLoading(false);
     }
   };
 
   const exportarPDF = () => {
-    const doc = new jsPDF('l', 'mm', 'a4'); // Paisagem para caber mais dados
+    const doc = new jsPDF('l', 'mm', 'a4');
     
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
@@ -170,12 +185,12 @@ export default function InteligenciaPage() {
         r.cidadeUf,
         r.vendedor,
         r.ultima_compra,
-        r.detalhe.substring(0, 80) + (r.detalhe.length > 80 ? '...' : '') // Limita o texto
+        r.detalhe.substring(0, 100) + (r.detalhe.length > 100 ? '...' : '')
     ]);
 
     autoTable(doc, {
         startY: 40,
-        head: [['FARMÁCIA', 'CNPJ', 'LOCAL', 'VENDEDOR', 'ÚLT. COMPRA', 'DETALHES ENCONTRADOS']],
+        head: [['FARMÁCIA', 'CNPJ', 'LOCAL', 'VENDEDOR', 'ÚLT. COMPRA', 'HISTÓRICO ENCONTRADO']],
         body: tableBody,
         theme: 'grid',
         headStyles: { fillColor: [20, 83, 45], textColor: 255, fontStyle: 'bold' },
@@ -221,7 +236,6 @@ export default function InteligenciaPage() {
             <div className="flex flex-col md:flex-row gap-4">
                 {tipoBusca === 'produto' ? (
                     <div className="flex-1 relative">
-                        {/* INPUT FALSO QUE ABRE O DROPDOWN */}
                         <div 
                             className="min-h-[56px] w-full bg-slate-50 border-2 border-slate-200 hover:border-blue-300 rounded-2xl p-2 flex flex-wrap gap-2 items-center cursor-text transition"
                             onClick={() => setDropdownAberto(true)}
@@ -249,7 +263,6 @@ export default function InteligenciaPage() {
                             <ChevronDown size={20} className="text-slate-400 mr-2"/>
                         </div>
 
-                        {/* LISTA SUSPENSA DE ATIVOS */}
                         {dropdownAberto && (
                             <>
                                 <div className="fixed inset-0 z-30" onClick={() => setDropdownAberto(false)}></div>
@@ -305,7 +318,7 @@ export default function InteligenciaPage() {
                             <Target className="text-blue-500"/> Resultados Encontrados
                         </h3>
                         <p className="text-sm text-slate-500 mt-1">
-                            A base ERP retornou <strong className="text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{resultados.length}</strong> cruzamentos de dados.
+                            A base ERP retornou <strong className="text-blue-600 bg-blue-50 px-2 py-0.5 rounded">{resultados.length}</strong> cruzamentos.
                         </p>
                     </div>
                     {resultados.length > 0 && (
@@ -321,7 +334,7 @@ export default function InteligenciaPage() {
                             <Search size={40}/>
                         </div>
                         <h4 className="text-xl font-bold text-slate-700">Nenhum cruzamento exato</h4>
-                        <p className="text-slate-500 mt-2 max-w-md mx-auto">Não encontramos histórico de compra para os filtros selecionados. Tente buscar com termos mais amplos ou verificar na planilha original.</p>
+                        <p className="text-slate-500 mt-2 max-w-md mx-auto">Não encontramos histórico de compra para os filtros selecionados na sua planilha.</p>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 gap-4">
