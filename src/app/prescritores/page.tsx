@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
+const API_CLIENTES_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
 const LISTA_ESPECIALIDADES = [
   "Cardiologia", "Clínico Geral", "Dermatologia", "Endocrinologia", 
@@ -34,12 +35,13 @@ export default function PrescritoresPage() {
   const [prescritorAtivo, setPrescritorAtivo] = useState<any>(null);
   const [interacoes, setInteracoes] = useState<any[]>([]);
   
-  // Combobox Produtos
+  // Bases da API do Sheets
   const [produtosApi, setProdutosApi] = useState<string[]>([]);
+  const [baseFarmaciasApi, setBaseFarmaciasApi] = useState<any[]>([]);
+
+  // Controles de Dropdown
   const [termoProdutoDropdown, setTermoProdutoDropdown] = useState("");
   const [dropdownProdutosAberto, setDropdownProdutosAberto] = useState(false);
-  
-  // Combobox Farmácias
   const [farmaciasBuscadas, setFarmaciasBuscadas] = useState<any[]>([]);
   const [dropdownFarmaciaAberto, setDropdownFarmaciaAberto] = useState(false);
 
@@ -63,6 +65,7 @@ export default function PrescritoresPage() {
     setMounted(true);
     carregarPrescritores();
     carregarListaProdutos();
+    carregarBaseFarmacias();
   }, []);
 
   const carregarListaProdutos = async () => {
@@ -76,20 +79,21 @@ export default function PrescritoresPage() {
     } catch (e) { console.error("Erro API Produtos:", e); }
   };
 
+  const carregarBaseFarmacias = async () => {
+    try {
+        const res = await fetch(`${API_CLIENTES_URL}?path=clientes`);
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+            setBaseFarmaciasApi(json.data);
+        }
+    } catch (e) { console.error("Erro API Farmácias:", e); }
+  };
+
   const carregarPrescritores = async () => {
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data: perfil } = await supabase.from('perfis').select('cargo, nome').eq('id', user.id).single();
-
-      let query = supabase.from('prescritores').select('*').order('nome', { ascending: true });
-      if (perfil && perfil.cargo !== 'admin') {
-          query = query.eq('user_id', user.id);
-      }
-
-      const { data, error } = await query;
+      // Busca global sem filtro de túnel
+      const { data, error } = await supabase.from('prescritores').select('*').order('nome', { ascending: true });
       if (error) throw error;
       if (data) setPrescritores(data);
     } catch (error) {
@@ -176,13 +180,29 @@ export default function PrescritoresPage() {
       setLoading(false);
   };
 
-  const buscarFarmaciaDB = async (termo: string) => {
+  const buscarFarmaciaInteligente = (termo: string) => {
       setNovaInteracao({...novaInteracao, farmacia_vinculada: termo});
       setDropdownFarmaciaAberto(true);
       
       if (termo.length > 2) {
-          const { data } = await supabase.from('base_clientes').select('fantasia').ilike('fantasia', `%${termo}%`).limit(5);
-          setFarmaciasBuscadas(data || []);
+          const termoLimpo = termo.toLowerCase().trim();
+          const termoNum = termo.replace(/\D/g, '');
+
+          const filtradas = baseFarmaciasApi.filter(f => {
+              const fantasia = String(f.fantasia || f.nome_fantasia || '').toLowerCase();
+              const razao = String(f.razao_social || f.cliente || '').toLowerCase();
+              const cnpj = String(f.cnpj || f.documento || '').replace(/\D/g, '');
+
+              return fantasia.includes(termoLimpo) || razao.includes(termoLimpo) || (termoNum && cnpj.includes(termoNum));
+          }).slice(0, 10); // Limita a 10 para não travar a tela
+
+          // Formata para exibição
+          const formatadas = filtradas.map(f => ({
+              nome: f.fantasia || f.nome_fantasia || f.razao_social || 'Desconhecida',
+              documento: f.cnpj || f.documento || ''
+          }));
+
+          setFarmaciasBuscadas(formatadas);
       } else {
           setFarmaciasBuscadas([]);
       }
@@ -205,7 +225,6 @@ export default function PrescritoresPage() {
           const { data: { user } } = await supabase.auth.getUser();
           if (!user) return;
 
-          // 1. Grava a interação com os novos campos e joga direto para 'realizado' no Kanban
           await supabase.from('interacoes').insert([{
               prescritor_id: prescritorAtivo.id,
               user_id: user.id,
@@ -215,10 +234,9 @@ export default function PrescritoresPage() {
               farmacia_vinculada: novaInteracao.farmacia_vinculada,
               produtos_vinculados: novaInteracao.produtos_vinculados.join(';'),
               data_proximo_contato: novaInteracao.data_proximo_contato || null,
-              status: 'realizado' // Entra como realizado por padrão
+              status: 'realizado' // Entra como realizado por padrão no Kanban
           }]);
 
-          // 2. Atualiza a data de follow-up no card principal do médico
           if (novaInteracao.data_proximo_contato) {
               await supabase.from('prescritores').update({ proximo_contato: novaInteracao.data_proximo_contato }).eq('id', prescritorAtivo.id);
           }
@@ -477,7 +495,7 @@ export default function PrescritoresPage() {
                                 )}
                             </div>
 
-                            {/* VINCULAR FARMÁCIA (AUTOCOMPLETE) */}
+                            {/* VINCULAR FARMÁCIA (AUTOCOMPLETE INTELIGENTE) */}
                             <div className="relative">
                                 <label className="text-sm font-bold text-slate-700 mb-2 flex items-center justify-between">
                                     <span>Vincular Farmácia Parceira</span>
@@ -485,7 +503,7 @@ export default function PrescritoresPage() {
                                 </label>
                                 <div className="flex items-center bg-white border border-slate-300 rounded-xl shadow-sm focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500 transition px-3">
                                     <Building2 size={18} className="text-slate-400"/>
-                                    <input type="text" value={novaInteracao.farmacia_vinculada} onChange={(e) => buscarFarmaciaDB(e.target.value)} onFocus={() => setDropdownFarmaciaAberto(true)} className="w-full p-3.5 bg-transparent outline-none text-base font-medium text-slate-900 placeholder-slate-400" placeholder="Digite para buscar na base..."/>
+                                    <input type="text" value={novaInteracao.farmacia_vinculada} onChange={(e) => buscarFarmaciaInteligente(e.target.value)} onFocus={() => setDropdownFarmaciaAberto(true)} className="w-full p-3.5 bg-transparent outline-none text-base font-medium text-slate-900 placeholder-slate-400" placeholder="Digite nome, razão social ou CNPJ..."/>
                                     {novaInteracao.farmacia_vinculada && <button type="button" onClick={() => {setNovaInteracao({...novaInteracao, farmacia_vinculada: ''}); setFarmaciasBuscadas([])}}><X size={16} className="text-slate-400 hover:text-red-500"/></button>}
                                 </div>
                                 {dropdownFarmaciaAberto && farmaciasBuscadas.length > 0 && (
@@ -493,8 +511,9 @@ export default function PrescritoresPage() {
                                         <div className="fixed inset-0 z-30" onClick={() => setDropdownFarmaciaAberto(false)}></div>
                                         <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden z-40">
                                             {farmaciasBuscadas.map((f, i) => (
-                                                <button type="button" key={i} onClick={() => {setNovaInteracao({...novaInteracao, farmacia_vinculada: f.fantasia}); setDropdownFarmaciaAberto(false);}} className="w-full text-left px-4 py-3 hover:bg-slate-50 transition text-sm font-bold text-slate-700 border-b border-slate-50 last:border-0">
-                                                    {f.fantasia}
+                                                <button type="button" key={i} onClick={() => {setNovaInteracao({...novaInteracao, farmacia_vinculada: f.nome}); setDropdownFarmaciaAberto(false);}} className="w-full text-left px-4 py-3 hover:bg-slate-50 transition border-b border-slate-50 last:border-0 flex flex-col">
+                                                    <span className="text-sm font-bold text-slate-700">{f.nome}</span>
+                                                    {f.documento && <span className="text-[10px] text-slate-400 font-mono">{f.documento}</span>}
                                                 </button>
                                             ))}
                                         </div>

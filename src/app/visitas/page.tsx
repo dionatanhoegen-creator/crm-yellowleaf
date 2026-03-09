@@ -3,13 +3,16 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { 
-  Stethoscope, Search, Plus, CalendarCheck, Clock, CheckCircle2, AlertCircle, FileText, ChevronRight, X, Save, Printer, Building2, Beaker, Activity, MapPin, Edit, MessageCircle, ChevronDown, Check
+  CalendarCheck, Search, Printer, AlertCircle, Clock, MapPin, 
+  Building2, Edit, MessageCircle, X, FileText, ChevronRight, 
+  Activity, Save, Beaker, ChevronDown, Check
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
+const API_CLIENTES_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
 const ESTAGIOS = [
   { id: 'agendado', label: 'Planejado / Agendado', color: 'border-blue-500', text: 'text-blue-700', bg: 'bg-blue-50' },
@@ -26,13 +29,16 @@ export default function PipelinePDPage() {
   const [busca, setBusca] = useState("");
   const [mounted, setMounted] = useState(false);
 
-  // Estados do Modal de Edição
+  // Estados do Modal de Edição Rápida
   const [modalAberto, setModalAberto] = useState(false);
   const [visitaEditando, setVisitaEditando] = useState<any>(null);
   const [salvando, setSalvando] = useState(false);
 
-  // Auxiliares para as caixas de seleção
+  // Bases da API
   const [produtosApi, setProdutosApi] = useState<string[]>([]);
+  const [baseFarmaciasApi, setBaseFarmaciasApi] = useState<any[]>([]);
+
+  // Controles de Dropdown na edição
   const [termoProdutoDropdown, setTermoProdutoDropdown] = useState("");
   const [dropdownProdutosAberto, setDropdownProdutosAberto] = useState(false);
   const [farmaciasBuscadas, setFarmaciasBuscadas] = useState<any[]>([]);
@@ -42,6 +48,7 @@ export default function PipelinePDPage() {
     setMounted(true);
     carregarVisitas();
     carregarListaProdutos();
+    carregarBaseFarmacias();
   }, []);
 
   const carregarListaProdutos = async () => {
@@ -55,26 +62,14 @@ export default function PipelinePDPage() {
     } catch (e) { console.error("Erro API Produtos:", e); }
   };
 
-  const buscarFarmaciaDB = async (termo: string) => {
-      setVisitaEditando({...visitaEditando, farmacia_vinculada: termo});
-      setDropdownFarmaciaAberto(true);
-      
-      if (termo.length > 2) {
-          const { data } = await supabase.from('base_clientes').select('fantasia').ilike('fantasia', `%${termo}%`).limit(5);
-          setFarmaciasBuscadas(data || []);
-      } else {
-          setFarmaciasBuscadas([]);
-      }
-  };
-
-  const toggleAtivoEdit = (ativo: string) => {
-      const atual = visitaEditando.produtos_vinculados_array || [];
-      if (atual.includes(ativo)) {
-          setVisitaEditando({...visitaEditando, produtos_vinculados_array: atual.filter((a:string) => a !== ativo)});
-      } else {
-          setVisitaEditando({...visitaEditando, produtos_vinculados_array: [...atual, ativo]});
-      }
-      setTermoProdutoDropdown("");
+  const carregarBaseFarmacias = async () => {
+    try {
+        const res = await fetch(`${API_CLIENTES_URL}?path=clientes`);
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+            setBaseFarmaciasApi(json.data);
+        }
+    } catch (e) { console.error("Erro API Farmácias:", e); }
   };
 
   const carregarVisitas = async () => {
@@ -83,18 +78,13 @@ export default function PipelinePDPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: perfil } = await supabase.from('perfis').select('cargo, nome').eq('id', user.id).single();
-
-      let query = supabase.from('interacoes')
+      // Puxa as interações GLOBALMENTE (Fim da visão de túnel)
+      const { data, error } = await supabase.from('interacoes')
           .select('*, prescritores(nome, especialidade, clinica, cidade, uf, telefone), perfis(nome)')
           .order('data_proximo_contato', { ascending: true, nullsFirst: false });
       
-      if (perfil && perfil.cargo !== 'admin') {
-          query = query.eq('user_id', user.id);
-      }
+      if (error) throw error;
 
-      const { data } = await query;
-      
       const formatadas = (data || []).map(v => ({ ...v, status: v.status || 'realizado' }));
       setVisitas(formatadas);
     } catch (e) {
@@ -121,6 +111,43 @@ export default function PipelinePDPage() {
           produtos_vinculados_array: visita.produtos_vinculados ? visita.produtos_vinculados.split(';').filter(Boolean) : []
       });
       setModalAberto(true);
+  };
+
+  const buscarFarmaciaInteligente = (termo: string) => {
+      setVisitaEditando({...visitaEditando, farmacia_vinculada: termo});
+      setDropdownFarmaciaAberto(true);
+      
+      if (termo.length > 2) {
+          const termoLimpo = termo.toLowerCase().trim();
+          const termoNum = termo.replace(/\D/g, '');
+
+          const filtradas = baseFarmaciasApi.filter(f => {
+              const fantasia = String(f.fantasia || f.nome_fantasia || '').toLowerCase();
+              const razao = String(f.razao_social || f.cliente || '').toLowerCase();
+              const cnpj = String(f.cnpj || f.documento || '').replace(/\D/g, '');
+
+              return fantasia.includes(termoLimpo) || razao.includes(termoLimpo) || (termoNum && cnpj.includes(termoNum));
+          }).slice(0, 10);
+
+          const formatadas = filtradas.map(f => ({
+              nome: f.fantasia || f.nome_fantasia || f.razao_social || 'Desconhecida',
+              documento: f.cnpj || f.documento || ''
+          }));
+
+          setFarmaciasBuscadas(formatadas);
+      } else {
+          setFarmaciasBuscadas([]);
+      }
+  };
+
+  const toggleAtivoEdit = (ativo: string) => {
+      const atual = visitaEditando.produtos_vinculados_array || [];
+      if (atual.includes(ativo)) {
+          setVisitaEditando({...visitaEditando, produtos_vinculados_array: atual.filter((a:string) => a !== ativo)});
+      } else {
+          setVisitaEditando({...visitaEditando, produtos_vinculados_array: [...atual, ativo]});
+      }
+      setTermoProdutoDropdown("");
   };
 
   const salvarEdicaoVisita = async (e: React.FormEvent) => {
@@ -198,7 +225,6 @@ export default function PipelinePDPage() {
   return (
     <div className="p-4 w-full h-[calc(100vh-64px)] flex flex-col font-sans">
       
-      {/* CABEÇALHO */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 shrink-0">
         <div>
             <h1 className="text-2xl font-black text-[#0f392b] tracking-tight flex items-center gap-2">
@@ -218,11 +244,11 @@ export default function PipelinePDPage() {
         </div>
       </div>
 
-      {/* KANBAN BOARD */}
       <div className="flex-1 overflow-x-auto pb-4">
           <div className="flex gap-4 h-full min-w-max">
               {ESTAGIOS.map(estagio => {
                   const visitasColuna = filtradas.filter(v => v.status === estagio.id);
+                  
                   return (
                       <div key={estagio.id} className="w-80 bg-slate-100/50 rounded-2xl border border-slate-200 flex flex-col h-full overflow-hidden">
                           <div className={`p-4 border-b-4 ${estagio.color} bg-white flex justify-between items-center shadow-sm shrink-0`}>
@@ -246,9 +272,7 @@ export default function PipelinePDPage() {
                                                           <MessageCircle size={16} />
                                                       </a>
                                                   )}
-                                                  <button onClick={() => abrirEdicaoVisita(visita)} className="text-slate-400 hover:text-blue-600 p-1 transition" title="Editar Visita">
-                                                      <Edit size={14}/>
-                                                  </button>
+                                                  <button onClick={() => abrirEdicaoVisita(visita)} className="text-slate-400 hover:text-blue-600 p-1 transition" title="Editar Visita"><Edit size={14}/></button>
                                               </div>
                                           </div>
 
@@ -293,14 +317,13 @@ export default function PipelinePDPage() {
           </div>
       </div>
 
-      {/* MODAL DE EDIÇÃO DE VISITA COM PRODUTOS E FARMÁCIAS */}
       {modalAberto && visitaEditando && mounted && createPortal(
           <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-200">
               <div className="bg-white w-full max-w-2xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col">
                   
                   <div className="bg-[#1e293b] p-6 flex justify-between items-center text-white shrink-0">
                       <div>
-                          <h2 className="text-lg font-black uppercase tracking-wide flex items-center gap-2"><Edit className="text-blue-400" size={20}/> Editar Registro da Visita</h2>
+                          <h2 className="text-lg font-black uppercase tracking-wide flex items-center gap-2"><Edit className="text-blue-400" size={20}/> Editar Histórico da Visita</h2>
                           <p className="text-sm font-medium text-slate-300 mt-1">{visitaEditando.prescritores?.nome || 'Médico'}</p>
                       </div>
                       <button type="button" onClick={() => setModalAberto(false)} className="hover:bg-white/20 p-2 rounded-full transition bg-white/10"><X size={20}/></button>
@@ -326,7 +349,7 @@ export default function PipelinePDPage() {
                           </div>
                       </div>
 
-                      {/* PRODUTOS E FARMÁCIA NA EDIÇÃO */}
+                      {/* EDIÇÃO: PRODUTOS E FARMÁCIAS */}
                       <div className="relative">
                           <label className="text-xs font-bold text-slate-700 mb-1.5 block">Ativos Apresentados (Selecione da lista)</label>
                           <div className="min-h-[52px] w-full bg-white border border-slate-300 hover:border-blue-400 focus-within:border-blue-500 rounded-xl p-2 flex flex-wrap gap-2 items-center cursor-text transition shadow-sm" onClick={() => setDropdownProdutosAberto(true)}>
@@ -362,7 +385,7 @@ export default function PipelinePDPage() {
                           </label>
                           <div className="flex items-center bg-white border border-slate-300 rounded-xl shadow-sm focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500 transition px-3">
                               <Building2 size={18} className="text-slate-400"/>
-                              <input type="text" value={visitaEditando.farmacia_vinculada} onChange={(e) => buscarFarmaciaDB(e.target.value)} onFocus={() => setDropdownFarmaciaAberto(true)} className="w-full p-3 bg-transparent outline-none text-sm font-medium text-slate-900 placeholder-slate-400" placeholder="Digite para buscar na base..."/>
+                              <input type="text" value={visitaEditando.farmacia_vinculada} onChange={(e) => buscarFarmaciaInteligente(e.target.value)} onFocus={() => setDropdownFarmaciaAberto(true)} className="w-full p-3 bg-transparent outline-none text-sm font-medium text-slate-900 placeholder-slate-400" placeholder="Digite nome, razão social ou CNPJ..."/>
                               {visitaEditando.farmacia_vinculada && <button type="button" onClick={() => {setVisitaEditando({...visitaEditando, farmacia_vinculada: ''}); setFarmaciasBuscadas([])}}><X size={16} className="text-slate-400 hover:text-red-500"/></button>}
                           </div>
                           {dropdownFarmaciaAberto && farmaciasBuscadas.length > 0 && (
@@ -370,8 +393,9 @@ export default function PipelinePDPage() {
                                   <div className="fixed inset-0 z-30" onClick={() => setDropdownFarmaciaAberto(false)}></div>
                                   <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden z-40">
                                       {farmaciasBuscadas.map((f, i) => (
-                                          <button type="button" key={i} onClick={() => {setVisitaEditando({...visitaEditando, farmacia_vinculada: f.fantasia}); setDropdownFarmaciaAberto(false);}} className="w-full text-left px-4 py-3 hover:bg-slate-50 transition text-sm font-bold text-slate-700 border-b border-slate-50 last:border-0">
-                                              {f.fantasia}
+                                          <button type="button" key={i} onClick={() => {setVisitaEditando({...visitaEditando, farmacia_vinculada: f.nome}); setDropdownFarmaciaAberto(false);}} className="w-full text-left px-4 py-3 hover:bg-slate-50 transition border-b border-slate-50 last:border-0 flex flex-col">
+                                              <span className="text-sm font-bold text-slate-700">{f.nome}</span>
+                                              {f.documento && <span className="text-[10px] text-slate-400 font-mono">{f.documento}</span>}
                                           </button>
                                       ))}
                                   </div>
@@ -405,7 +429,6 @@ export default function PipelinePDPage() {
               </div>
           </div>, document.body
       )}
-
     </div>
   );
 }
