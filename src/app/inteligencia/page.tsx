@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Lightbulb, Search, Download, Building2, Beaker, Calendar, 
   MapPin, Target, Activity, FileText, User, X, ChevronDown, Check,
-  Briefcase, TrendingUp, BarChart3, Hash, ShoppingBag, Map
+  Briefcase, TrendingUp, BarChart3, Hash, ShoppingBag, Map, Maximize2
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -291,7 +291,7 @@ export default function InteligenciaPage() {
             </div>
         </div>
 
-        {/* ÁREA DE RESULTADOS */}
+        {/* ÁREA DE RESULTADOS (DATA GRID) */}
         {buscou && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-6 gap-4 px-2">
@@ -360,7 +360,7 @@ export default function InteligenciaPage() {
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-200">
                 <div className="bg-white w-full max-w-4xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[95vh] animate-in zoom-in-95">
                     
-                    {/* CABEÇALHO DO MODAL */}
+                    {/* CABEÇALHO DO MODAL (Estilo Corporate) */}
                     <div className="bg-[#1e293b] p-6 flex justify-between items-start text-white shrink-0 relative overflow-hidden rounded-t-[2rem]">
                         <div className="relative z-10 w-full">
                             <div className="flex justify-between items-start w-full">
@@ -381,6 +381,7 @@ export default function InteligenciaPage() {
                     {/* CORPO DO DOSSIÊ */}
                     <div className="p-6 overflow-y-auto flex-1 bg-slate-50 custom-scrollbar space-y-6">
                         
+                        {/* Cards Superiores (Resumo) */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><User size={12}/> Representante</p>
@@ -396,6 +397,7 @@ export default function InteligenciaPage() {
                             </div>
                         </div>
 
+                        {/* Endereço (Se houver) */}
                         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
                             <div className="p-2 bg-slate-50 rounded-lg text-slate-400"><Map size={16}/></div>
                             <div>
@@ -411,9 +413,7 @@ export default function InteligenciaPage() {
                                 <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">
                                     {tipoBusca === 'produto' ? 'Transações Encontradas (Filtro Ativo)' : 'Histórico de Pedidos'}
                                 </h3>
-                                <span className="bg-slate-200 text-slate-600 text-[10px] font-black px-2 py-0.5 rounded-full">
-                                    {(dossieAtivo.historico_tabela || []).length}
-                                </span>
+                                <span className="bg-slate-200 text-slate-600 text-[10px] font-black px-2 py-0.5 rounded-full">{dossieAtivo.historico_tabela.length}</span>
                             </div>
 
                             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -428,10 +428,10 @@ export default function InteligenciaPage() {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
-                                            {(!dossieAtivo.historico_tabela || !Array.isArray(dossieAtivo.historico_tabela) || dossieAtivo.historico_tabela.length === 0) ? (
+                                            {dossieAtivo.historico_tabela.length === 0 ? (
                                                 <tr>
                                                     <td colSpan={4} className="p-8 text-center text-slate-400 text-xs font-medium">
-                                                        Nenhuma transação válida encontrada no ERP.
+                                                        Nenhuma transação formatada encontrada para exibição.
                                                     </td>
                                                 </tr>
                                             ) : (
