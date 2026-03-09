@@ -9,7 +9,7 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
   LayoutDashboard, Users, Trello, Package, Lock, 
   BarChart3, LogOut, Menu, X, ChevronRight,
-  FileText, Shield, ChevronDown, Stethoscope, Lightbulb
+  FileText, Shield, ChevronDown, Stethoscope, Lightbulb, CalendarCheck
 } from 'lucide-react';
 
 const outfit = Outfit({ subsets: ["latin"] });
@@ -20,6 +20,7 @@ const MENU_BASE = [
   { name: 'Inteligência', path: '/inteligencia', icon: Lightbulb, key: 'inteligencia' },
   { name: 'Clientes', path: '/clientes', icon: Users, key: 'clientes' },
   { name: 'Prescritores', path: '/prescritores', icon: Stethoscope, key: 'prescritores' },
+  { name: 'Visitas P&D', path: '/visitas', icon: CalendarCheck, key: 'prescritores' }, // Nova aba de Visitas (Usa a mesma permissão dos prescritores)
   { name: 'Pipeline', path: '/pipeline', icon: Trello, key: 'pipeline' },
   { name: 'Produtos', path: '/produtos', icon: Package, key: 'produtos' },
   { name: 'Exclusividades', path: '/exclusividades', icon: Lock, key: 'exclusividades' },
@@ -110,14 +111,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
 
             {/* --- BARRA DE NAVEGAÇÃO RÁPIDA (DINÂMICA) --- */}
-            <div className="hidden md:flex items-center gap-2 pl-6 border-l border-slate-200 h-8">
-               {menuPermitido.slice(0, 4).map((item) => {
+            <div className="hidden md:flex items-center gap-2 pl-6 border-l border-slate-200 h-8 overflow-hidden max-w-2xl">
+               {menuPermitido.slice(0, 5).map((item) => {
                  const active = pathname === item.path;
                  return (
                    <Link 
                      key={item.path}
                      href={item.path} 
-                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
+                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] uppercase tracking-wider font-bold transition-all whitespace-nowrap ${
                        active 
                          ? 'bg-green-50 text-green-700 border border-green-200' 
                          : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800 border border-transparent'
@@ -131,7 +132,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
 
           {/* --- PERFIL (DIREITA) COM DROPDOWN --- */}
-          <div className="relative">
+          <div className="relative shrink-0">
              <button 
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
                 className="flex items-center gap-3 hover:bg-slate-50 p-2 rounded-xl transition"
@@ -189,7 +190,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <button onClick={() => setIsOpen(false)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 text-white transition"><X size={20} /></button>
           </div>
 
-          <nav className="p-4 space-y-2 overflow-y-auto h-[calc(100vh-140px)]">
+          <nav className="p-4 space-y-2 overflow-y-auto h-[calc(100vh-140px)] custom-scrollbar">
             {menuPermitido.map((item) => {
               const active = pathname === item.path;
               return (
