@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
-  Search, Plus, MapPin, Phone, Star, Edit, X, Stethoscope, Save, Building2, CalendarCheck, FileText, ChevronRight, User, Hash, AlignLeft
+  Search, Plus, MapPin, Phone, Star, Edit, X, Stethoscope, Save, Building2, CalendarCheck, FileText, ChevronRight, User, Hash, AlignLeft, Activity
 } from 'lucide-react';
 
 export default function PrescritoresPage() {
@@ -166,7 +166,7 @@ export default function PrescritoresPage() {
             </div>
             <div className="bg-white px-6 py-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-center gap-4 shrink-0 min-w-[200px]">
                 <div className="text-right">
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total na Base</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total na Base</p>
                     <p className="text-3xl font-black text-slate-800">{prescritores.length}</p>
                 </div>
                 <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center"><Stethoscope size={24}/></div>
@@ -309,7 +309,7 @@ export default function PrescritoresPage() {
                             </div>
                             <div className="pt-6 mt-6">
                                 <button type="submit" disabled={salvando} className="w-full bg-blue-600 text-white h-14 rounded-xl font-black hover:bg-blue-700 flex justify-center items-center gap-2 shadow-lg shadow-blue-200 transition transform active:scale-95 disabled:opacity-50 text-base">
-                                    <Save size={20}/> {salvando ? 'Salvando...' : 'Gravar Histórico'}
+                                    {salvando ? <Activity className="animate-spin" size={20}/> : <Save size={20}/>} {salvando ? 'Salvando...' : 'Gravar Histórico'}
                                 </button>
                             </div>
                         </form>
