@@ -62,21 +62,30 @@ export default function InteligenciaPage() {
           .trim();
   };
 
+  // Funções de formatação blindadas (evitam que o React "desmaie" ao receber objetos)
   const formatCurrency = (val: any) => {
       if (!val) return 'R$ 0,00';
-      let num = typeof val === 'string' ? parseFloat(val.replace(/\./g, '').replace(',', '.')) : val;
-      if (isNaN(num)) return val;
-      return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      try {
+          let num = typeof val === 'string' ? parseFloat(val.replace(/\./g, '').replace(',', '.')) : Number(val);
+          if (isNaN(num)) return String(val); // Devolve como texto se não for número
+          return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      } catch (e) {
+          return String(val);
+      }
   };
 
-  // Formata a data (Ex: 2025-09-01 para 09/2025 ou 01/09/2025)
   const formatDate = (val: any) => {
       if (!val) return '-';
-      if (typeof val === 'string' && val.includes('-')) {
-          const parts = val.split('-');
-          if (parts.length === 3) return `${parts[1]}/${parts[0]}`; // Retorna MM/YYYY igual ao seu print
+      try {
+          const strVal = String(val);
+          if (strVal.includes('-')) {
+              const parts = strVal.split('-');
+              if (parts.length === 3) return `${parts[1]}/${parts[0]}`; 
+          }
+          return strVal;
+      } catch (e) {
+          return '-';
       }
-      return val;
   };
 
   const realizarBusca = async () => {
@@ -112,7 +121,6 @@ export default function InteligenciaPage() {
           const ultimaCompra = clienteLimpo.ultima_compra || clienteLimpo.data_ultima_compra || clienteLimpo.data || '-';
           const endereco = clienteLimpo.endereco || clienteLimpo.logradouro || 'Endereço não cadastrado';
 
-          // Extrair o array de histórico de compras
           let historicoArray: any[] = [];
           const chavesHistorico = ['historico_compras', 'produtos', 'compras', 'historico'];
           
@@ -120,7 +128,7 @@ export default function InteligenciaPage() {
               if (chavesHistorico.some(k => key.includes(k))) {
                   let val = clienteLimpo[key];
                   if (typeof val === 'string') {
-                      try { val = JSON.parse(val); } catch (e) {} // Tenta converter a string JSON
+                      try { val = JSON.parse(val); } catch (e) {} 
                   }
                   if (Array.isArray(val)) {
                       historicoArray = val;
@@ -130,21 +138,20 @@ export default function InteligenciaPage() {
           }
 
           let encontrou = false;
-          let historicoFiltradoParaDossie = historicoArray; // Por padrão, mostra tudo
+          let historicoFiltradoParaDossie = historicoArray; 
 
           if (tipoBusca === 'produto') {
-              // Se buscou por produto, vamos filtrar o histórico DESTA farmácia para mostrar só o que interessa
               const comprasRelevantes = historicoArray.filter((compra: any) => {
-                  const nomeProdutoCompra = cleanText(compra.produto || '');
+                  if (typeof compra !== 'object' || !compra) return false;
+                  const nomeProdutoCompra = cleanText(compra.produto || compra.insumo || compra.ativo || '');
                   return ativosSelecionados.some(ativo => nomeProdutoCompra.includes(cleanText(ativo)));
               });
 
               if (comprasRelevantes.length > 0) {
                   encontrou = true;
-                  historicoFiltradoParaDossie = comprasRelevantes; // O Dossiê vai mostrar SÓ essas compras
+                  historicoFiltradoParaDossie = comprasRelevantes; 
               }
           } else {
-              // Busca por Farmácia
               const termoFarm = cleanText(termoFarmacia);
               const nomeFarmLimpo = cleanText(nomeFarmacia);
               const cnpjLimpo = cleanText(cnpj).replace(/\D/g, '');
@@ -157,7 +164,7 @@ export default function InteligenciaPage() {
 
           if (encontrou) {
               resultadosFiltrados.push({
-                  id: cnpj + Math.random(),
+                  id: cnpj + '_' + resultadosFiltrados.length,
                   farmacia: nomeFarmacia,
                   cnpj: cnpj,
                   cidadeUf: cidadeUf,
@@ -165,7 +172,7 @@ export default function InteligenciaPage() {
                   endereco: endereco,
                   ultima_compra: ultimaCompra,
                   status: clienteLimpo.bloqueado ? 'Bloqueado' : 'Ativo',
-                  historico_tabela: historicoFiltradoParaDossie // Passa o histórico pronto para a tabela do modal
+                  historico_tabela: historicoFiltradoParaDossie 
               });
           }
       });
@@ -284,7 +291,7 @@ export default function InteligenciaPage() {
             </div>
         </div>
 
-        {/* ÁREA DE RESULTADOS (DATA GRID) */}
+        {/* ÁREA DE RESULTADOS */}
         {buscou && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-6 gap-4 px-2">
@@ -321,7 +328,7 @@ export default function InteligenciaPage() {
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
                                     {resultados.map((res, i) => (
-                                        <tr key={i} className="hover:bg-blue-50/30 transition group">
+                                        <tr key={res.id} className="hover:bg-blue-50/30 transition group">
                                             <td className="p-5">
                                                 <div className="flex items-center gap-3">
                                                     <div className="w-10 h-10 bg-blue-100 text-blue-700 rounded-lg flex items-center justify-center shrink-0 font-bold"><Building2 size={18}/></div>
@@ -353,7 +360,7 @@ export default function InteligenciaPage() {
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-200">
                 <div className="bg-white w-full max-w-4xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[95vh] animate-in zoom-in-95">
                     
-                    {/* CABEÇALHO DO MODAL (Estilo Corporate) */}
+                    {/* CABEÇALHO DO MODAL */}
                     <div className="bg-[#1e293b] p-6 flex justify-between items-start text-white shrink-0 relative overflow-hidden rounded-t-[2rem]">
                         <div className="relative z-10 w-full">
                             <div className="flex justify-between items-start w-full">
@@ -374,7 +381,6 @@ export default function InteligenciaPage() {
                     {/* CORPO DO DOSSIÊ */}
                     <div className="p-6 overflow-y-auto flex-1 bg-slate-50 custom-scrollbar space-y-6">
                         
-                        {/* Cards Superiores (Resumo) */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><User size={12}/> Representante</p>
@@ -390,7 +396,6 @@ export default function InteligenciaPage() {
                             </div>
                         </div>
 
-                        {/* Endereço (Se houver) */}
                         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
                             <div className="p-2 bg-slate-50 rounded-lg text-slate-400"><Map size={16}/></div>
                             <div>
@@ -406,7 +411,9 @@ export default function InteligenciaPage() {
                                 <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">
                                     {tipoBusca === 'produto' ? 'Transações Encontradas (Filtro Ativo)' : 'Histórico de Pedidos'}
                                 </h3>
-                                <span className="bg-slate-200 text-slate-600 text-[10px] font-black px-2 py-0.5 rounded-full">{dossieAtivo.historico_tabela.length}</span>
+                                <span className="bg-slate-200 text-slate-600 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                    {(dossieAtivo.historico_tabela || []).length}
+                                </span>
                             </div>
 
                             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -421,29 +428,41 @@ export default function InteligenciaPage() {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
-                                            {dossieAtivo.historico_tabela.length === 0 ? (
+                                            {(!dossieAtivo.historico_tabela || !Array.isArray(dossieAtivo.historico_tabela) || dossieAtivo.historico_tabela.length === 0) ? (
                                                 <tr>
                                                     <td colSpan={4} className="p-8 text-center text-slate-400 text-xs font-medium">
-                                                        Nenhuma transação formatada encontrada para exibição.
+                                                        Nenhuma transação válida encontrada no ERP.
                                                     </td>
                                                 </tr>
                                             ) : (
-                                                dossieAtivo.historico_tabela.map((item: any, idx: number) => (
-                                                    <tr key={idx} className="hover:bg-slate-50 transition">
-                                                        <td className="p-4 text-slate-500 font-medium">
-                                                            {formatDate(item.data || item.data_compra)}
-                                                        </td>
-                                                        <td className="p-4 font-black text-slate-800 uppercase">
-                                                            {item.produto || item.insumo || item.ativo || '-'}
-                                                        </td>
-                                                        <td className="p-4 text-center font-bold text-slate-600">
-                                                            {item.qtd || item.quantidade || '1'}
-                                                        </td>
-                                                        <td className="p-4 text-right font-black text-green-700">
-                                                            {formatCurrency(item.valor || item.preco)}
-                                                        </td>
-                                                    </tr>
-                                                ))
+                                                dossieAtivo.historico_tabela.map((item: any, idx: number) => {
+                                                    // Escudo anti-erros: se o item vier apenas como texto em vez de objeto
+                                                    if (typeof item !== 'object' || item === null) {
+                                                        return (
+                                                            <tr key={idx} className="hover:bg-slate-50 transition">
+                                                                <td colSpan={4} className="p-4 text-slate-500 font-medium whitespace-pre-wrap leading-relaxed">
+                                                                    {String(item)}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    }
+                                                    return (
+                                                        <tr key={idx} className="hover:bg-slate-50 transition">
+                                                            <td className="p-4 text-slate-500 font-medium whitespace-nowrap">
+                                                                {formatDate(item.data || item.data_compra)}
+                                                            </td>
+                                                            <td className="p-4 font-black text-slate-800 uppercase">
+                                                                {String(item.produto || item.insumo || item.ativo || '-')}
+                                                            </td>
+                                                            <td className="p-4 text-center font-bold text-slate-600">
+                                                                {String(item.qtd || item.quantidade || '1')}
+                                                            </td>
+                                                            <td className="p-4 text-right font-black text-green-700 whitespace-nowrap">
+                                                                {formatCurrency(item.valor || item.preco)}
+                                                            </td>
+                                                        </tr>
+                                                    )
+                                                })
                                             )}
                                         </tbody>
                                     </table>
