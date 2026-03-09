@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Lightbulb, Search, Download, Building2, Beaker, Calendar, 
   MapPin, Target, Activity, FileText, User, X, ChevronDown, Check,
-  Briefcase, TrendingUp, BarChart3, Maximize2, Hash
+  Briefcase, TrendingUp, BarChart3, Hash, ShoppingBag, Map
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -63,9 +63,20 @@ export default function InteligenciaPage() {
   };
 
   const formatCurrency = (val: any) => {
-      const num = Number(val);
+      if (!val) return 'R$ 0,00';
+      let num = typeof val === 'string' ? parseFloat(val.replace(/\./g, '').replace(',', '.')) : val;
       if (isNaN(num)) return val;
       return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  };
+
+  // Formata a data (Ex: 2025-09-01 para 09/2025 ou 01/09/2025)
+  const formatDate = (val: any) => {
+      if (!val) return '-';
+      if (typeof val === 'string' && val.includes('-')) {
+          const parts = val.split('-');
+          if (parts.length === 3) return `${parts[1]}/${parts[0]}`; // Retorna MM/YYYY igual ao seu print
+      }
+      return val;
   };
 
   const realizarBusca = async () => {
@@ -97,19 +108,43 @@ export default function InteligenciaPage() {
           const nomeFarmacia = clienteLimpo.fantasia || clienteLimpo.nome_fantasia || clienteLimpo.razao_social || clienteLimpo.cliente || clienteLimpo.nome || 'FARMÁCIA NÃO IDENTIFICADA';
           const cnpj = clienteLimpo.cnpj || clienteLimpo.documento || clienteLimpo.cpf_cnpj || 'CNPJ N/D';
           const vendedor = clienteLimpo.vendedor || clienteLimpo.representante || clienteLimpo.consultor || 'N/D';
-          const cidadeUf = `${clienteLimpo.municipio || clienteLimpo.cidade || '-'} / ${clienteLimpo.uf || clienteLimpo.estado || '-'}`;
+          const cidadeUf = `${clienteLimpo.municipio || clienteLimpo.cidade || '-'} - ${clienteLimpo.uf || clienteLimpo.estado || '-'}`;
           const ultimaCompra = clienteLimpo.ultima_compra || clienteLimpo.data_ultima_compra || clienteLimpo.data || '-';
-          const status = clienteLimpo.bloqueado ? 'Bloqueado' : 'Ativo';
+          const endereco = clienteLimpo.endereco || clienteLimpo.logradouro || 'Endereço não cadastrado';
 
-          const textoClienteCompleto = cleanText(JSON.stringify(cliente));
+          // Extrair o array de histórico de compras
+          let historicoArray: any[] = [];
+          const chavesHistorico = ['historico_compras', 'produtos', 'compras', 'historico'];
+          
+          for (const key of Object.keys(clienteLimpo)) {
+              if (chavesHistorico.some(k => key.includes(k))) {
+                  let val = clienteLimpo[key];
+                  if (typeof val === 'string') {
+                      try { val = JSON.parse(val); } catch (e) {} // Tenta converter a string JSON
+                  }
+                  if (Array.isArray(val)) {
+                      historicoArray = val;
+                      break;
+                  }
+              }
+          }
 
           let encontrou = false;
+          let historicoFiltradoParaDossie = historicoArray; // Por padrão, mostra tudo
 
           if (tipoBusca === 'produto') {
-              ativosSelecionados.forEach(ativo => {
-                  if (textoClienteCompleto.includes(cleanText(ativo))) encontrou = true;
+              // Se buscou por produto, vamos filtrar o histórico DESTA farmácia para mostrar só o que interessa
+              const comprasRelevantes = historicoArray.filter((compra: any) => {
+                  const nomeProdutoCompra = cleanText(compra.produto || '');
+                  return ativosSelecionados.some(ativo => nomeProdutoCompra.includes(cleanText(ativo)));
               });
+
+              if (comprasRelevantes.length > 0) {
+                  encontrou = true;
+                  historicoFiltradoParaDossie = comprasRelevantes; // O Dossiê vai mostrar SÓ essas compras
+              }
           } else {
+              // Busca por Farmácia
               const termoFarm = cleanText(termoFarmacia);
               const nomeFarmLimpo = cleanText(nomeFarmacia);
               const cnpjLimpo = cleanText(cnpj).replace(/\D/g, '');
@@ -127,9 +162,10 @@ export default function InteligenciaPage() {
                   cnpj: cnpj,
                   cidadeUf: cidadeUf,
                   vendedor: vendedor,
+                  endereco: endereco,
                   ultima_compra: ultimaCompra,
-                  status: status,
-                  raw_data: cliente // Guarda o objeto original completo para o Dossiê
+                  status: clienteLimpo.bloqueado ? 'Bloqueado' : 'Ativo',
+                  historico_tabela: historicoFiltradoParaDossie // Passa o histórico pronto para a tabela do modal
               });
           }
       });
@@ -168,65 +204,6 @@ export default function InteligenciaPage() {
     });
 
     doc.save(`BI_YellowLeaf_${new Date().toISOString().split('T')[0]}.pdf`);
-  };
-
-  // Renderiza as informações extras ignorando campos básicos já mostrados no cabeçalho
-  const renderDossierExtraData = (rawData: any) => {
-      const chavesIgnoradas = ['nome', 'fantasia', 'razao_social', 'cnpj', 'documento', 'cidade', 'municipio', 'uf', 'estado', 'vendedor', 'representante', 'id'];
-      
-      const extras = Object.entries(rawData).filter(([key, value]) => {
-          if (!value || value === '') return false; // Ignora vazios
-          const keyLimpa = cleanText(key);
-          if (chavesIgnoradas.some(ign => keyLimpa.includes(ign))) return false; // Ignora básicos
-          return true;
-      });
-
-      if (extras.length === 0) return <p className="text-slate-400 text-sm italic">Nenhum dado transacional adicional encontrado no ERP para esta conta.</p>;
-
-      return (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {extras.map(([key, value]: any, i) => {
-                  const isValor = cleanText(key).includes('valor') || cleanText(key).includes('preco') || cleanText(key).includes('faturamento');
-                  const isData = cleanText(key).includes('data');
-                  const isHistorico = cleanText(key).includes('historico') || cleanText(key).includes('obs') || cleanText(key).includes('produto') || cleanText(key).includes('compra');
-                  
-                  let formattedValue = "";
-
-                  // Tratamento para Objetos e Arrays
-                  if (typeof value === 'object' && value !== null) {
-                      try {
-                          if (Array.isArray(value)) {
-                              // Se for array (ex: lista de produtos), formata com bullets
-                              formattedValue = value.map(v => typeof v === 'object' ? JSON.stringify(v) : v).join('\n• ');
-                              if (formattedValue) formattedValue = '• ' + formattedValue;
-                          } else {
-                              // Se for objeto, formata como string legível
-                              formattedValue = JSON.stringify(value, null, 2);
-                          }
-                      } catch (e) {
-                          formattedValue = String(value);
-                      }
-                  } else {
-                      formattedValue = String(value);
-                  }
-
-                  if (isValor && !isNaN(Number(value))) {
-                      formattedValue = formatCurrency(value);
-                  } else if (isData && typeof value === 'string' && value.includes('T')) {
-                      formattedValue = new Date(value).toLocaleDateString('pt-BR');
-                  }
-
-                  return (
-                      <div key={i} className={`bg-slate-50 p-4 rounded-xl border border-slate-200 ${isHistorico ? 'md:col-span-2' : ''}`}>
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{key.replace(/_/g, ' ')}</p>
-                          <div className={`text-sm text-slate-800 ${isValor ? 'font-black text-blue-700 text-lg' : 'font-medium'} ${isHistorico ? 'whitespace-pre-wrap leading-relaxed' : 'truncate'}`}>
-                              {formattedValue}
-                          </div>
-                      </div>
-                  );
-              })}
-          </div>
-      );
   };
 
   return (
@@ -328,7 +305,7 @@ export default function InteligenciaPage() {
                     <div className="bg-white border border-slate-100 rounded-3xl p-16 text-center shadow-sm">
                         <div className="w-24 h-24 bg-slate-50 text-slate-300 rounded-full flex items-center justify-center mx-auto mb-6"><Search size={40}/></div>
                         <h4 className="text-xl font-bold text-slate-700">Database Miss</h4>
-                        <p className="text-slate-500 mt-2 max-w-md mx-auto">Não encontramos transações ou históricos que correspondam a este filtro no Data Lake atual.</p>
+                        <p className="text-slate-500 mt-2 max-w-md mx-auto">Não encontramos transações para os filtros selecionados no Data Lake atual.</p>
                     </div>
                 ) : (
                     <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
@@ -339,7 +316,6 @@ export default function InteligenciaPage() {
                                         <th className="p-5">Conta / Fantasia</th>
                                         <th className="p-5">Localização</th>
                                         <th className="p-5">Account Exec.</th>
-                                        <th className="p-5">Última Transação</th>
                                         <th className="p-5 text-right">Ação</th>
                                     </tr>
                                 </thead>
@@ -357,7 +333,6 @@ export default function InteligenciaPage() {
                                             </td>
                                             <td className="p-5 text-xs font-medium text-slate-600"><span className="flex items-center gap-1.5"><MapPin size={14} className="text-slate-400"/> {res.cidadeUf}</span></td>
                                             <td className="p-5 text-xs font-medium text-slate-600"><span className="flex items-center gap-1.5"><User size={14} className="text-slate-400"/> {res.vendedor}</span></td>
-                                            <td className="p-5 text-xs font-medium text-slate-600"><span className="flex items-center gap-1.5"><Calendar size={14} className="text-slate-400"/> {res.ultima_compra}</span></td>
                                             <td className="p-5 text-right">
                                                 <button onClick={() => setDossieAtivo(res)} className="text-xs font-bold text-blue-600 bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-600 hover:text-white transition flex items-center gap-2 ml-auto shadow-sm">
                                                     <Maximize2 size={14}/> Abrir Dossiê
@@ -376,50 +351,104 @@ export default function InteligenciaPage() {
         {/* --- MODAL: DOSSIÊ CORPORATIVO (RAIO-X DO CLIENTE) --- */}
         {dossieAtivo && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-200">
-                <div className="bg-white w-full max-w-5xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[95vh] animate-in zoom-in-95">
+                <div className="bg-white w-full max-w-4xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[95vh] animate-in zoom-in-95">
                     
-                    {/* CABEÇALHO DO MODAL */}
-                    <div className="bg-[#0f392b] p-8 flex justify-between items-start text-white shrink-0 relative overflow-hidden">
-                        <div className="absolute -right-10 -top-10 text-white/5 transform rotate-12"><Building2 size={200}/></div>
+                    {/* CABEÇALHO DO MODAL (Estilo Corporate) */}
+                    <div className="bg-[#1e293b] p-6 flex justify-between items-start text-white shrink-0 relative overflow-hidden rounded-t-[2rem]">
                         <div className="relative z-10 w-full">
-                            <div className="flex justify-between items-center w-full mb-4">
-                                <span className="bg-[#82D14D] text-[#0f392b] px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 shadow-lg"><Briefcase size={12}/> Dossiê de Inteligência</span>
-                                <button onClick={() => setDossieAtivo(null)} className="hover:bg-white/20 p-2 rounded-full transition bg-black/20 text-white"><X size={20}/></button>
-                            </div>
-                            <h2 className="text-3xl font-black uppercase tracking-tight mb-2 pr-12">{dossieAtivo.farmacia}</h2>
-                            <div className="flex gap-6 text-sm font-medium text-slate-300">
-                                <span className="flex items-center gap-2"><Hash size={16}/> {dossieAtivo.cnpj}</span>
-                                <span className="flex items-center gap-2"><MapPin size={16}/> {dossieAtivo.cidadeUf}</span>
+                            <div className="flex justify-between items-start w-full">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-14 h-14 bg-white/10 rounded-xl flex items-center justify-center font-bold text-xl backdrop-blur-sm">
+                                        {dossieAtivo.farmacia.substring(0, 2).toUpperCase()}
+                                    </div>
+                                    <div>
+                                        <h2 className="text-2xl font-black uppercase tracking-tight leading-none mb-1">{dossieAtivo.farmacia}</h2>
+                                        <p className="text-xs font-medium text-slate-400 font-mono tracking-wider">{dossieAtivo.cnpj}</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setDossieAtivo(null)} className="hover:bg-white/20 p-2 rounded-full transition bg-white/10 text-white"><X size={20}/></button>
                             </div>
                         </div>
                     </div>
 
-                    {/* CORPO DO DOSSIÊ (SCROLL) */}
-                    <div className="p-8 overflow-y-auto flex-1 bg-slate-50 custom-scrollbar space-y-8">
+                    {/* CORPO DO DOSSIÊ */}
+                    <div className="p-6 overflow-y-auto flex-1 bg-slate-50 custom-scrollbar space-y-6">
                         
-                        {/* Resumo Rápido */}
-                        <div>
-                            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-slate-200 pb-2"><User size={16}/> Gestão da Conta</h3>
-                            <div className="flex gap-4">
-                                <div className="bg-white px-6 py-4 rounded-2xl border border-slate-200 flex-1 shadow-sm">
-                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Account Executive (Vendedor)</p>
-                                    <p className="text-lg font-black text-slate-800">{dossieAtivo.vendedor}</p>
-                                </div>
-                                <div className="bg-white px-6 py-4 rounded-2xl border border-slate-200 flex-1 shadow-sm">
-                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Última Transação Registrada</p>
-                                    <p className="text-lg font-black text-slate-800">{dossieAtivo.ultima_compra}</p>
-                                </div>
-                                <div className="bg-white px-6 py-4 rounded-2xl border border-slate-200 flex-1 shadow-sm">
-                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Status ERP</p>
-                                    <p className={`text-lg font-black ${dossieAtivo.status === 'Ativo' ? 'text-green-600' : 'text-red-600'}`}>{dossieAtivo.status}</p>
-                                </div>
+                        {/* Cards Superiores (Resumo) */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><User size={12}/> Representante</p>
+                                <p className="text-sm font-black text-blue-700 uppercase">{dossieAtivo.vendedor}</p>
+                            </div>
+                            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><MapPin size={12}/> Localização</p>
+                                <p className="text-sm font-black text-slate-800 uppercase">{dossieAtivo.cidadeUf}</p>
+                            </div>
+                            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><Calendar size={12}/> Última Compra</p>
+                                <p className="text-sm font-black text-slate-800">{dossieAtivo.ultima_compra}</p>
                             </div>
                         </div>
 
-                        {/* Extração Profunda de Dados */}
+                        {/* Endereço (Se houver) */}
+                        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-3">
+                            <div className="p-2 bg-slate-50 rounded-lg text-slate-400"><Map size={16}/></div>
+                            <div>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Endereço de Entrega</p>
+                                <p className="text-sm font-bold text-slate-700 uppercase">{dossieAtivo.endereco}</p>
+                            </div>
+                        </div>
+
+                        {/* TABELA DE HISTÓRICO DE PEDIDOS */}
                         <div>
-                            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2 border-b border-slate-200 pb-2"><TrendingUp size={16}/> Detalhamento de Transações e Histórico</h3>
-                            {renderDossierExtraData(dossieAtivo.raw_data)}
+                            <div className="flex items-center gap-2 mb-4 px-2">
+                                <ShoppingBag className="text-green-600" size={20}/>
+                                <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">
+                                    {tipoBusca === 'produto' ? 'Transações Encontradas (Filtro Ativo)' : 'Histórico de Pedidos'}
+                                </h3>
+                                <span className="bg-slate-200 text-slate-600 text-[10px] font-black px-2 py-0.5 rounded-full">{dossieAtivo.historico_tabela.length}</span>
+                            </div>
+
+                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                                <div className="overflow-x-auto max-h-[350px] custom-scrollbar">
+                                    <table className="w-full text-left text-sm border-collapse">
+                                        <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
+                                            <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-200">
+                                                <th className="p-4">Data</th>
+                                                <th className="p-4">Produto / Insumo</th>
+                                                <th className="p-4 text-center">Qtd</th>
+                                                <th className="p-4 text-right">Valor</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {dossieAtivo.historico_tabela.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={4} className="p-8 text-center text-slate-400 text-xs font-medium">
+                                                        Nenhuma transação formatada encontrada para exibição.
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                dossieAtivo.historico_tabela.map((item: any, idx: number) => (
+                                                    <tr key={idx} className="hover:bg-slate-50 transition">
+                                                        <td className="p-4 text-slate-500 font-medium">
+                                                            {formatDate(item.data || item.data_compra)}
+                                                        </td>
+                                                        <td className="p-4 font-black text-slate-800 uppercase">
+                                                            {item.produto || item.insumo || item.ativo || '-'}
+                                                        </td>
+                                                        <td className="p-4 text-center font-bold text-slate-600">
+                                                            {item.qtd || item.quantidade || '1'}
+                                                        </td>
+                                                        <td className="p-4 text-right font-black text-green-700">
+                                                            {formatCurrency(item.valor || item.preco)}
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
 
                     </div>
