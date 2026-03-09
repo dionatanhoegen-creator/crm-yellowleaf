@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { 
-  Stethoscope, Search, Plus, CalendarCheck, Clock, CheckCircle2, AlertCircle, FileText, ChevronRight, X, Save, Printer, Building2, Beaker, Activity, MapPin
+  Stethoscope, Search, Plus, CalendarCheck, Clock, CheckCircle2, AlertCircle, FileText, ChevronRight, X, Save, Printer, Building2, Beaker, Activity, MapPin, Edit, MessageCircle
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -44,7 +44,7 @@ export default function PipelinePDPage() {
 
       // Puxa as interações CRUZANDO com os dados do Médico
       let query = supabase.from('interacoes')
-          .select('*, prescritores(nome, especialidade, clinica, cidade, uf), perfis(nome)')
+          .select('*, prescritores(nome, especialidade, clinica, cidade, uf, telefone), perfis(nome)')
           .order('data_proximo_contato', { ascending: true, nullsFirst: false });
       
       // Visão de Túnel
@@ -69,13 +69,20 @@ export default function PipelinePDPage() {
   };
 
   const mudarStatus = async (id: string, novoStatus: string) => {
-      // Atualiza na tela instantaneamente para não dar delay visual
       setVisitas(visitas.map(v => v.id === id ? { ...v, status: novoStatus } : v));
       await supabase.from('interacoes').update({ status: novoStatus }).eq('id', id);
   };
 
   const abrirEdicaoVisita = (visita: any) => {
-      setVisitaEditando({...visita});
+      // Clona o objeto com fallback para evitar campos vazios quebrando o React
+      setVisitaEditando({
+          ...visita,
+          tipo: visita.tipo || 'Visita Presencial',
+          status: visita.status || 'realizado',
+          resumo: visita.resumo || '',
+          proximo_passo: visita.proximo_passo || '',
+          data_proximo_contato: visita.data_proximo_contato || ''
+      });
       setModalAberto(true);
   };
 
@@ -87,7 +94,6 @@ export default function PipelinePDPage() {
               tipo: visitaEditando.tipo,
               resumo: visitaEditando.resumo,
               proximo_passo: visitaEditando.proximo_passo,
-              farmacia_vinculada: visitaEditando.farmacia_vinculada,
               data_proximo_contato: visitaEditando.data_proximo_contato || null,
               status: visitaEditando.status
           }).eq('id', visitaEditando.id);
@@ -101,29 +107,38 @@ export default function PipelinePDPage() {
       }
   };
 
+  // --- GERADOR DE RELATÓRIO COM LOGO ---
   const gerarRelatorioGerencial = () => {
     const doc = new jsPDF('l', 'mm', 'a4');
+    
+    // Tenta inserir a logo (Se a imagem /logo.jpg existir na pasta public)
+    try {
+        doc.addImage("/logo.jpg", "JPEG", 14, 10, 35, 15);
+    } catch (e) {
+        console.error("Logo não encontrada ou em formato inválido", e);
+    }
+
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
     doc.setTextColor(15, 55, 43); 
-    doc.text("RELATÓRIO DE PERFORMANCE DE P&D", 14, 20);
+    doc.text("RELATÓRIO DE PERFORMANCE DE P&D", 14, 34); // Posição Y ajustada para caber a logo
     
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100);
-    doc.text(`Visitas Extraídas: ${filtradas.length} | Gerado em: ${new Date().toLocaleString('pt-BR')}`, 14, 26);
+    doc.text(`Visitas Extraídas: ${filtradas.length} | Gerado em: ${new Date().toLocaleString('pt-BR')}`, 14, 40);
 
     const tableBody = filtradas.map(v => [
         new Date(v.created_at).toLocaleDateString('pt-BR'),
         v.prescritores?.nome || 'N/D',
-        v.tipo,
+        v.tipo || '-',
         v.farmacia_vinculada || '-',
-        v.produtos_vinculados ? v.produtos_vinculados.replace(/;/g, ', ') : '-',
+        v.produtos_vinculados ? String(v.produtos_vinculados).replace(/;/g, ', ') : '-',
         ESTAGIOS.find(e => e.id === v.status)?.label || v.status
     ]);
 
     autoTable(doc, {
-        startY: 35,
+        startY: 46, // Tabela começa mais abaixo
         head: [['DATA INSERÇÃO', 'PRESCRITOR', 'TIPO DE CONTATO', 'FARMÁCIA INDICADA', 'ATIVOS TRABALHADOS', 'STATUS DO CICLO']],
         body: tableBody,
         theme: 'grid',
@@ -140,13 +155,14 @@ export default function PipelinePDPage() {
       return dataISO < hoje;
   };
 
+  // Filtro protegido contra arrays nulos
   const filtradas = visitas.filter(v => {
       const t = busca.toLowerCase();
       return (
-          (v.prescritores?.nome && v.prescritores.nome.toLowerCase().includes(t)) ||
-          (v.farmacia_vinculada && v.farmacia_vinculada.toLowerCase().includes(t)) ||
-          (v.produtos_vinculados && v.produtos_vinculados.toLowerCase().includes(t)) ||
-          (v.resumo && v.resumo.toLowerCase().includes(t))
+          (v.prescritores?.nome && String(v.prescritores.nome).toLowerCase().includes(t)) ||
+          (v.farmacia_vinculada && String(v.farmacia_vinculada).toLowerCase().includes(t)) ||
+          (v.produtos_vinculados && String(v.produtos_vinculados).toLowerCase().includes(t)) ||
+          (v.resumo && String(v.resumo).toLowerCase().includes(t))
       );
   });
 
@@ -172,7 +188,7 @@ export default function PipelinePDPage() {
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             </div>
             <button onClick={gerarRelatorioGerencial} className="bg-[#0f392b] hover:bg-[#16503c] text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 flex items-center gap-2 whitespace-nowrap text-sm">
-                <Printer size={16} /> Relatório
+                <Printer size={16} /> Relatório PDF
             </button>
         </div>
       </div>
@@ -195,22 +211,32 @@ export default function PipelinePDPage() {
                           <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
                               {visitasColuna.map(visita => {
                                   const atrasado = isAtrasado(visita.data_proximo_contato) && estagio.id !== 'concluido';
+                                  const telefone = visita.prescritores?.telefone;
 
                                   return (
-                                      <div key={visita.id} className={`bg-white p-4 rounded-xl border shadow-sm transition hover:shadow-md flex flex-col ${atrasado ? 'border-red-300' : 'border-slate-200 hover:border-blue-300'}`}>
+                                      <div key={visita.id} className={`bg-white p-4 rounded-xl border shadow-sm transition hover:shadow-md flex flex-col ${atrasado ? 'border-red-300 bg-red-50/10' : 'border-slate-200 hover:border-blue-300'}`}>
                                           
                                           {/* Cabeçalho do Card */}
-                                          <div className="flex justify-between items-start mb-2">
-                                              <span className="text-[9px] font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded uppercase tracking-wider border border-blue-100">{visita.tipo}</span>
-                                              {visita.data_proximo_contato && estagio.id !== 'concluido' && (
-                                                  <span className={`text-[9px] font-bold flex items-center gap-1 px-1.5 py-0.5 rounded ${atrasado ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-100 text-slate-500'}`}>
-                                                      {atrasado ? <AlertCircle size={10}/> : <Clock size={10}/>} {new Date(visita.data_proximo_contato).toLocaleDateString('pt-BR', {timeZone:'UTC'})}
-                                                  </span>
-                                              )}
+                                          <div className="flex justify-between items-start mb-3">
+                                              <span className="text-[9px] font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded uppercase tracking-wider border border-blue-100">{visita.tipo || '-'}</span>
+                                              <div className="flex gap-2 items-center">
+                                                  {telefone && (
+                                                      <a 
+                                                          href={`https://wa.me/55${telefone.replace(/\D/g, '')}`} 
+                                                          target="_blank"
+                                                          rel="noopener noreferrer"
+                                                          className="text-green-500 hover:text-green-600 transition-colors p-1"
+                                                          title="Abrir WhatsApp"
+                                                      >
+                                                          <MessageCircle size={16} />
+                                                      </a>
+                                                  )}
+                                                  <button onClick={() => abrirEdicaoVisita(visita)} className="text-slate-400 hover:text-blue-600 p-1 transition"><Edit size={14}/></button>
+                                              </div>
                                           </div>
 
                                           {/* Médico */}
-                                          <h4 className="font-black text-slate-800 leading-tight mb-1 truncate cursor-pointer hover:text-blue-600 transition" onClick={() => abrirEdicaoVisita(visita)}>
+                                          <h4 className="font-black text-slate-800 leading-tight mb-1 truncate" title={visita.prescritores?.nome}>
                                               {visita.prescritores?.nome || 'Médico Excluído'}
                                           </h4>
                                           <p className="text-[10px] text-slate-500 flex items-center gap-1 mb-3">
@@ -227,7 +253,7 @@ export default function PipelinePDPage() {
 
                                               {visita.produtos_vinculados && (
                                                   <div className="flex flex-wrap gap-1 mt-1">
-                                                      {visita.produtos_vinculados.split(';').filter(Boolean).map((p: string, i: number) => (
+                                                      {String(visita.produtos_vinculados).split(';').filter(Boolean).map((p: string, i: number) => (
                                                           <span key={i} className="text-[8px] font-black bg-[#82D14D]/20 text-[#0f392b] px-1.5 py-0.5 rounded border border-[#82D14D]/40 uppercase truncate max-w-full">
                                                               {p}
                                                           </span>
@@ -235,13 +261,21 @@ export default function PipelinePDPage() {
                                                   </div>
                                               )}
                                           </div>
+                                          
+                                          {/* Alerta de Follow-up */}
+                                          {visita.data_proximo_contato && estagio.id !== 'concluido' && (
+                                              <div className={`mt-1 mb-3 flex items-center gap-1 text-[10px] font-bold p-1.5 rounded border ${atrasado ? 'text-red-700 bg-red-100 border-red-200 animate-pulse' : 'text-orange-700 bg-orange-50 border-orange-100'}`}>
+                                                  {atrasado ? <AlertCircle size={12}/> : <Clock size={12}/>} 
+                                                  Follow-up: {new Date(visita.data_proximo_contato).toLocaleDateString('pt-BR', {timeZone:'UTC'})}
+                                              </div>
+                                          )}
 
                                           {/* Avançar Etapa */}
                                           <div className="mt-auto pt-2 border-t border-slate-100">
                                               <select 
                                                   value={visita.status} 
                                                   onChange={(e) => mudarStatus(visita.id, e.target.value)}
-                                                  className="w-full text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-lg p-1.5 outline-none cursor-pointer hover:border-blue-400 transition"
+                                                  className="w-full text-xs font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none cursor-pointer hover:border-blue-400 transition"
                                               >
                                                   {ESTAGIOS.map(e => <option key={e.id} value={e.id}>Mover para: {e.label}</option>)}
                                               </select>
@@ -256,32 +290,34 @@ export default function PipelinePDPage() {
           </div>
       </div>
 
-      {/* MODAL DE EDIÇÃO DE VISITA */}
+      {/* MODAL DE EDIÇÃO DE VISITA BLINDADO */}
       {modalAberto && visitaEditando && mounted && createPortal(
           <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-200">
-              <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+              <div className="bg-white w-full max-w-2xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col">
                   
                   <div className="bg-[#1e293b] p-6 flex justify-between items-center text-white shrink-0">
                       <div>
-                          <h2 className="text-lg font-black uppercase tracking-wide flex items-center gap-2"><Edit className="text-blue-400" size={20}/> Editar Registro P&D</h2>
-                          <p className="text-sm font-medium text-slate-300 mt-1">{visitaEditando.prescritores?.nome}</p>
+                          <h2 className="text-lg font-black uppercase tracking-wide flex items-center gap-2"><Edit className="text-blue-400" size={20}/> Editar Histórico da Visita</h2>
+                          <p className="text-sm font-medium text-slate-300 mt-1">{visitaEditando.prescritores?.nome || 'Médico'}</p>
                       </div>
-                      <button type="button" onClick={() => setModalAberto(false)} className="hover:bg-white/20 p-2 rounded-full transition"><X size={20}/></button>
+                      <button type="button" onClick={() => setModalAberto(false)} className="hover:bg-white/20 p-2 rounded-full transition bg-white/10"><X size={20}/></button>
                   </div>
 
-                  <form onSubmit={salvarEdicaoVisita} className="p-6 md:p-8 space-y-5 overflow-y-auto max-h-[70vh]">
+                  <form onSubmit={salvarEdicaoVisita} className="p-6 md:p-8 space-y-5 overflow-y-auto max-h-[70vh] custom-scrollbar">
                       <div className="grid grid-cols-2 gap-4">
                           <div>
                               <label className="text-xs font-bold text-slate-700 mb-1.5 block">Tipo de Contato</label>
-                              <select value={visitaEditando.tipo} onChange={e => setVisitaEditando({...visitaEditando, tipo: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl text-sm font-medium bg-white focus:border-blue-500 outline-none">
+                              <select value={visitaEditando.tipo} onChange={e => setVisitaEditando({...visitaEditando, tipo: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-blue-500 outline-none">
                                   <option value="Visita Presencial">Visita Presencial</option>
                                   <option value="Apresentação Online">Apresentação Online</option>
+                                  <option value="Evento / Congresso">Evento / Congresso</option>
                                   <option value="WhatsApp/Telefone">WhatsApp / Telefone</option>
+                                  <option value="Outros">Outros</option>
                               </select>
                           </div>
                           <div>
-                              <label className="text-xs font-bold text-slate-700 mb-1.5 block">Status no Funil</label>
-                              <select value={visitaEditando.status} onChange={e => setVisitaEditando({...visitaEditando, status: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl text-sm font-bold bg-white focus:border-blue-500 outline-none text-blue-700">
+                              <label className="text-xs font-bold text-slate-700 mb-1.5 block">Status no Pipeline</label>
+                              <select value={visitaEditando.status} onChange={e => setVisitaEditando({...visitaEditando, status: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl text-sm font-bold bg-white focus:ring-2 focus:ring-blue-500 outline-none text-blue-700">
                                   {ESTAGIOS.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
                               </select>
                           </div>
@@ -289,23 +325,23 @@ export default function PipelinePDPage() {
 
                       <div>
                           <label className="text-xs font-bold text-slate-700 mb-1.5 block">Resumo do Contato</label>
-                          <textarea required rows={4} value={visitaEditando.resumo} onChange={e => setVisitaEditando({...visitaEditando, resumo: e.target.value})} className="w-full p-4 border border-slate-300 rounded-xl text-sm font-medium bg-white focus:border-blue-500 outline-none resize-none"></textarea>
+                          <textarea required rows={4} value={visitaEditando.resumo} onChange={e => setVisitaEditando({...visitaEditando, resumo: e.target.value})} className="w-full p-4 border border-slate-300 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-blue-500 outline-none resize-none shadow-sm"></textarea>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
                           <div>
                               <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Próximo Passo</label>
-                              <input type="text" value={visitaEditando.proximo_passo || ''} onChange={e => setVisitaEditando({...visitaEditando, proximo_passo: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl text-sm font-medium bg-white focus:border-blue-500 outline-none"/>
+                              <input type="text" value={visitaEditando.proximo_passo} onChange={e => setVisitaEditando({...visitaEditando, proximo_passo: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"/>
                           </div>
                           <div>
-                              <label className="text-[10px] font-black text-red-600 uppercase tracking-widest mb-1.5 block flex items-center gap-1"><Clock size={12}/> Data Limite Alerta</label>
-                              <input type="date" value={visitaEditando.data_proximo_contato || ''} onChange={e => setVisitaEditando({...visitaEditando, data_proximo_contato: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl text-sm font-bold text-red-800 bg-white focus:border-red-500 outline-none"/>
+                              <label className="text-[10px] font-black text-red-600 uppercase tracking-widest mb-1.5 block flex items-center gap-1"><Clock size={12}/> Data do Follow-up</label>
+                              <input type="date" value={visitaEditando.data_proximo_contato} onChange={e => setVisitaEditando({...visitaEditando, data_proximo_contato: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl text-sm font-bold text-red-800 bg-white focus:ring-2 focus:ring-red-500 outline-none shadow-sm cursor-pointer"/>
                           </div>
                       </div>
 
-                      <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
-                          <button type="button" onClick={() => setModalAberto(false)} className="px-6 py-3 text-slate-600 font-bold hover:bg-slate-100 rounded-xl transition text-sm">Cancelar</button>
-                          <button type="submit" disabled={salvando} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-black hover:bg-blue-700 flex items-center gap-2 shadow-lg disabled:opacity-50 text-sm transition">
+                      <div className="pt-6 border-t border-slate-200 flex justify-end gap-3 mt-4">
+                          <button type="button" onClick={() => setModalAberto(false)} className="px-6 py-3 text-slate-600 font-bold bg-slate-100 hover:bg-slate-200 rounded-xl transition text-sm">Cancelar</button>
+                          <button type="submit" disabled={salvando} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-black hover:bg-blue-700 flex items-center gap-2 shadow-lg hover:shadow-blue-200 disabled:opacity-50 text-sm transition transform active:scale-95">
                               {salvando ? <Activity className="animate-spin" size={16}/> : <Save size={16}/>} Atualizar Histórico
                           </button>
                       </div>
