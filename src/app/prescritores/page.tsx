@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
-  Search, Plus, MapPin, Phone, Star, Edit, X, Stethoscope, Save, Building2, CalendarCheck, FileText, ChevronRight, User, Hash, AlignLeft, Activity, Trash2, Clock, Beaker, Check, AlertCircle
+  Search, Plus, MapPin, Phone, Star, Edit, X, Stethoscope, Save, Building2, CalendarCheck, FileText, ChevronRight, User, AlignLeft, Activity, Trash2, Clock, Beaker, Check, AlertCircle, ChevronDown, MessageCircle
 } from 'lucide-react';
 
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
@@ -30,7 +30,7 @@ export default function PrescritoresPage() {
   const [salvando, setSalvando] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
   
-  // Estados para a nova inteligência de interações
+  // Estados para a inteligência de interações (Diário)
   const [prescritorAtivo, setPrescritorAtivo] = useState<any>(null);
   const [interacoes, setInteracoes] = useState<any[]>([]);
   
@@ -82,10 +82,9 @@ export default function PrescritoresPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: perfil } = await supabase.from('perfis').select('cargo').eq('id', user.id).single();
+      const { data: perfil } = await supabase.from('perfis').select('cargo, nome').eq('id', user.id).single();
 
       let query = supabase.from('prescritores').select('*').order('nome', { ascending: true });
-      
       if (perfil && perfil.cargo !== 'admin') {
           query = query.eq('user_id', user.id);
       }
@@ -206,7 +205,7 @@ export default function PrescritoresPage() {
           const { data: { user } } = await supabase.auth.getUser();
           if (!user) return;
 
-          // 1. Grava a interação com os novos campos
+          // 1. Grava a interação com os novos campos e joga direto para 'realizado' no Kanban
           await supabase.from('interacoes').insert([{
               prescritor_id: prescritorAtivo.id,
               user_id: user.id,
@@ -214,8 +213,9 @@ export default function PrescritoresPage() {
               resumo: novaInteracao.resumo,
               proximo_passo: novaInteracao.proximo_passo,
               farmacia_vinculada: novaInteracao.farmacia_vinculada,
-              produtos_vinculados: novaInteracao.produtos_vinculados.join(';'), // Salva como string separada por ponto e vírgula
-              data_proximo_contato: novaInteracao.data_proximo_contato || null
+              produtos_vinculados: novaInteracao.produtos_vinculados.join(';'),
+              data_proximo_contato: novaInteracao.data_proximo_contato || null,
+              status: 'realizado' // Entra como realizado por padrão
           }]);
 
           // 2. Atualiza a data de follow-up no card principal do médico
@@ -225,7 +225,7 @@ export default function PrescritoresPage() {
 
           setNovaInteracao({ tipo: 'Visita Presencial', resumo: '', proximo_passo: '', farmacia_vinculada: '', produtos_vinculados: [], data_proximo_contato: '' });
           abrirInteracoes(prescritorAtivo); 
-          carregarPrescritores(); // Atualiza a tela de trás (cards)
+          carregarPrescritores(); 
       } catch (err: any) {
           alert(`Erro ao registrar visita: ${err.message}`);
       } finally {
@@ -243,7 +243,6 @@ export default function PrescritoresPage() {
     );
   });
 
-  // Função auxiliar para verificar atrasos
   const isAtrasado = (dataISO: string) => {
       if (!dataISO) return false;
       const hoje = new Date().toISOString().split('T')[0];
@@ -260,7 +259,7 @@ export default function PrescritoresPage() {
              <h1 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3">
                 <Stethoscope className="text-blue-600" /> Base de Prescritores
              </h1>
-             <p className="text-slate-500 mt-1">Gestão médica e Pipeline de Visitas P&D.</p>
+             <p className="text-slate-500 mt-1">Gestão médica e Diário de Visitas P&D.</p>
            </div>
            <button onClick={abrirNovo} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-xl font-bold shadow-lg shadow-blue-200 transition active:scale-95 flex items-center gap-2">
               <Plus size={18} /> Novo Prescritor
@@ -282,7 +281,7 @@ export default function PrescritoresPage() {
             </div>
         </div>
 
-        {/* LISTA DE CARDS (PIPELINE) */}
+        {/* LISTA DE CARDS */}
         {loading && !modalInteracoes ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 animate-pulse">
             {[1,2,3,4,5,6].map(i => <div key={i} className="h-56 bg-slate-200 rounded-2xl"></div>)}
@@ -293,7 +292,6 @@ export default function PrescritoresPage() {
                 <div className="col-span-full text-center p-12 bg-white rounded-3xl border border-slate-100 shadow-sm">
                     <Stethoscope size={48} className="mx-auto text-slate-300 mb-4"/>
                     <p className="text-slate-500 font-bold text-lg">Nenhum prescritor encontrado.</p>
-                    <p className="text-slate-400 text-sm mt-1">Clique no botão azul acima para cadastrar o primeiro.</p>
                 </div>
             )}
             {filtrados.map((p) => {
@@ -302,7 +300,6 @@ export default function PrescritoresPage() {
               return (
               <div key={p.id} className={`bg-white rounded-2xl p-5 border shadow-sm transition group flex flex-col justify-between h-full relative ${alertaAtraso ? 'border-red-300 hover:shadow-red-100' : 'border-slate-100 hover:shadow-md hover:border-blue-200'}`}>
                  
-                 {/* Alerta de Follow-up */}
                  {p.proximo_contato && (
                     <div className="absolute top-0 left-0 w-full flex justify-center -mt-3">
                         <span className={`px-3 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest shadow-sm flex items-center gap-1.5 border ${alertaAtraso ? 'bg-red-500 text-white border-red-600 animate-pulse' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
@@ -348,16 +345,23 @@ export default function PrescritoresPage() {
                      <button onClick={() => abrirInteracoes(p)} className={`text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-2 ${alertaAtraso ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-600 hover:text-white' : 'bg-green-50 text-green-700 border border-green-100 hover:bg-green-600 hover:text-white'}`}>
                          <CalendarCheck size={14}/> Diário de Visitas
                      </button>
-                     <button onClick={() => abrirEdicao(p)} className="text-xs font-bold text-blue-600 bg-blue-50 border border-blue-100 px-4 py-2 rounded-xl hover:bg-blue-600 hover:text-white transition flex items-center gap-2">
-                         <Edit size={14}/> Editar
-                     </button>
+                     <div className="flex items-center gap-2">
+                        {p.telefone && (
+                            <a href={`https://wa.me/55${p.telefone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="text-green-500 hover:text-green-600 transition-colors p-2 bg-green-50 rounded-lg" title="Abrir WhatsApp">
+                                <MessageCircle size={16} />
+                            </a>
+                        )}
+                        <button onClick={() => abrirEdicao(p)} className="text-xs font-bold text-blue-600 bg-blue-50 border border-blue-100 px-4 py-2 rounded-xl hover:bg-blue-600 hover:text-white transition flex items-center gap-2">
+                            <Edit size={14}/> Editar
+                        </button>
+                     </div>
                  </div>
               </div>
             )})}
           </div>
         )}
 
-        {/* MODAL: DIÁRIO DE VISITAS (PIPELINE) */}
+        {/* MODAL: DIÁRIO DE VISITAS */}
         {modalInteracoes && prescritorAtivo && mounted && createPortal(
           <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-200">
              <div className="bg-white w-full max-w-6xl rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[95vh]">
@@ -368,7 +372,7 @@ export default function PrescritoresPage() {
                            {prescritorAtivo.nome.substring(0, 2).toUpperCase()}
                        </div>
                        <div>
-                           <h2 className="text-xl font-black uppercase tracking-tight flex items-center gap-2"><CalendarCheck className="text-blue-400"/> Pipeline de Visitação P&D</h2>
+                           <h2 className="text-xl font-black uppercase tracking-tight flex items-center gap-2"><CalendarCheck className="text-blue-400"/> Diário de Visitas</h2>
                            <p className="text-sm text-slate-300 font-medium mt-0.5">{prescritorAtivo.nome} ({prescritorAtivo.especialidade})</p>
                        </div>
                    </div>
@@ -395,7 +399,6 @@ export default function PrescritoresPage() {
                                             <span className="text-xs font-bold text-slate-500 bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100">{new Date(int.created_at).toLocaleDateString('pt-BR')}</span>
                                         </div>
                                         
-                                        {/* Exibe Produtos Vinculados */}
                                         {int.produtos_vinculados && (
                                             <div className="flex flex-wrap gap-1.5 mb-3">
                                                 {int.produtos_vinculados.split(';').filter(Boolean).map((prod: string, i: number) => (
@@ -404,9 +407,8 @@ export default function PrescritoresPage() {
                                             </div>
                                         )}
 
-                                        {/* Exibe Farmácia Vinculada */}
                                         {int.farmacia_vinculada && (
-                                            <p className="text-xs text-slate-600 font-bold flex items-center gap-1 mb-3"><Building2 size={12} className="text-slate-400"/> Indicado para: <span className="text-blue-600 uppercase">{int.farmacia_vinculada}</span></p>
+                                            <p className="text-xs text-slate-600 font-bold flex items-center gap-1 mb-3"><Building2 size={12} className="text-blue-500"/> Indicado para: <span className="text-blue-600 uppercase">{int.farmacia_vinculada}</span></p>
                                         )}
 
                                         <p className="text-sm text-slate-800 font-medium mb-4 whitespace-pre-wrap leading-relaxed">{int.resumo}</p>
@@ -430,7 +432,7 @@ export default function PrescritoresPage() {
                         </div>
                     </div>
 
-                    {/* DIREITA: NOVA INTERAÇÃO (PIPELINE) */}
+                    {/* DIREITA: NOVA INTERAÇÃO */}
                     <div className="lg:w-1/2 p-6 lg:p-8 bg-white overflow-y-auto custom-scrollbar">
                         <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2 border-b border-slate-200 pb-3"><Plus className="text-green-600" size={20}/> Registrar Nova Visita</h3>
                         
@@ -477,13 +479,13 @@ export default function PrescritoresPage() {
 
                             {/* VINCULAR FARMÁCIA (AUTOCOMPLETE) */}
                             <div className="relative">
-                                <label className="text-sm font-bold text-slate-700 mb-2 block flex items-center justify-between">
+                                <label className="text-sm font-bold text-slate-700 mb-2 flex items-center justify-between">
                                     <span>Vincular Farmácia Parceira</span>
                                     <span className="text-[10px] text-slate-400 font-normal uppercase">Opcional</span>
                                 </label>
                                 <div className="flex items-center bg-white border border-slate-300 rounded-xl shadow-sm focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500 transition px-3">
                                     <Building2 size={18} className="text-slate-400"/>
-                                    <input type="text" value={novaInteracao.farmacia_vinculada} onChange={(e) => buscarFarmaciaDB(e.target.value)} onFocus={() => setDropdownFarmaciaAberto(true)} className="w-full p-3.5 bg-transparent outline-none text-base font-medium text-slate-900 placeholder-slate-400" placeholder="Digite para buscar na base ou criar uma nova..."/>
+                                    <input type="text" value={novaInteracao.farmacia_vinculada} onChange={(e) => buscarFarmaciaDB(e.target.value)} onFocus={() => setDropdownFarmaciaAberto(true)} className="w-full p-3.5 bg-transparent outline-none text-base font-medium text-slate-900 placeholder-slate-400" placeholder="Digite para buscar na base..."/>
                                     {novaInteracao.farmacia_vinculada && <button type="button" onClick={() => {setNovaInteracao({...novaInteracao, farmacia_vinculada: ''}); setFarmaciasBuscadas([])}}><X size={16} className="text-slate-400 hover:text-red-500"/></button>}
                                 </div>
                                 {dropdownFarmaciaAberto && farmaciasBuscadas.length > 0 && (
@@ -511,7 +513,7 @@ export default function PrescritoresPage() {
                                     <input type="text" value={novaInteracao.proximo_passo} onChange={e => setNovaInteracao({...novaInteracao, proximo_passo: e.target.value})} className="w-full p-3 border border-blue-200 rounded-xl text-sm font-bold text-slate-900 bg-white placeholder-slate-400 focus:border-blue-500 outline-none transition shadow-sm" placeholder="Ex: Enviar literatura"/>
                                 </div>
                                 <div>
-                                    <label className="text-xs font-black text-red-600 uppercase tracking-widest mb-2 block flex items-center gap-1"><Clock size={12}/> Data Limite (Alerta)</label>
+                                    <label className="text-xs font-black text-red-600 uppercase tracking-widest mb-2 flex items-center gap-1"><Clock size={12}/> Data Limite (Alerta)</label>
                                     <input type="date" value={novaInteracao.data_proximo_contato} onChange={e => setNovaInteracao({...novaInteracao, data_proximo_contato: e.target.value})} className="w-full p-3 border border-red-200 rounded-xl text-sm font-bold text-red-900 bg-white focus:border-red-500 outline-none transition shadow-sm cursor-pointer"/>
                                 </div>
                             </div>
@@ -533,7 +535,6 @@ export default function PrescritoresPage() {
            <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-200 overflow-y-auto">
              <div className="bg-white w-full max-w-3xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col my-8">
                 
-                {/* Cabeçalho do Modal */}
                 <div className="bg-[#1e293b] p-6 md:p-8 flex justify-between items-center text-white shrink-0 relative overflow-hidden">
                    <div className="absolute -right-4 -top-4 text-white/5 transform rotate-12"><User size={150}/></div>
                    <div className="relative z-10">
@@ -544,8 +545,6 @@ export default function PrescritoresPage() {
                 </div>
                 
                 <form onSubmit={handleSalvarPrescritor} className="p-6 md:p-8">
-                    
-                    {/* Seção 1 */}
                     <h3 className="text-lg font-black text-slate-800 mb-5 flex items-center gap-2 border-b border-slate-200 pb-3">
                         <User className="text-blue-600" size={20}/> Informações Profissionais
                     </h3>
@@ -587,7 +586,6 @@ export default function PrescritoresPage() {
                         </div>
                     </div>
 
-                    {/* Seção 2 */}
                     <h3 className="text-lg font-black text-slate-800 mb-5 flex items-center gap-2 border-b border-slate-200 pb-3">
                         <Building2 className="text-blue-600" size={20}/> Dados de Contato e Localização
                     </h3>
@@ -620,7 +618,6 @@ export default function PrescritoresPage() {
                         </div>
                     </div>
 
-                    {/* Seção 3 */}
                     <h3 className="text-lg font-black text-slate-800 mb-5 flex items-center gap-2 border-b border-slate-200 pb-3">
                         <AlignLeft className="text-blue-600" size={20}/> Anotações de P&D
                     </h3>
