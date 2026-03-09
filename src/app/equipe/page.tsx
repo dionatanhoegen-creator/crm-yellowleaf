@@ -4,108 +4,91 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
-  Users, ShieldCheck, Edit, Save, X, ToggleLeft, ToggleRight, ShieldAlert
+  Shield, User, Search, Activity, Save, X, Lock, CheckCircle2, LayoutDashboard, Trello, Stethoscope, Users, Lightbulb, Package, FileText
 } from 'lucide-react';
 
-export default function GestaoEquipePage() {
+// Lista de todos os módulos que existem no sistema (baseado no seu layout.tsx)
+const MODULOS_SISTEMA = [
+  { key: 'pipeline', label: 'Pipeline Comercial', icon: Trello, desc: 'Gestão de funil de propostas e CRM Comercial.' },
+  { key: 'prescritores', label: 'Prescritores & Visitas P&D', icon: Stethoscope, desc: 'Gestão de médicos, diário de visitas e Kanban de P&D.' },
+  { key: 'inteligencia', label: 'Inteligência de Mercado', icon: Lightbulb, desc: 'Deep Search e histórico de compras de farmácias.' },
+  { key: 'clientes', label: 'Base de Clientes', icon: Users, desc: 'Visualização da carteira e ERP.' },
+  { key: 'produtos', label: 'Produtos e Preços', icon: Package, desc: 'Tabela completa de ativos.' },
+  { key: 'exclusividades', label: 'Gestão de Exclusividades', icon: Lock, desc: 'Bloqueios e regras regionais.' },
+  { key: 'faturamento', label: 'Dashboard & Faturamento', icon: LayoutDashboard, desc: 'Métricas financeiras e painel inicial.' },
+  { key: 'relatorios', label: 'Relatórios Gerais', icon: FileText, desc: 'Extração de dados gerenciais.' },
+  { key: 'admin', label: 'Acesso Administrador', icon: Shield, desc: 'Controle total de acessos e configurações do sistema.' }
+];
+
+export default function EquipePage() {
   const supabase = createClientComponentClient();
-  const [equipe, setEquipe] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [acessoNegado, setAcessoNegado] = useState(false);
   
-  // Controle do Modal de Edição
-  const [usuarioEditando, setUsuarioEditando] = useState<any>(null);
-  const [salvando, setSalvando] = useState(false);
+  const [usuarios, setUsuarios] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busca, setBusca] = useState("");
   const [mounted, setMounted] = useState(false);
+
+  // Modal de Acessos
+  const [modalAberto, setModalAberto] = useState(false);
+  const [usuarioEditando, setUsuarioEditando] = useState<any>(null);
+  const [acessosForm, setAcessosForm] = useState<Record<string, boolean>>({});
+  const [salvando, setSalvando] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    verificarAcessoECarregar();
+    carregarEquipe();
   }, []);
 
-  const verificarAcessoECarregar = async () => {
+  const carregarEquipe = async () => {
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setAcessoNegado(true);
-        return;
-      }
-
-      // Verifica se quem está acessando é ADMIN na tabela de perfis
-      const { data: meuPerfil } = await supabase.from('perfis').select('cargo').eq('id', user.id).single();
-      
-      if (!meuPerfil || meuPerfil.cargo !== 'admin') {
-        setAcessoNegado(true);
-        setLoading(false);
-        return;
-      }
-
-      // Se for Admin, carrega a equipe toda
-      const { data: perfis } = await supabase.from('perfis').select('*').order('nome');
-      if (perfis) setEquipe(perfis);
-
-    } catch (error) {
-      console.error("Erro ao carregar equipe:", error);
+      const { data, error } = await supabase.from('perfis').select('*').order('nome');
+      if (error) throw error;
+      setUsuarios(data || []);
+    } catch (e) {
+      console.error("Erro ao carregar usuários:", e);
     } finally {
       setLoading(false);
     }
   };
 
-  const abrirEdicao = (membro: any) => {
-    // Garante que o JSON de acessos existe para não dar erro na tela (inclui inteligência)
-    const acessosPadrao = { pipeline: false, inteligencia: false, clientes: false, prescritores: false, faturamento: false, exclusividades: false, produtos: false, relatorios: false, admin: false };
-    setUsuarioEditando({
-      ...membro,
-      acessos: typeof membro.acessos === 'object' && membro.acessos !== null ? { ...acessosPadrao, ...membro.acessos } : acessosPadrao
-    });
+  const abrirModalAcessos = (user: any) => {
+      setUsuarioEditando(user);
+      // Puxa os acessos atuais do usuário ou cria um objeto vazio se ele for novo
+      setAcessosForm(user.acessos || {});
+      setModalAberto(true);
   };
 
-  const handleSalvar = async () => {
-    setSalvando(true);
-    try {
-      const { error } = await supabase
-        .from('perfis')
-        .update({
-          nome: usuarioEditando.nome,
-          cargo: usuarioEditando.cargo,
-          telefone: usuarioEditando.telefone,
-          acessos: usuarioEditando.acessos
-        })
-        .eq('id', usuarioEditando.id);
-
-      if (error) throw error;
-
-      setUsuarioEditando(null);
-      verificarAcessoECarregar(); // Recarrega a lista atualizada
-    } catch (error) {
-      alert("Erro ao salvar as permissões.");
-      console.error(error);
-    } finally {
-      setSalvando(false);
-    }
+  const toggleAcesso = (key: string) => {
+      setAcessosForm(prev => ({
+          ...prev,
+          [key]: !prev[key]
+      }));
   };
 
-  const toggleAcesso = (chave: string) => {
-    setUsuarioEditando((prev: any) => ({
-      ...prev,
-      acessos: {
-        ...prev.acessos,
-        [chave]: !prev.acessos[chave]
+  const salvarAcessos = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setSalvando(true);
+      try {
+          const { error } = await supabase
+              .from('perfis')
+              .update({ acessos: acessosForm })
+              .eq('id', usuarioEditando.id);
+
+          if (error) throw error;
+          
+          setModalAberto(false);
+          carregarEquipe();
+      } catch (err: any) {
+          alert(`Erro ao salvar permissões: ${err.message}`);
+      } finally {
+          setSalvando(false);
       }
-    }));
   };
 
-  if (acessoNegado) return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6">
-        <div className="bg-white p-10 rounded-3xl shadow-xl max-w-md w-full text-center border border-slate-100">
-            <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
-                <ShieldAlert size={40} />
-            </div>
-            <h1 className="text-2xl font-black text-slate-800 mb-2">Acesso Restrito</h1>
-            <p className="text-slate-500 mb-8">Apenas administradores podem gerenciar as permissões da equipe.</p>
-        </div>
-    </div>
+  const filtrados = usuarios.filter(u => 
+      (u.nome && u.nome.toLowerCase().includes(busca.toLowerCase())) ||
+      (u.email && u.email.toLowerCase().includes(busca.toLowerCase()))
   );
 
   return (
@@ -113,178 +96,127 @@ export default function GestaoEquipePage() {
       <div className="max-w-6xl mx-auto">
         
         {/* CABEÇALHO */}
-        <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 pb-6">
            <div>
              <h1 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3">
-                <Users className="text-blue-600" /> Gestão de Equipe
+                <Shield className="text-blue-600" size={32} /> Gestão de Equipe e Acessos
              </h1>
-             <p className="text-slate-500 mt-1">Controle de acessos, cargos e permissões do sistema.</p>
+             <p className="text-slate-500 mt-1 font-medium">Controle os módulos que cada membro da YellowLeaf pode visualizar.</p>
            </div>
         </div>
 
-        {/* LISTA DE EQUIPE */}
-        {loading ? (
-          <div className="p-8 text-center text-slate-400 font-bold animate-pulse">Carregando usuários...</div>
-        ) : (
-          <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-xs border-b border-slate-100">
-                  <tr>
-                    <th className="p-5">Colaborador</th>
-                    <th className="p-5">E-mail</th>
-                    <th className="p-5">Cargo (Visão de Dados)</th>
-                    <th className="p-5 text-center">Telas Liberadas</th>
-                    <th className="p-5 text-right">Ação</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {equipe.map((membro) => {
-                    // Conta quantas chavinhas estão ativas
-                    const telasAtivas = membro.acessos ? Object.values(membro.acessos).filter(Boolean).length : 0;
-                    
-                    return (
-                      <tr key={membro.id} className="hover:bg-slate-50/50 transition">
-                        <td className="p-5 font-bold text-slate-800 flex items-center gap-3">
-                           <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center text-xs">
-                             {membro.nome ? membro.nome.substring(0, 2).toUpperCase() : 'US'}
-                           </div>
-                           {membro.nome || 'Usuário Novo'}
-                        </td>
-                        <td className="p-5 text-slate-500 font-mono text-xs">{membro.email}</td>
-                        <td className="p-5">
-                           <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                             membro.cargo === 'admin' ? 'bg-purple-100 text-purple-700' :
-                             membro.cargo === 'farmaceutico' ? 'bg-emerald-100 text-emerald-700' :
-                             'bg-blue-100 text-blue-700'
-                           }`}>
-                             {membro.cargo}
-                           </span>
-                        </td>
-                        <td className="p-5 text-center font-bold text-slate-400">
-                           {telasAtivas} <span className="text-xs font-normal">telas</span>
-                        </td>
-                        <td className="p-5 text-right">
-                           <button 
-                             onClick={() => abrirEdicao(membro)}
-                             className="text-blue-600 hover:text-blue-800 hover:bg-blue-50 p-2 rounded-lg transition font-bold text-xs flex items-center gap-2 ml-auto"
-                           >
-                             <Edit size={16}/> Configurar
-                           </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+        {/* BARRA DE BUSCA */}
+        <div className="flex flex-col md:flex-row gap-4 mb-8">
+            <div className="relative flex-1">
+              <input 
+                  type="text" 
+                  placeholder="Buscar por nome ou e-mail..." 
+                  value={busca} 
+                  onChange={(e) => setBusca(e.target.value)} 
+                  className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl shadow-sm focus:border-blue-500 outline-none text-lg font-medium transition" 
+              />
+              <Search size={24} className="absolute left-4 top-4 text-slate-300" />
             </div>
-          </div>
+            <div className="bg-white px-6 py-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-center gap-4 shrink-0">
+                <div className="text-right">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Usuários Ativos</p>
+                    <p className="text-3xl font-black text-slate-800">{usuarios.length}</p>
+                </div>
+                <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center"><Users size={24}/></div>
+            </div>
+        </div>
+
+        {/* LISTA DE USUÁRIOS */}
+        {loading ? (
+            <div className="flex justify-center items-center py-20">
+                <Activity className="animate-spin text-blue-500" size={40} />
+            </div>
+        ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {filtrados.map(u => (
+                    <div key={u.id} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm hover:shadow-md transition flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div className="flex items-center gap-4">
+                            <div className="w-14 h-14 bg-slate-800 text-white rounded-full flex items-center justify-center font-black text-xl shrink-0">
+                                {(u.nome || u.email || 'U').substring(0, 2).toUpperCase()}
+                            </div>
+                            <div>
+                                <h3 className="font-black text-lg text-slate-800 leading-tight">{u.nome || 'Usuário Sem Nome'}</h3>
+                                <p className="text-sm font-medium text-slate-500 mb-1">{u.email}</p>
+                                <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md ${u.cargo === 'admin' ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-blue-100 text-blue-700 border border-blue-200'}`}>
+                                    {u.cargo === 'admin' ? 'Administrador' : 'Consultor'}
+                                </span>
+                            </div>
+                        </div>
+                        <button 
+                            onClick={() => abrirModalAcessos(u)} 
+                            className="w-full md:w-auto text-xs font-bold text-slate-700 bg-slate-100 px-5 py-3 rounded-xl hover:bg-blue-600 hover:text-white transition flex items-center justify-center gap-2"
+                        >
+                            <Lock size={14}/> Permissões
+                        </button>
+                    </div>
+                ))}
+            </div>
         )}
 
-        {/* MODAL DE EDIÇÃO DE ACESSOS */}
-        {usuarioEditando && mounted && createPortal(
-          <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
-             <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[95vh]">
-                
-                <div className="bg-slate-800 p-6 flex justify-between items-center text-white shrink-0">
-                   <div>
-                     <h2 className="text-xl font-bold flex items-center gap-2"><ShieldCheck size={24}/> Configurar Permissões</h2>
-                     <p className="text-slate-400 text-xs mt-1 font-mono">{usuarioEditando.email}</p>
-                   </div>
-                   <button onClick={() => setUsuarioEditando(null)} className="hover:bg-white/10 p-2 rounded-full transition"><X size={20}/></button>
-                </div>
-                
-                <div className="p-8 overflow-y-auto flex-1">
-                   {/* DADOS CADASTRAIS */}
-                   <h3 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-4 border-b pb-2">1. Dados e Cargo</h3>
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                      <div>
-                          <label className="text-xs font-bold text-slate-500 mb-1 block">Nome de Exibição (Sai no PDF)</label>
-                          <input 
-                              type="text" value={usuarioEditando.nome} 
-                              onChange={(e) => setUsuarioEditando({...usuarioEditando, nome: e.target.value})}
-                              className="w-full p-3 border border-slate-200 rounded-xl text-sm font-semibold bg-slate-50 outline-none focus:border-blue-500"
-                          />
-                      </div>
-                      <div>
-                          <label className="text-xs font-bold text-slate-500 mb-1 block">Telefone (Sai no PDF)</label>
-                          <input 
-                              type="text" value={usuarioEditando.telefone || ''} placeholder="(00) 00000-0000"
-                              onChange={(e) => setUsuarioEditando({...usuarioEditando, telefone: e.target.value})}
-                              className="w-full p-3 border border-slate-200 rounded-xl text-sm font-semibold bg-slate-50 outline-none focus:border-blue-500"
-                          />
-                      </div>
-                      <div className="md:col-span-2">
-                          <label className="text-xs font-bold text-slate-500 mb-1 block">Cargo (Define o que a pessoa vê lá dentro)</label>
-                          <select 
-                              value={usuarioEditando.cargo} 
-                              onChange={(e) => setUsuarioEditando({...usuarioEditando, cargo: e.target.value})}
-                              className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold text-blue-700 bg-blue-50 outline-none focus:border-blue-500 cursor-pointer"
-                          >
-                              <option value="vendedor">Vendedor (Vê apenas os próprios clientes e pipeline)</option>
-                              <option value="farmaceutico">Farmacêutico P&D (Vê toda a base de prescritores e clientes)</option>
-                              <option value="admin">Administrador (Acesso irrestrito a todos os dados)</option>
-                          </select>
-                      </div>
-                   </div>
+        {/* MODAL DE PERMISSÕES */}
+        {modalAberto && usuarioEditando && mounted && createPortal(
+            <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-200">
+                <div className="bg-white w-full max-w-3xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                    
+                    <div className="bg-[#1e293b] p-6 md:p-8 flex justify-between items-center text-white shrink-0">
+                        <div>
+                            <span className="bg-blue-500 text-white px-3 py-1 rounded text-[10px] font-black uppercase tracking-widest mb-2 inline-block">Central de Segurança</span>
+                            <h2 className="text-2xl font-black tracking-tight flex items-center gap-2">Acessos: {usuarioEditando.nome}</h2>
+                        </div>
+                        <button onClick={() => setModalAberto(false)} className="hover:bg-white/20 p-2 rounded-full transition bg-white/10"><X size={20}/></button>
+                    </div>
 
-                   {/* CONTROLE DE TELAS (CHAVINHAS) */}
-                   <h3 className="text-xs font-black text-slate-400 uppercase tracking-wider mb-4 border-b pb-2">2. Liberação de Telas (Menu)</h3>
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      
-                      {/* MAPEANDO AS TELAS */}
-                      {[
-                        { key: 'pipeline', label: 'CRM / Pipeline', desc: 'Aba de negociações' },
-                        { key: 'inteligencia', label: 'Inteligência P&D', desc: 'Motor de busca de ativos' },
-                        { key: 'faturamento', label: 'Faturamento', desc: 'Dashboard de vendas' },
-                        { key: 'clientes', label: 'Carteira de Clientes', desc: 'Base de farmácias' },
-                        { key: 'prescritores', label: 'P&D / Prescritores', desc: 'Gestão médica' },
-                        { key: 'exclusividades', label: 'Exclusividades', desc: 'Bloqueio de praça' },
-                        { key: 'produtos', label: 'Tabela de Preços', desc: 'Insumos e ativos' },
-                        { key: 'relatorios', label: 'Relatórios Internos', desc: 'Métricas de fechamento' },
-                        { key: 'admin', label: 'Gestão de Equipe', desc: 'Pode editar permissões', danger: true },
-                      ].map((tela) => {
-                        const isAtivo = usuarioEditando.acessos[tela.key];
-                        return (
-                          <div 
-                            key={tela.key} 
-                            onClick={() => toggleAcesso(tela.key)}
-                            className={`p-4 rounded-xl border-2 cursor-pointer flex items-center justify-between transition ${
-                               isAtivo 
-                                ? (tela.danger ? 'border-red-400 bg-red-50' : 'border-green-400 bg-green-50') 
-                                : 'border-slate-100 bg-white hover:border-slate-300'
-                            }`}
-                          >
-                             <div>
-                               <p className={`text-sm font-bold ${isAtivo ? (tela.danger ? 'text-red-700' : 'text-green-700') : 'text-slate-600'}`}>
-                                 {tela.label}
-                               </p>
-                               <p className="text-[10px] text-slate-400 mt-0.5">{tela.desc}</p>
-                             </div>
-                             <div>
-                               {isAtivo ? <ToggleRight size={28} className={tela.danger ? "text-red-500" : "text-green-500"} /> : <ToggleLeft size={28} className="text-slate-300" />}
-                             </div>
-                          </div>
-                        )
-                      })}
-                      
-                   </div>
-                </div>
+                    <form onSubmit={salvarAcessos} className="flex flex-col flex-1 overflow-hidden">
+                        <div className="p-6 md:p-8 overflow-y-auto flex-1 custom-scrollbar bg-slate-50 space-y-3">
+                            <p className="text-sm font-medium text-slate-500 mb-4">Ative os interruptores abaixo para liberar os módulos na barra superior e lateral deste usuário.</p>
+                            
+                            <div className="grid grid-cols-1 gap-3">
+                                {MODULOS_SISTEMA.map(mod => {
+                                    const temAcesso = acessosForm[mod.key] === true;
+                                    
+                                    return (
+                                        <div 
+                                            key={mod.key} 
+                                            onClick={() => toggleAcesso(mod.key)}
+                                            className={`flex items-center justify-between p-4 rounded-2xl border-2 cursor-pointer transition-all ${temAcesso ? 'bg-blue-50/50 border-blue-400 shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300'}`}
+                                        >
+                                            <div className="flex items-center gap-4">
+                                                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${temAcesso ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                                                    <mod.icon size={24} />
+                                                </div>
+                                                <div>
+                                                    <h4 className={`font-black text-base leading-tight ${temAcesso ? 'text-blue-900' : 'text-slate-700'}`}>{mod.label}</h4>
+                                                    <p className={`text-xs font-medium ${temAcesso ? 'text-blue-700' : 'text-slate-500'}`}>{mod.desc}</p>
+                                                </div>
+                                            </div>
+                                            
+                                            {/* Custom Toggle Switch */}
+                                            <div className={`w-14 h-8 rounded-full flex items-center p-1 transition-colors duration-300 ${temAcesso ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                                                <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 flex items-center justify-center ${temAcesso ? 'translate-x-6' : 'translate-x-0'}`}>
+                                                    {temAcesso && <CheckCircle2 size={14} className="text-blue-600"/>}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        </div>
 
-                <div className="p-6 bg-slate-50 border-t flex justify-end gap-3 shrink-0">
-                   <button onClick={() => setUsuarioEditando(null)} className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-200 rounded-xl transition">Cancelar</button>
-                   <button 
-                      onClick={handleSalvar} 
-                      disabled={salvando}
-                      className="bg-blue-600 text-white px-8 py-3 rounded-xl font-black hover:bg-blue-700 flex items-center gap-2 shadow-lg hover:shadow-blue-200 transition transform active:scale-95 disabled:opacity-50"
-                   >
-                      <Save size={20}/> {salvando ? 'Salvando...' : 'Salvar Acessos'}
-                   </button>
+                        <div className="p-6 bg-white border-t border-slate-200 flex justify-end gap-3 shrink-0">
+                            <button type="button" onClick={() => setModalAberto(false)} className="px-6 py-3 text-slate-600 font-bold bg-slate-100 hover:bg-slate-200 rounded-xl transition text-sm">Cancelar</button>
+                            <button type="submit" disabled={salvando} className="bg-[#0f392b] text-white px-8 py-3 rounded-xl font-black hover:bg-[#16503c] flex items-center gap-2 shadow-lg disabled:opacity-50 text-sm transition transform active:scale-95 uppercase tracking-wide">
+                                {salvando ? <Activity className="animate-spin" size={16}/> : <Save size={16}/>} {salvando ? 'Salvando...' : 'Salvar Permissões'}
+                            </button>
+                        </div>
+                    </form>
                 </div>
-             </div>
-          </div>, document.body
+            </div>, document.body
         )}
-
       </div>
     </div>
   );
