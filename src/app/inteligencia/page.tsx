@@ -188,18 +188,40 @@ export default function InteligenciaPage() {
               {extras.map(([key, value]: any, i) => {
                   const isValor = cleanText(key).includes('valor') || cleanText(key).includes('preco') || cleanText(key).includes('faturamento');
                   const isData = cleanText(key).includes('data');
-                  const isHistorico = cleanText(key).includes('historico') || cleanText(key).includes('obs') || cleanText(key).includes('produto');
+                  const isHistorico = cleanText(key).includes('historico') || cleanText(key).includes('obs') || cleanText(key).includes('produto') || cleanText(key).includes('compra');
                   
-                  let formattedValue = String(value);
-                  if (isValor && !isNaN(Number(value))) formattedValue = formatCurrency(value);
-                  else if (isData && String(value).includes('T')) formattedValue = new Date(value).toLocaleDateString('pt-BR');
+                  let formattedValue = "";
+
+                  // Tratamento para Objetos e Arrays
+                  if (typeof value === 'object' && value !== null) {
+                      try {
+                          if (Array.isArray(value)) {
+                              // Se for array (ex: lista de produtos), formata com bullets
+                              formattedValue = value.map(v => typeof v === 'object' ? JSON.stringify(v) : v).join('\n• ');
+                              if (formattedValue) formattedValue = '• ' + formattedValue;
+                          } else {
+                              // Se for objeto, formata como string legível
+                              formattedValue = JSON.stringify(value, null, 2);
+                          }
+                      } catch (e) {
+                          formattedValue = String(value);
+                      }
+                  } else {
+                      formattedValue = String(value);
+                  }
+
+                  if (isValor && !isNaN(Number(value))) {
+                      formattedValue = formatCurrency(value);
+                  } else if (isData && typeof value === 'string' && value.includes('T')) {
+                      formattedValue = new Date(value).toLocaleDateString('pt-BR');
+                  }
 
                   return (
                       <div key={i} className={`bg-slate-50 p-4 rounded-xl border border-slate-200 ${isHistorico ? 'md:col-span-2' : ''}`}>
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{key.replace(/_/g, ' ')}</p>
-                          <p className={`text-sm text-slate-800 ${isValor ? 'font-black text-blue-700 text-lg' : 'font-medium'} ${isHistorico ? 'whitespace-pre-wrap' : 'truncate'}`}>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{key.replace(/_/g, ' ')}</p>
+                          <div className={`text-sm text-slate-800 ${isValor ? 'font-black text-blue-700 text-lg' : 'font-medium'} ${isHistorico ? 'whitespace-pre-wrap leading-relaxed' : 'truncate'}`}>
                               {formattedValue}
-                          </p>
+                          </div>
                       </div>
                   );
               })}
