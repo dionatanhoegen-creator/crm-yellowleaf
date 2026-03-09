@@ -42,7 +42,7 @@ export default function PipelinePDPage() {
 
       const { data: perfil } = await supabase.from('perfis').select('cargo, nome').eq('id', user.id).single();
 
-      // Puxa as interações CRUZANDO com os dados do Médico (agora incluindo o telefone)
+      // Puxa as interações CRUZANDO com os dados do Médico
       let query = supabase.from('interacoes')
           .select('*, prescritores(nome, especialidade, clinica, cidade, uf, telefone), perfis(nome)')
           .order('data_proximo_contato', { ascending: true, nullsFirst: false });
@@ -74,7 +74,15 @@ export default function PipelinePDPage() {
   };
 
   const abrirEdicaoVisita = (visita: any) => {
-      setVisitaEditando({...visita});
+      // Clona o objeto com fallback para evitar campos vazios quebrando o React
+      setVisitaEditando({
+          ...visita,
+          tipo: visita.tipo || 'Visita Presencial',
+          status: visita.status || 'realizado',
+          resumo: visita.resumo || '',
+          proximo_passo: visita.proximo_passo || '',
+          data_proximo_contato: visita.data_proximo_contato || ''
+      });
       setModalAberto(true);
   };
 
@@ -86,7 +94,6 @@ export default function PipelinePDPage() {
               tipo: visitaEditando.tipo,
               resumo: visitaEditando.resumo,
               proximo_passo: visitaEditando.proximo_passo,
-              farmacia_vinculada: visitaEditando.farmacia_vinculada,
               data_proximo_contato: visitaEditando.data_proximo_contato || null,
               status: visitaEditando.status
           }).eq('id', visitaEditando.id);
@@ -100,29 +107,38 @@ export default function PipelinePDPage() {
       }
   };
 
+  // --- GERADOR DE RELATÓRIO COM LOGO ---
   const gerarRelatorioGerencial = () => {
     const doc = new jsPDF('l', 'mm', 'a4');
+    
+    // Tenta inserir a logo (Se a imagem /logo.jpg existir na pasta public)
+    try {
+        doc.addImage("/logo.jpg", "JPEG", 14, 10, 35, 15);
+    } catch (e) {
+        console.error("Logo não encontrada ou em formato inválido", e);
+    }
+
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
     doc.setTextColor(15, 55, 43); 
-    doc.text("RELATÓRIO DE PERFORMANCE DE P&D", 14, 20);
+    doc.text("RELATÓRIO DE PERFORMANCE DE P&D", 14, 34); // Posição Y ajustada para caber a logo
     
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100);
-    doc.text(`Visitas Extraídas: ${filtradas.length} | Gerado em: ${new Date().toLocaleString('pt-BR')}`, 14, 26);
+    doc.text(`Visitas Extraídas: ${filtradas.length} | Gerado em: ${new Date().toLocaleString('pt-BR')}`, 14, 40);
 
     const tableBody = filtradas.map(v => [
         new Date(v.created_at).toLocaleDateString('pt-BR'),
         v.prescritores?.nome || 'N/D',
-        v.tipo,
+        v.tipo || '-',
         v.farmacia_vinculada || '-',
-        v.produtos_vinculados ? v.produtos_vinculados.replace(/;/g, ', ') : '-',
+        v.produtos_vinculados ? String(v.produtos_vinculados).replace(/;/g, ', ') : '-',
         ESTAGIOS.find(e => e.id === v.status)?.label || v.status
     ]);
 
     autoTable(doc, {
-        startY: 35,
+        startY: 46, // Tabela começa mais abaixo
         head: [['DATA INSERÇÃO', 'PRESCRITOR', 'TIPO DE CONTATO', 'FARMÁCIA INDICADA', 'ATIVOS TRABALHADOS', 'STATUS DO CICLO']],
         body: tableBody,
         theme: 'grid',
@@ -139,13 +155,14 @@ export default function PipelinePDPage() {
       return dataISO < hoje;
   };
 
+  // Filtro protegido contra arrays nulos
   const filtradas = visitas.filter(v => {
       const t = busca.toLowerCase();
       return (
-          (v.prescritores?.nome && v.prescritores.nome.toLowerCase().includes(t)) ||
-          (v.farmacia_vinculada && v.farmacia_vinculada.toLowerCase().includes(t)) ||
-          (v.produtos_vinculados && v.produtos_vinculados.toLowerCase().includes(t)) ||
-          (v.resumo && v.resumo.toLowerCase().includes(t))
+          (v.prescritores?.nome && String(v.prescritores.nome).toLowerCase().includes(t)) ||
+          (v.farmacia_vinculada && String(v.farmacia_vinculada).toLowerCase().includes(t)) ||
+          (v.produtos_vinculados && String(v.produtos_vinculados).toLowerCase().includes(t)) ||
+          (v.resumo && String(v.resumo).toLowerCase().includes(t))
       );
   });
 
@@ -201,7 +218,7 @@ export default function PipelinePDPage() {
                                           
                                           {/* Cabeçalho do Card */}
                                           <div className="flex justify-between items-start mb-3">
-                                              <span className="text-[9px] font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded uppercase tracking-wider border border-blue-100">{visita.tipo}</span>
+                                              <span className="text-[9px] font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded uppercase tracking-wider border border-blue-100">{visita.tipo || '-'}</span>
                                               <div className="flex gap-2 items-center">
                                                   {telefone && (
                                                       <a 
@@ -236,7 +253,7 @@ export default function PipelinePDPage() {
 
                                               {visita.produtos_vinculados && (
                                                   <div className="flex flex-wrap gap-1 mt-1">
-                                                      {visita.produtos_vinculados.split(';').filter(Boolean).map((p: string, i: number) => (
+                                                      {String(visita.produtos_vinculados).split(';').filter(Boolean).map((p: string, i: number) => (
                                                           <span key={i} className="text-[8px] font-black bg-[#82D14D]/20 text-[#0f392b] px-1.5 py-0.5 rounded border border-[#82D14D]/40 uppercase truncate max-w-full">
                                                               {p}
                                                           </span>
@@ -245,7 +262,7 @@ export default function PipelinePDPage() {
                                               )}
                                           </div>
                                           
-                                          {/* Alerta de Follow-up (Embutido no Card) */}
+                                          {/* Alerta de Follow-up */}
                                           {visita.data_proximo_contato && estagio.id !== 'concluido' && (
                                               <div className={`mt-1 mb-3 flex items-center gap-1 text-[10px] font-bold p-1.5 rounded border ${atrasado ? 'text-red-700 bg-red-100 border-red-200 animate-pulse' : 'text-orange-700 bg-orange-50 border-orange-100'}`}>
                                                   {atrasado ? <AlertCircle size={12}/> : <Clock size={12}/>} 
@@ -273,7 +290,7 @@ export default function PipelinePDPage() {
           </div>
       </div>
 
-      {/* MODAL DE EDIÇÃO DE VISITA */}
+      {/* MODAL DE EDIÇÃO DE VISITA BLINDADO */}
       {modalAberto && visitaEditando && mounted && createPortal(
           <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-200">
               <div className="bg-white w-full max-w-2xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col">
@@ -281,7 +298,7 @@ export default function PipelinePDPage() {
                   <div className="bg-[#1e293b] p-6 flex justify-between items-center text-white shrink-0">
                       <div>
                           <h2 className="text-lg font-black uppercase tracking-wide flex items-center gap-2"><Edit className="text-blue-400" size={20}/> Editar Histórico da Visita</h2>
-                          <p className="text-sm font-medium text-slate-300 mt-1">{visitaEditando.prescritores?.nome}</p>
+                          <p className="text-sm font-medium text-slate-300 mt-1">{visitaEditando.prescritores?.nome || 'Médico'}</p>
                       </div>
                       <button type="button" onClick={() => setModalAberto(false)} className="hover:bg-white/20 p-2 rounded-full transition bg-white/10"><X size={20}/></button>
                   </div>
@@ -314,11 +331,11 @@ export default function PipelinePDPage() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
                           <div>
                               <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Próximo Passo</label>
-                              <input type="text" value={visitaEditando.proximo_passo || ''} onChange={e => setVisitaEditando({...visitaEditando, proximo_passo: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"/>
+                              <input type="text" value={visitaEditando.proximo_passo} onChange={e => setVisitaEditando({...visitaEditando, proximo_passo: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl text-sm font-medium bg-white focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"/>
                           </div>
                           <div>
                               <label className="text-[10px] font-black text-red-600 uppercase tracking-widest mb-1.5 block flex items-center gap-1"><Clock size={12}/> Data do Follow-up</label>
-                              <input type="date" value={visitaEditando.data_proximo_contato || ''} onChange={e => setVisitaEditando({...visitaEditando, data_proximo_contato: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl text-sm font-bold text-red-800 bg-white focus:ring-2 focus:ring-red-500 outline-none shadow-sm cursor-pointer"/>
+                              <input type="date" value={visitaEditando.data_proximo_contato} onChange={e => setVisitaEditando({...visitaEditando, data_proximo_contato: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl text-sm font-bold text-red-800 bg-white focus:ring-2 focus:ring-red-500 outline-none shadow-sm cursor-pointer"/>
                           </div>
                       </div>
 
