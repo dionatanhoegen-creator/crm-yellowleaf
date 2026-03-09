@@ -4,8 +4,16 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
-  Search, Plus, MapPin, Phone, Star, Edit, X, Stethoscope, Save, Building2, CalendarCheck, FileText, ChevronRight, User, Hash, AlignLeft, Activity
+  Search, Plus, MapPin, Phone, Star, Edit, X, Stethoscope, Save, Building2, CalendarCheck, FileText, ChevronRight, User, AlignLeft, Activity, Trash2
 } from 'lucide-react';
+
+const LISTA_ESPECIALIDADES = [
+  "Cardiologia", "Clínico Geral", "Dermatologia", "Endocrinologia", 
+  "Estética", "Gastroenterologia", "Geriatria", "Ginecologia", 
+  "Medicina Esportiva", "Neurologia", "Nutrição", "Nutrição Esportiva", 
+  "Nutrologia", "Odontologia", "Ortopedia", "Pediatria", 
+  "Psiquiatria", "Reumatologia", "Urologia"
+];
 
 export default function PrescritoresPage() {
   const supabase = createClientComponentClient();
@@ -18,6 +26,7 @@ export default function PrescritoresPage() {
   const [modalAberto, setModalAberto] = useState(false);
   const [modalInteracoes, setModalInteracoes] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
   
   // Estados
   const [prescritorAtivo, setPrescritorAtivo] = useState<any>(null);
@@ -39,8 +48,25 @@ export default function PrescritoresPage() {
   const carregarPrescritores = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('prescritores').select('*').order('nome', { ascending: true });
-      if (error) throw error;
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: perfil } = await supabase.from('perfis').select('cargo').eq('id', user.id).single();
+
+      let query = supabase.from('prescritores').select('*').order('nome', { ascending: true });
+      
+      // Visão de Túnel: Se não for admin, vê apenas os seus próprios prescritores
+      if (perfil && perfil.cargo !== 'admin') {
+          query = query.eq('user_id', user.id);
+      }
+
+      const { data, error } = await query;
+      
+      if (error) {
+          console.error("Erro BD:", error);
+          throw error;
+      }
+      
       if (data) setPrescritores(data);
     } catch (error) {
       console.error("Erro ao carregar prescritores:", error);
@@ -73,22 +99,60 @@ export default function PrescritoresPage() {
     setSalvando(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Usuário não logado");
+      if (!user) throw new Error("Sessão expirada. Faça login novamente.");
 
-      const payload = { ...form, user_id: user.id };
+      const payload = { 
+          nome: form.nome, 
+          crm_crn: form.crm_crn, 
+          especialidade: form.especialidade, 
+          telefone: form.telefone, 
+          clinica: form.clinica, 
+          endereco: form.endereco, 
+          bairro: form.bairro, 
+          cidade: form.cidade, 
+          uf: form.uf, 
+          potencial: form.potencial, 
+          perfil_prescritor: form.perfil_prescritor, 
+          observacoes: form.observacoes,
+          user_id: user.id 
+      };
 
+      let result;
       if (form.id) {
-        await supabase.from('prescritores').update(payload).eq('id', form.id);
+        result = await supabase.from('prescritores').update(payload).eq('id', form.id);
       } else {
-        await supabase.from('prescritores').insert([payload]);
+        result = await supabase.from('prescritores').insert([payload]);
       }
+
+      if (result.error) {
+          console.error("Erro ao salvar:", result.error);
+          throw new Error(result.error.message);
+      }
+
       setModalAberto(false);
       carregarPrescritores();
-    } catch (error) {
-      alert("Erro ao salvar prescritor.");
+    } catch (error: any) {
+      alert(`Falha ao salvar: ${error.message}`);
     } finally {
       setSalvando(false);
     }
+  };
+
+  const handleExcluirPrescritor = async () => {
+      if (!confirm(`Tem certeza que deseja EXCLUIR o prescritor ${form.nome}? Todo o histórico será perdido.`)) return;
+      
+      setExcluindo(true);
+      try {
+          const { error } = await supabase.from('prescritores').delete().eq('id', form.id);
+          if (error) throw error;
+          
+          setModalAberto(false);
+          carregarPrescritores();
+      } catch (error: any) {
+          alert(`Erro ao excluir: ${error.message}`);
+      } finally {
+          setExcluindo(false);
+      }
   };
 
   // --- LÓGICA DE INTERAÇÕES (DIÁRIO DE VISITAS) ---
@@ -114,7 +178,7 @@ export default function PrescritoresPage() {
           const { data: { user } } = await supabase.auth.getUser();
           if (!user) return;
 
-          await supabase.from('interacoes').insert([{
+          const { error } = await supabase.from('interacoes').insert([{
               prescritor_id: prescritorAtivo.id,
               user_id: user.id,
               tipo: novaInteracao.tipo,
@@ -122,10 +186,12 @@ export default function PrescritoresPage() {
               proximo_passo: novaInteracao.proximo_passo
           }]);
 
+          if (error) throw error;
+
           setNovaInteracao({ tipo: 'Visita Presencial', resumo: '', proximo_passo: '' });
           abrirInteracoes(prescritorAtivo); // Recarrega a lista
-      } catch (err) {
-          alert("Erro ao registrar visita.");
+      } catch (err: any) {
+          alert(`Erro ao registrar visita: ${err.message}`);
       } finally {
           setSalvando(false);
       }
@@ -180,6 +246,13 @@ export default function PrescritoresPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {filtrados.length === 0 && (
+                <div className="col-span-full text-center p-12 bg-white rounded-3xl border border-slate-100 shadow-sm">
+                    <Stethoscope size={48} className="mx-auto text-slate-300 mb-4"/>
+                    <p className="text-slate-500 font-bold text-lg">Nenhum prescritor encontrado.</p>
+                    <p className="text-slate-400 text-sm mt-1">Clique no botão azul acima para cadastrar o primeiro.</p>
+                </div>
+            )}
             {filtrados.map((p) => (
               <div key={p.id} className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm hover:shadow-md hover:border-blue-200 transition group flex flex-col justify-between h-full relative">
                  <div className="absolute top-4 right-4">
@@ -309,7 +382,7 @@ export default function PrescritoresPage() {
                             </div>
                             <div className="pt-6 mt-6">
                                 <button type="submit" disabled={salvando} className="w-full bg-blue-600 text-white h-14 rounded-xl font-black hover:bg-blue-700 flex justify-center items-center gap-2 shadow-lg shadow-blue-200 transition transform active:scale-95 disabled:opacity-50 text-base">
-                                    {salvando ? <Activity className="animate-spin" size={20}/> : <Save size={20}/>} {salvando ? 'Salvando...' : 'Gravar Histórico'}
+                                    <Save size={20}/> {salvando ? 'Salvando...' : 'Gravar Histórico'}
                                 </button>
                             </div>
                         </form>
@@ -349,10 +422,25 @@ export default function PrescritoresPage() {
                             <label className="text-sm font-bold text-slate-700 mb-1.5 block">CRM / CRN</label>
                             <input type="text" placeholder="Ex: CRM-SP 123456" value={form.crm_crn} onChange={e => setForm({...form, crm_crn: e.target.value})} className="w-full p-3.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-base font-medium text-slate-900 placeholder-slate-400 shadow-sm transition"/>
                         </div>
+                        
+                        {/* LISTA DE ESPECIALIDADES (Datalist) */}
                         <div>
                             <label className="text-sm font-bold text-slate-700 mb-1.5 block">Especialidade Principal</label>
-                            <input type="text" placeholder="Ex: Dermatologia, Nutrologia..." value={form.especialidade} onChange={e => setForm({...form, especialidade: e.target.value})} className="w-full p-3.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-base font-medium text-slate-900 placeholder-slate-400 shadow-sm transition"/>
+                            <input 
+                                list="lista-especialidades"
+                                type="text" 
+                                placeholder="Selecione na lista ou digite..." 
+                                value={form.especialidade} 
+                                onChange={e => setForm({...form, especialidade: e.target.value})} 
+                                className="w-full p-3.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-base font-medium text-slate-900 placeholder-slate-400 shadow-sm transition"
+                            />
+                            <datalist id="lista-especialidades">
+                                {LISTA_ESPECIALIDADES.map(esp => (
+                                    <option key={esp} value={esp} />
+                                ))}
+                            </datalist>
                         </div>
+
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="text-sm font-bold text-slate-700 mb-1.5 block">Curva (Potencial)</label>
@@ -416,10 +504,17 @@ export default function PrescritoresPage() {
                     </div>
 
                     <div className="flex flex-col-reverse md:flex-row gap-4 pt-6 border-t border-slate-200">
-                        <button type="button" onClick={() => setModalAberto(false)} className="w-full md:w-auto px-8 py-4 text-slate-600 font-bold bg-slate-100 hover:bg-slate-200 rounded-xl transition text-base">Cancelar</button>
-                        <button type="submit" disabled={salvando} className="w-full bg-blue-600 text-white py-4 rounded-xl font-black hover:bg-blue-700 shadow-lg shadow-blue-200 transition transform active:scale-95 disabled:opacity-50 text-base flex justify-center items-center gap-2">
-                           {salvando ? <Activity className="animate-spin" size={20}/> : <Save size={20}/>} {salvando ? 'Salvando...' : 'Gravar Ficha do Prescritor'}
-                        </button>
+                        {form.id && (
+                            <button type="button" onClick={handleExcluirPrescritor} disabled={excluindo} className="w-full md:w-auto px-6 py-4 text-red-600 font-bold bg-red-50 hover:bg-red-100 rounded-xl transition text-base flex items-center justify-center gap-2 disabled:opacity-50">
+                                {excluindo ? <Activity className="animate-spin" size={18}/> : <Trash2 size={18}/>} Excluir
+                            </button>
+                        )}
+                        <div className="flex-1 flex flex-col-reverse md:flex-row gap-4 justify-end">
+                            <button type="button" onClick={() => setModalAberto(false)} className="w-full md:w-auto px-8 py-4 text-slate-600 font-bold bg-slate-100 hover:bg-slate-200 rounded-xl transition text-base">Cancelar</button>
+                            <button type="submit" disabled={salvando} className="w-full md:w-auto px-10 bg-blue-600 text-white py-4 rounded-xl font-black hover:bg-blue-700 shadow-lg shadow-blue-200 transition transform active:scale-95 disabled:opacity-50 text-base flex justify-center items-center gap-2">
+                               {salvando ? <Activity className="animate-spin" size={20}/> : <Save size={20}/>} {salvando ? 'Salvando...' : 'Gravar Ficha'}
+                            </button>
+                        </div>
                     </div>
                 </form>
              </div>
