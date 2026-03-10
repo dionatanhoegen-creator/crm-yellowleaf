@@ -9,7 +9,7 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
   LayoutDashboard, Users, Trello, Package, Lock, 
   BarChart3, LogOut, Menu, X, ChevronRight,
-  FileText, Shield, ChevronDown, Stethoscope, Lightbulb, CalendarCheck, Target
+  FileText, Shield, ChevronDown, Stethoscope, Lightbulb, CalendarCheck, Target, TrendingUp
 } from 'lucide-react';
 
 const outfit = Outfit({ subsets: ["latin"] });
@@ -17,7 +17,8 @@ const outfit = Outfit({ subsets: ["latin"] });
 // Definição original dos itens com a sua "chave" de acesso correspondente
 const MENU_BASE = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard, key: 'faturamento' },
-  { name: 'Prospecção', path: '/prospeccao', icon: Target, key: 'pipeline' }, // Aba nova (usa permissão comercial)
+  { name: 'Análise de Vendas', path: '/analise-vendas', icon: TrendingUp, key: 'faturamento' }, // Nova aba de Análise profunda
+  { name: 'Prospecção', path: '/prospeccao', icon: Target, key: 'pipeline' },
   { name: 'Inteligência', path: '/inteligencia', icon: Lightbulb, key: 'inteligencia' },
   { name: 'Clientes', path: '/clientes', icon: Users, key: 'clientes' },
   { name: 'Prescritores', path: '/prescritores', icon: Stethoscope, key: 'prescritores' },
@@ -38,7 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const [isOpen, setIsOpen] = useState(false); 
   const [isProfileOpen, setIsProfileOpen] = useState(false); 
   const [userEmail, setUserEmail] = useState("Carregando..."); 
-  const [menuPermitido, setMenuPermitido] = useState<any[]>([]); // O Menu agora é dinâmico!
+  const [menuPermitido, setMenuPermitido] = useState<any[]>([]);
 
   const isLoginPage = pathname === '/login';
 
@@ -51,15 +52,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       if (user) {
         setUserEmail(user.email || "Usuário");
         
-        // Vai buscar as chavinhas do perfil logado
         const { data: perfil } = await supabase.from('perfis').select('acessos').eq('id', user.id).single();
         
         if (perfil && perfil.acessos) {
-            // Filtra o MENU_BASE: só fica o item que tem a chavinha = true
             const menuFiltrado = MENU_BASE.filter(item => perfil.acessos[item.key] === true);
             setMenuPermitido(menuFiltrado);
         } else {
-            // Se der erro ou não tiver perfil, mostra o básico do básico por segurança
             setMenuPermitido([]);
         }
       } else {
@@ -93,7 +91,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="pt-br">
       <body className={`${outfit.className} bg-slate-50 text-slate-700 overflow-x-hidden`}>
         
-        {/* --- 1. CABEÇALHO FIXO GLOBAL --- */}
+        {/* --- CABEÇALHO FIXO GLOBAL --- */}
         <header className="fixed top-0 left-0 right-0 h-16 bg-white border-b border-slate-200 z-[40] flex items-center px-4 justify-between shadow-sm">
           
           <div className="flex items-center gap-6">
@@ -155,7 +153,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     <div className="px-3 py-2 border-b border-slate-100 mb-1">
                        <p className="text-xs font-bold text-slate-400 uppercase">Minha Conta</p>
                     </div>
-                    {/* Link para a tela de Equipe, se o cara for Admin */}
                     {menuPermitido.some(m => m.key === 'admin') && (
                         <Link href="/equipe" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-lg transition font-medium">
                            <Shield size={16}/> Gestão de Acessos
@@ -173,7 +170,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </header>
 
-        {/* --- 2. MENU LATERAL (DRAWER DINÂMICO) --- */}
+        {/* --- MENU LATERAL (DRAWER DINÂMICO) --- */}
         <div 
           className={`fixed inset-0 bg-black/60 z-[50] backdrop-blur-sm transition-opacity duration-300 ${
             isOpen ? 'opacity-100 visible' : 'opacity-0 invisible pointer-events-none'
@@ -212,7 +209,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               );
             })}
             
-            {/* Aviso se a pessoa não tiver nada liberado */}
             {menuPermitido.length === 0 && (
                 <p className="text-center text-xs text-slate-500 mt-10 px-4">Seu usuário não possui módulos liberados. Fale com o Administrador.</p>
             )}
@@ -228,7 +224,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </aside>
 
-        {/* --- 3. CONTEÚDO PRINCIPAL --- */}
+        {/* --- CONTEÚDO PRINCIPAL --- */}
         <main className="w-full min-h-screen pt-16 bg-slate-50 relative z-0">
           {children}
         </main>

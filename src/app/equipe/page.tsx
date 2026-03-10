@@ -7,16 +7,16 @@ import {
   Shield, User, Search, Activity, Save, X, Lock, CheckCircle2, LayoutDashboard, Trello, Stethoscope, Users, Lightbulb, Package, FileText
 } from 'lucide-react';
 
-// Lista de todos os módulos que existem no sistema (baseado no seu layout.tsx)
+// Lista de todos os módulos que existem no sistema, com descrições atualizadas
 const MODULOS_SISTEMA = [
-  { key: 'pipeline', label: 'Pipeline Comercial', icon: Trello, desc: 'Gestão de funil de propostas e CRM Comercial.' },
+  { key: 'pipeline', label: 'Pipeline & Prospecção', icon: Trello, desc: 'Gestão comercial, match de mailing e fechamento de vendas.' },
   { key: 'prescritores', label: 'Prescritores & Visitas P&D', icon: Stethoscope, desc: 'Gestão de médicos, diário de visitas e Kanban de P&D.' },
   { key: 'inteligencia', label: 'Inteligência de Mercado', icon: Lightbulb, desc: 'Deep Search e histórico de compras de farmácias.' },
+  { key: 'faturamento', label: 'Dashboards Financeiros', icon: LayoutDashboard, desc: 'Painel inicial de receitas, comissões e Análise de Vendas (Drill-Down).' },
   { key: 'clientes', label: 'Base de Clientes', icon: Users, desc: 'Visualização da carteira e ERP.' },
   { key: 'produtos', label: 'Produtos e Preços', icon: Package, desc: 'Tabela completa de ativos.' },
   { key: 'exclusividades', label: 'Gestão de Exclusividades', icon: Lock, desc: 'Bloqueios e regras regionais.' },
-  { key: 'faturamento', label: 'Dashboard & Faturamento', icon: LayoutDashboard, desc: 'Métricas financeiras e painel inicial.' },
-  { key: 'relatorios', label: 'Relatórios Gerais', icon: FileText, desc: 'Extração de dados gerenciais.' },
+  { key: 'relatorios', label: 'Relatórios Gerais', icon: FileText, desc: 'Extração de dados gerenciais em PDF/Excel.' },
   { key: 'admin', label: 'Acesso Administrador', icon: Shield, desc: 'Controle total de acessos e configurações do sistema.' }
 ];
 
@@ -54,7 +54,6 @@ export default function EquipePage() {
 
   const abrirModalAcessos = (user: any) => {
       setUsuarioEditando(user);
-      // Puxa os acessos atuais do usuário ou cria um objeto vazio se ele for novo
       setAcessosForm(user.acessos || {});
       setModalAberto(true);
   };
