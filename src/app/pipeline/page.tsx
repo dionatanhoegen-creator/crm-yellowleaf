@@ -271,20 +271,41 @@ export default function PipelinePage() {
   };
 
   const continuarBuscaCNPJ = async (cnpjLimpo: string) => {
-    // CORREÇÃO AQUI: Verifica `cnpj` e `documento`
+    
+    // --- BUSCA PROFUNDA (DEEP SEARCH) NO ERP ---
     const clienteNaBase = baseClientesExterna.find(c => {
-        const cnpjBase = String(c.cnpj || c.documento || '').replace(/\D/g, '');
-        return cnpjBase === cnpjLimpo;
+        // Tenta achar pelas chaves comuns
+        const cnpjDireto = String(c.cnpj || c.CNPJ || c.documento || c.Documento || '').replace(/\D/g, '');
+        if (cnpjDireto === cnpjLimpo) return true;
+
+        // Se falhar, varre TODAS as propriedades do objeto daquela linha do Excel
+        return Object.values(c).some(val => {
+            if (val && (typeof val === 'string' || typeof val === 'number')) {
+                return String(val).replace(/\D/g, '') === cnpjLimpo;
+            }
+            return false;
+        });
     });
 
     if (clienteNaBase) {
+        // Normaliza as chaves do objeto para minúsculas para não dar erro de leitura
+        const chavesERP = Object.keys(clienteNaBase).reduce((acc, key) => {
+            acc[key.toLowerCase().trim()] = clienteNaBase[key];
+            return acc;
+        }, {} as any);
+
+        const isBloqueado = chavesERP.bloqueado === true || String(chavesERP.bloqueado).toLowerCase() === 'sim';
+        const motivoBloqueio = chavesERP.motivobloqueio || chavesERP.motivo || 'Verifique com o financeiro.';
+        const vendedorERP = chavesERP.vendedor || chavesERP.consultor || chavesERP.representante || '';
+        const nomeFantasiaOuRazao = chavesERP.fantasia || chavesERP['nome fantasia'] || chavesERP.razaosocial || chavesERP['razão social'] || 'Cliente do ERP';
+
         // Bloqueio 1: Cliente Inadimplente/Bloqueado
-        if (clienteNaBase.bloqueado) {
+        if (isBloqueado) {
             setBlockModal({
                 open: true,
                 title: 'CLIENTE BLOQUEADO',
-                message: 'Este CNPJ possui restrições administrativas no ERP.',
-                motivo: clienteNaBase.motivoBloqueio || 'Entre em contato com o financeiro.'
+                message: 'Este CNPJ possui restrições administrativas no ERP Oficial.',
+                motivo: motivoBloqueio
             });
             setFormData(prev => ({ ...prev, cnpj: '' }));
             setLoadingCNPJ(false);
@@ -292,13 +313,13 @@ export default function PipelinePage() {
         }
 
         // Bloqueio 2: Carteira Fechada
-        if (clienteNaBase.vendedor && clienteNaBase.vendedor.trim() !== "") {
-            if (usuarioLogado?.cargo !== 'admin' && clienteNaBase.vendedor.toLowerCase() !== usuarioLogado?.nome?.toLowerCase()) {
+        if (vendedorERP && String(vendedorERP).trim() !== "") {
+            if (usuarioLogado?.cargo !== 'admin' && String(vendedorERP).toLowerCase().trim() !== String(usuarioLogado?.nome || '').toLowerCase().trim()) {
                 setBlockModal({
                     open: true,
                     title: 'CARTEIRA DEFINIDA',
                     message: 'Este cliente já pertence à carteira de outro representante.',
-                    motivo: `Carteira exclusiva de: ${clienteNaBase.vendedor}`
+                    motivo: `Carteira exclusiva de: ${vendedorERP}`
                 });
                 setFormData(prev => ({ ...prev, cnpj: '' }));
                 setLoadingCNPJ(false);
@@ -306,13 +327,13 @@ export default function PipelinePage() {
             }
         }
 
-        // ALERTA 3: É cliente ativo e não tem bloqueios
+        // ALERTA 3: É cliente ativo e não tem bloqueios (Exibe Modal Amarelo)
         setConfirmModal({
             open: true,
-            message: `ATENÇÃO: A farmácia "${clienteNaBase.fantasia || clienteNaBase.razao_social || 'N/A'}" JÁ ESTÁ CADASTRADA no ERP Oficial como cliente ativo. Deseja criar uma nova proposta (Upsell) para ele?`,
+            message: `ATENÇÃO: A farmácia "${nomeFantasiaOuRazao.toUpperCase()}" JÁ ESTÁ CADASTRADA no ERP Oficial como cliente ativo. Deseja criar uma nova proposta (Upsell) para ela?`,
             onConfirm: () => {
                 setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
-                preencherDadosAPI(cnpjLimpo, clienteNaBase);
+                preencherDadosAPI(cnpjLimpo, chavesERP);
             },
             onCancel: () => {
                 setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
@@ -323,32 +344,32 @@ export default function PipelinePage() {
         return;
     }
 
-    // Se não encontrou no ERP, segue normal
+    // Se não encontrou no ERP, busca direto da Receita Federal
     preencherDadosAPI(cnpjLimpo, null);
   };
 
-  const preencherDadosAPI = async (cnpjLimpo: string, clienteERP: any) => {
+  const preencherDadosAPI = async (cnpjLimpo: string, chavesERP: any) => {
     try {
       const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`);
       if (res.ok) {
           const data = await res.json();
           setFormData(prev => ({ 
             ...prev, 
-            nome_cliente: (data.nome_fantasia || data.razao_social || clienteERP?.razao_social || '').toUpperCase(),
-            cidade_exclusividade: (data.municipio || clienteERP?.cidade || '').toUpperCase(),
-            uf_exclusividade: (data.uf || clienteERP?.uf || '').toUpperCase(),
-            telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : (clienteERP?.telefone || prev.telefone)
+            nome_cliente: (data.nome_fantasia || data.razao_social || chavesERP?.razaosocial || '').toUpperCase(),
+            cidade_exclusividade: (data.municipio || chavesERP?.cidade || '').toUpperCase(),
+            uf_exclusividade: (data.uf || chavesERP?.uf || '').toUpperCase(),
+            telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : (chavesERP?.telefone || prev.telefone)
           }));
       }
     } catch (e) {
-       // Se a API Brasil falhar, usa os dados do ERP se existirem
-       if (clienteERP) {
+       // Se a API Brasil falhar (offline), usa os dados do ERP se existirem
+       if (chavesERP) {
           setFormData(prev => ({
              ...prev,
-             nome_cliente: (clienteERP.razao_social || clienteERP.fantasia || '').toUpperCase(),
-             cidade_exclusividade: (clienteERP.cidade || '').toUpperCase(),
-             uf_exclusividade: (clienteERP.uf || '').toUpperCase(),
-             telefone: clienteERP.telefone || prev.telefone
+             nome_cliente: (chavesERP.razaosocial || chavesERP.fantasia || '').toUpperCase(),
+             cidade_exclusividade: (chavesERP.cidade || '').toUpperCase(),
+             uf_exclusividade: (chavesERP.uf || '').toUpperCase(),
+             telefone: chavesERP.telefone || prev.telefone
           }));
        }
     }
