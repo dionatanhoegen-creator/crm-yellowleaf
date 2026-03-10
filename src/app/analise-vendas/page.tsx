@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
   TrendingUp, Users, Package, Search, Calendar, DollarSign, 
-  ArrowRight, Activity, Clock, ShieldCheck, Tag, Filter, BarChart3, AlertCircle, ShoppingCart
+  Activity, Clock, ShieldCheck, Tag, BarChart3, AlertCircle, ShoppingCart
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
@@ -30,38 +30,59 @@ export default function AnaliseVendasPage() {
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
-      let query = supabase.from('pipeline').select('*, perfis(nome)').eq('status', 'fechado').order('created_at', { ascending: true });
-      const [resCRM, resProdutos, resClientes] = await Promise.all([
-          query,
-          fetch(`${API_PRODUTOS_URL}?path=produtos`).then(r => r.json()),
-          fetch(`${API_CLIENTES_URL}?path=clientes`).then(r => r.json())
+      if (!user) return;
+
+      const { data: perfilLogado } = await supabase.from('perfis').select('cargo, nome').eq('id', user.id).single();
+
+      // 1. Busca Vendas do CRM de forma SEGURA (sem joins que podem quebrar)
+      let queryVendas = supabase.from('pipeline').select('*').eq('status', 'fechado').order('created_at', { ascending: true });
+      if (perfilLogado && perfilLogado.cargo !== 'admin') {
+          queryVendas = queryVendas.eq('user_id', user.id);
+      }
+
+      // 2. Busca Perfis separados para evitar erros de Foreign Key
+      const queryPerfis = supabase.from('perfis').select('id, nome');
+
+      // 3. Executa todas as requisições em paralelo
+      const [resCRM, resPerfis, resProdutos, resClientes] = await Promise.all([
+          queryVendas,
+          queryPerfis,
+          fetch(`${API_PRODUTOS_URL}?path=produtos`).then(r => r.json()).catch(() => ({success: false, data: []})),
+          fetch(`${API_CLIENTES_URL}?path=clientes`).then(r => r.json()).catch(() => ({success: false, data: []}))
       ]);
 
       const vendasCRM = resCRM.data || [];
+      const perfis = resPerfis.data || [];
       const listaAPIProdutos = (resProdutos.success && Array.isArray(resProdutos.data)) ? resProdutos.data : [];
       const listaAPIClientes = (resClientes.success && Array.isArray(resClientes.data)) ? resClientes.data : [];
 
-      construirInteligencia(vendasCRM, listaAPIProdutos, listaAPIClientes);
+      // Dicionário de Vendedores para cruzar os IDs rapidamente
+      const mapaVendedores: any = {};
+      perfis.forEach(p => mapaVendedores[p.id] = p.nome);
+
+      construirInteligencia(vendasCRM, listaAPIProdutos, listaAPIClientes, mapaVendedores);
     } catch (e) {
-      console.error(e);
+      console.error("Erro crítico ao carregar dados:", e);
     } finally {
       setLoading(false);
     }
   };
 
-  const construirInteligencia = (vendasCRM: any[], listaAPIProdutos: any[], listaAPIClientes: any[]) => {
+  // Função para limpar ® ™ e acentos, garantindo que o Match seja perfeito
+  const normalizeChave = (str: string) => String(str || '').replace(/[®™]/g, '').trim().toUpperCase();
+
+  const construirInteligencia = (vendasCRM: any[], listaAPIProdutos: any[], listaAPIClientes: any[], mapaVendedores: any) => {
     const mapaClientes: any = {};
     const mapaProdutos: any = {};
 
-    // 1. Injeta TODOS os produtos da API no mapa (Para a lista nunca ficar vazia)
+    // 1. Injeta TODOS os produtos da API no mapa (Para a lista lateral)
     listaAPIProdutos.forEach(p => {
         if (!p.ativo) return;
-        const nome = p.ativo.trim();
-        const key = nome.toUpperCase();
+        const nomeOriginal = p.ativo.trim();
+        const key = normalizeChave(nomeOriginal);
         if (!mapaProdutos[key]) {
             mapaProdutos[key] = {
-                nome_original: nome,
+                nome_original: nomeOriginal,
                 totalVendido: 0,
                 quantidadeVendas: 0,
                 historico: [],
@@ -73,12 +94,12 @@ export default function AnaliseVendasPage() {
 
     // 2. Injeta TODOS os clientes da API no mapa
     listaAPIClientes.forEach(c => {
-        const nome = (c.fantasia || c.nome_fantasia || c.razao_social || '').trim();
-        if (!nome) return;
-        const key = nome.toUpperCase();
+        const nomeOriginal = (c.fantasia || c.nome_fantasia || c.razao_social || '').trim();
+        if (!nomeOriginal) return;
+        const key = normalizeChave(nomeOriginal);
         if (!mapaClientes[key]) {
             mapaClientes[key] = {
-                nome_original: nome,
+                nome_original: nomeOriginal,
                 totalGasto: 0,
                 quantidadeCompras: 0,
                 historico: [],
@@ -90,33 +111,41 @@ export default function AnaliseVendasPage() {
         }
     });
 
-    // 3. Sobrepõe as vendas do CRM (Gera o histórico de Timeline e Drill-down)
+    // 3. Processa as Vendas Fechadas do CRM e alimenta as fichas
     vendasCRM.forEach(venda => {
-        const cKey = (venda.nome_cliente || 'Desconhecido').trim().toUpperCase();
-        const pKey = (venda.produto || 'Sem Produto').trim().toUpperCase();
+        const nomeClienteCRM = venda.nome_cliente || 'Cliente Avulso';
+        const nomeProdutoCRM = venda.produto || 'Produto Diversos';
+        
+        const cKey = normalizeChave(nomeClienteCRM);
+        const pKey = normalizeChave(nomeProdutoCRM);
+        
         const valor = Number(venda.valor) || 0;
         const dataVenda = venda.data_entrada || venda.created_at;
-        const vendedor = venda.perfis?.nome || 'Sistema';
+        const vendedor = mapaVendedores[venda.user_id] || 'Consultor Base';
 
-        // Atualiza Cliente
-        if (!mapaClientes[cKey]) mapaClientes[cKey] = { nome_original: venda.nome_cliente, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set() };
+        // Atualiza o Cliente
+        if (!mapaClientes[cKey]) {
+            mapaClientes[cKey] = { nome_original: nomeClienteCRM, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set(), cidade: '', uf: '', vendedor_erp: '' };
+        }
         
         const isRecompra = mapaClientes[cKey].quantidadeCompras > 0;
         mapaClientes[cKey].totalGasto += valor;
         mapaClientes[cKey].quantidadeCompras += 1;
-        mapaClientes[cKey].produtosComprados.add(venda.produto);
+        mapaClientes[cKey].produtosComprados.add(nomeProdutoCRM);
         mapaClientes[cKey].historico.unshift({
-            id: venda.id, data: dataVenda, produto: venda.produto, valor: valor, vendedor: vendedor, tipo: isRecompra ? 'Recompra' : 'Nova Compra', kg: venda.kg_proposto
+            id: venda.id, data: dataVenda, produto: nomeProdutoCRM, valor: valor, vendedor: vendedor, tipo: isRecompra ? 'Recompra' : 'Nova Compra', kg: venda.kg_proposto
         });
 
-        // Atualiza Produto
-        if (!mapaProdutos[pKey]) mapaProdutos[pKey] = { nome_original: venda.produto, totalVendido: 0, quantidadeVendas: 0, historico: [], clientes: new Set() };
+        // Atualiza o Produto
+        if (!mapaProdutos[pKey]) {
+            mapaProdutos[pKey] = { nome_original: nomeProdutoCRM, totalVendido: 0, quantidadeVendas: 0, historico: [], clientes: new Set(), preco_base: 0 };
+        }
         
         mapaProdutos[pKey].totalVendido += valor;
         mapaProdutos[pKey].quantidadeVendas += 1;
-        mapaProdutos[pKey].clientes.add(venda.nome_cliente);
+        mapaProdutos[pKey].clientes.add(nomeClienteCRM);
         mapaProdutos[pKey].historico.unshift({
-            id: venda.id, data: dataVenda, cliente: venda.nome_cliente, valor: valor, vendedor: vendedor, kg: venda.kg_proposto
+            id: venda.id, data: dataVenda, cliente: nomeClienteCRM, valor: valor, vendedor: vendedor, kg: venda.kg_proposto
         });
     });
 
@@ -127,32 +156,33 @@ export default function AnaliseVendasPage() {
   const formatCurrency = (val: number) => (Number(val)||0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
 
-  // Prepara as listas para a barra lateral ordenando pelos que mais venderam/compraram primeiro, depois ordem alfabética
+  // Listas de navegação filtradas e ordenadas (maior receita no topo)
   const listaDados = visaoAtiva === 'clientes' ? Object.values(dadosClientes) : Object.values(dadosProdutos);
   const listaLateral = listaDados
       .filter((item: any) => item.nome_original.toLowerCase().includes(busca.toLowerCase()))
       .sort((a: any, b: any) => {
           const valA = a.totalGasto || a.totalVendido || 0;
           const valB = b.totalGasto || b.totalVendido || 0;
-          if (valB !== valA) return valB - valA;
-          return a.nome_original.localeCompare(b.nome_original);
+          if (valB !== valA) return valB - valA; // Maior valor primeiro
+          return a.nome_original.localeCompare(b.nome_original); // Desempate alfabético
       })
-      .slice(0, 150); // Mostra os top 150 para não travar o navegador
+      .slice(0, 150); // Limita a 150 para performance extrema
 
   const detalhesItem = itemSelecionado 
       ? (visaoAtiva === 'clientes' ? dadosClientes[itemSelecionado] : dadosProdutos[itemSelecionado]) 
       : null;
 
-  // Monta dados do gráfico se houver histórico
+  // Monta dados para o Gráfico Recharts dinamicamente
   const montarDadosGrafico = (historico: any[]) => {
-      const agregado: any = {};
+      const agregado: Record<string, number> = {};
       historico.forEach(h => {
-          const mesAno = h.data.substring(0, 7); // YYYY-MM
+          if(!h.data) return;
+          const mesAno = h.data.substring(0, 7); // Extrai YYYY-MM
           if(!agregado[mesAno]) agregado[mesAno] = 0;
           agregado[mesAno] += h.valor;
       });
       return Object.keys(agregado).sort().map(k => ({
-          name: k.split('-').reverse().join('/'), // MM/YYYY
+          name: k.split('-').reverse().join('/'), // Formata para MM/YYYY
           valor: agregado[k]
       }));
   };
@@ -167,7 +197,7 @@ export default function AnaliseVendasPage() {
                 <h1 className="text-3xl font-black text-[#0f392b] tracking-tight flex items-center gap-3">
                     <TrendingUp className="text-[#82D14D]" size={32} /> Análise Profunda de Vendas
                 </h1>
-                <p className="text-slate-500 mt-1 font-medium">Drill-down completo do histórico de compras do ERP integrado ao CRM.</p>
+                <p className="text-slate-500 mt-1 font-medium">Drill-down das propostas ganhas no CRM cruzadas com o ERP.</p>
             </div>
             <div className="bg-white px-5 py-2.5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
                 <div className="flex -space-x-2">
@@ -180,7 +210,7 @@ export default function AnaliseVendasPage() {
 
         <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-180px)]">
             
-            {/* BARRA LATERAL (LISTA) */}
+            {/* BARRA LATERAL */}
             <div className="lg:w-[400px] bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden shrink-0">
                 <div className="p-5 border-b border-slate-100 bg-slate-50/80">
                     <div className="flex bg-slate-200/70 p-1 rounded-xl mb-4">
@@ -205,10 +235,10 @@ export default function AnaliseVendasPage() {
                             <span className="text-sm font-bold animate-pulse">Sincronizando Data Lake...</span>
                         </div>
                     ) : listaLateral.length === 0 ? (
-                        <p className="text-center text-slate-400 text-sm font-medium p-10">Nenhum {visaoAtiva} encontrado.</p>
+                        <p className="text-center text-slate-400 text-sm font-medium p-10">Nenhum dado encontrado.</p>
                     ) : (
                         listaLateral.map((item: any) => {
-                            const chave = item.nome_original.toUpperCase();
+                            const chave = normalizeChave(item.nome_original);
                             const isSelected = itemSelecionado === chave;
                             const valorStr = formatCurrency(item.totalGasto || item.totalVendido);
                             const qtd = item.quantidadeCompras || item.quantidadeVendas;
@@ -236,7 +266,7 @@ export default function AnaliseVendasPage() {
                 </div>
             </div>
 
-            {/* PAINEL PRINCIPAL (DETALHES) */}
+            {/* PAINEL PRINCIPAL (FICHA / DRILL-DOWN) */}
             <div className="flex-1 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
                 {!detalhesItem ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-center p-10 bg-slate-50/50">
@@ -279,7 +309,7 @@ export default function AnaliseVendasPage() {
                                         <p className="text-2xl font-black text-white">{detalhesItem.quantidadeCompras || detalhesItem.quantidadeVendas} <span className="text-sm text-white/50 font-medium">transações</span></p>
                                     </div>
                                     <div className="bg-white/10 p-4 rounded-2xl border border-white/10 backdrop-blur-sm">
-                                        <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><Tag size={12}/> {visaoAtiva === 'clientes' ? 'Ativos Testados' : 'Carteira de Clientes'}</p>
+                                        <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><Tag size={12}/> {visaoAtiva === 'clientes' ? 'Ativos Diferentes' : 'Clientes Únicos'}</p>
                                         <p className="text-2xl font-black text-white">
                                             {visaoAtiva === 'clientes' ? detalhesItem.produtosComprados.size : detalhesItem.clientes.size} <span className="text-sm text-white/50 font-medium">únicos</span>
                                         </p>
@@ -296,7 +326,7 @@ export default function AnaliseVendasPage() {
                             </div>
                         </div>
 
-                        {/* CORPO INFERIOR: GRÁFICO + TIMELINE */}
+                        {/* GRÁFICO E TIMELINE */}
                         <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50 p-8">
                             
                             {detalhesItem.historico.length === 0 ? (
@@ -305,7 +335,7 @@ export default function AnaliseVendasPage() {
                                         <Clock size={24}/>
                                     </div>
                                     <h3 className="text-lg font-bold text-slate-700 mb-2">Aguardando a Primeira Venda</h3>
-                                    <p className="text-slate-500 text-sm">Este {visaoAtiva === 'clientes' ? 'cliente' : 'produto'} consta na nossa base oficial do ERP, mas ainda não possui propostas fechadas registradas através do CRM.</p>
+                                    <p className="text-slate-500 text-sm">Este {visaoAtiva === 'clientes' ? 'cliente' : 'produto'} consta na nossa base oficial do ERP, mas ainda não possui propostas fechadas através do seu Pipeline no CRM.</p>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
@@ -335,11 +365,11 @@ export default function AnaliseVendasPage() {
                                     {/* TIMELINE */}
                                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col max-h-[400px]">
                                         <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2 shrink-0">
-                                            <Clock className="text-blue-600"/> Histórico Detalhado (Timeline)
+                                            <Clock className="text-blue-600"/> Histórico de {visaoAtiva === 'clientes' ? 'Compras' : 'Vendas'}
                                         </h3>
                                         <div className="space-y-4 overflow-y-auto custom-scrollbar pr-2 flex-1 relative before:absolute before:inset-0 before:ml-[19px] before:w-0.5 before:bg-slate-200">
-                                            {detalhesItem.historico.map((hist: any) => (
-                                                <div key={hist.id} className="relative flex items-start gap-4 group">
+                                            {detalhesItem.historico.map((hist: any, i: number) => (
+                                                <div key={`${hist.id}-${i}`} className="relative flex items-start gap-4 group">
                                                     <div className="w-10 h-10 rounded-full border-4 border-white bg-blue-100 text-blue-600 shadow-sm flex items-center justify-center shrink-0 z-10 group-hover:bg-blue-600 group-hover:text-white transition-colors">
                                                         <ShieldCheck size={16}/>
                                                     </div>
