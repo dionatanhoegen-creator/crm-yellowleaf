@@ -114,7 +114,6 @@ export default function PipelinePage() {
   const inicializarDados = async () => {
     setLoading(true);
     
-    // 1. PRIMEIRO: Descobre quem é o utilizador logado e qual o seu cargo
     const { data: { user } } = await supabase.auth.getUser();
     let perfilUsuario = null;
     
@@ -124,7 +123,6 @@ export default function PipelinePage() {
         setUsuarioLogado(perfil);
     }
     
-    // 2. DEPOIS: Carrega os dados (passando o perfil para filtrar o pipeline)
     await Promise.all([
         carregarOportunidades(perfilUsuario), 
         carregarProdutosDaAPI(), 
@@ -183,11 +181,9 @@ export default function PipelinePage() {
     setLoadingProdutos(false);
   };
 
-  // --- FILTRO DE TÚNEL DE VISÃO ---
   const carregarOportunidades = async (perfil: any) => {
     let query = supabase.from('pipeline').select('*').order('created_at', { ascending: false });
     
-    // Se não for Admin, só puxa os dados DELE mesmo
     if (perfil && perfil.cargo !== 'admin') {
         query = query.eq('user_id', perfil.id);
     }
@@ -239,7 +235,6 @@ export default function PipelinePage() {
     });
   }, [formData.valor_g_tabela, formData.kg_proposto]);
 
-
   const buscarDadosCNPJ = async () => {
     const cnpjLimpo = formData.cnpj?.replace(/\D/g, '');
     if (cnpjLimpo?.length !== 14) return;
@@ -263,7 +258,7 @@ export default function PipelinePage() {
                     continuarBuscaCNPJ(cnpjLimpo); 
                 },
                 onCancel: () => {
-                    setConfirmModal(prev => ({ ...prev, open: false }));
+                    setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
                     setFormData(prev => ({ ...prev, cnpj: '' })); 
                     setLoadingCNPJ(false);
                 }
@@ -276,17 +271,19 @@ export default function PipelinePage() {
   };
 
   const continuarBuscaCNPJ = async (cnpjLimpo: string) => {
+    // CORREÇÃO AQUI: Verifica `cnpj` e `documento`
     const clienteNaBase = baseClientesExterna.find(c => {
-        const cnpjBase = String(c.cnpj || '').replace(/\D/g, '');
+        const cnpjBase = String(c.cnpj || c.documento || '').replace(/\D/g, '');
         return cnpjBase === cnpjLimpo;
     });
 
     if (clienteNaBase) {
+        // Bloqueio 1: Cliente Inadimplente/Bloqueado
         if (clienteNaBase.bloqueado) {
             setBlockModal({
                 open: true,
                 title: 'CLIENTE BLOQUEADO',
-                message: 'Este CNPJ possui restrições administrativas.',
+                message: 'Este CNPJ possui restrições administrativas no ERP.',
                 motivo: clienteNaBase.motivoBloqueio || 'Entre em contato com o financeiro.'
             });
             setFormData(prev => ({ ...prev, cnpj: '' }));
@@ -294,8 +291,8 @@ export default function PipelinePage() {
             return; 
         }
 
+        // Bloqueio 2: Carteira Fechada
         if (clienteNaBase.vendedor && clienteNaBase.vendedor.trim() !== "") {
-            // Se eu não for admin E o vendedor do sistema não for igual ao meu nome, bloqueia
             if (usuarioLogado?.cargo !== 'admin' && clienteNaBase.vendedor.toLowerCase() !== usuarioLogado?.nome?.toLowerCase()) {
                 setBlockModal({
                     open: true,
@@ -308,21 +305,53 @@ export default function PipelinePage() {
                 return; 
             }
         }
+
+        // ALERTA 3: É cliente ativo e não tem bloqueios
+        setConfirmModal({
+            open: true,
+            message: `ATENÇÃO: A farmácia "${clienteNaBase.fantasia || clienteNaBase.razao_social || 'N/A'}" JÁ ESTÁ CADASTRADA no ERP Oficial como cliente ativo. Deseja criar uma nova proposta (Upsell) para ele?`,
+            onConfirm: () => {
+                setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
+                preencherDadosAPI(cnpjLimpo, clienteNaBase);
+            },
+            onCancel: () => {
+                setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
+                setFormData(prev => ({ ...prev, cnpj: '' })); 
+                setLoadingCNPJ(false);
+            }
+        });
+        return;
     }
 
+    // Se não encontrou no ERP, segue normal
+    preencherDadosAPI(cnpjLimpo, null);
+  };
+
+  const preencherDadosAPI = async (cnpjLimpo: string, clienteERP: any) => {
     try {
       const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`);
-      if (!res.ok) throw new Error("Erro CNPJ");
-      
-      const data = await res.json();
-      setFormData(prev => ({ 
-        ...prev, 
-        nome_cliente: (data.nome_fantasia || data.razao_social || '').toUpperCase(),
-        cidade_exclusividade: (data.municipio || '').toUpperCase(),
-        uf_exclusividade: (data.uf || '').toUpperCase(),
-        telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : prev.telefone
-      }));
-    } catch (e) { }
+      if (res.ok) {
+          const data = await res.json();
+          setFormData(prev => ({ 
+            ...prev, 
+            nome_cliente: (data.nome_fantasia || data.razao_social || clienteERP?.razao_social || '').toUpperCase(),
+            cidade_exclusividade: (data.municipio || clienteERP?.cidade || '').toUpperCase(),
+            uf_exclusividade: (data.uf || clienteERP?.uf || '').toUpperCase(),
+            telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : (clienteERP?.telefone || prev.telefone)
+          }));
+      }
+    } catch (e) {
+       // Se a API Brasil falhar, usa os dados do ERP se existirem
+       if (clienteERP) {
+          setFormData(prev => ({
+             ...prev,
+             nome_cliente: (clienteERP.razao_social || clienteERP.fantasia || '').toUpperCase(),
+             cidade_exclusividade: (clienteERP.cidade || '').toUpperCase(),
+             uf_exclusividade: (clienteERP.uf || '').toUpperCase(),
+             telefone: clienteERP.telefone || prev.telefone
+          }));
+       }
+    }
     
     setLoadingCNPJ(false);
   };
@@ -454,7 +483,8 @@ export default function PipelinePage() {
     const cinzaSuave: [number, number, number] = [243, 244, 246];
     const textoCinza: [number, number, number] = [60, 60, 60];
 
-    try { doc.addImage("/logo.jpg", "JPEG", 20, 12, 50, 20); } catch (e) {}
+    try { doc.addImage("/logo.png", "PNG", 20, 12, 50, 20); } 
+    catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 20, 12, 50, 20); } catch (err) {} }
 
     doc.setFont("helvetica", "bold"); doc.setFontSize(24);
     doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
@@ -615,7 +645,6 @@ export default function PipelinePage() {
     let numeroFinal = formData.numero_proposta;
     
     if (!editingOp) {
-        // --- CORREÇÃO DA SEQUÊNCIA GLOBAL ---
         const { data: maxOp } = await supabase
             .from('pipeline')
             .select('numero_proposta')
@@ -971,7 +1000,7 @@ export default function PipelinePage() {
         </div>, document.body
       )}
 
-      {/* MODAL DUPLICIDADE */}
+      {/* MODAL DUPLICIDADE E ALERTA DE CLIENTE DA BASE */}
       {confirmModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
@@ -979,7 +1008,7 @@ export default function PipelinePage() {
                  <div className="mx-auto w-16 h-16 bg-yellow-50 text-yellow-600 rounded-full flex items-center justify-center mb-6">
                     <AlertTriangle size={32} />
                  </div>
-                 <h2 className="text-xl font-black text-slate-800 mb-3">ATENÇÃO: DUPLICIDADE</h2>
+                 <h2 className="text-xl font-black text-slate-800 mb-3">AVISO IMPORTANTE</h2>
                  <p className="text-slate-500 font-medium leading-relaxed">{confirmModal.message}</p>
               </div>
               <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
