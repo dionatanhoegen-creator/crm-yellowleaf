@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
   TrendingUp, Users, Package, Search, Calendar, DollarSign, 
-  Activity, Clock, ShieldCheck, Tag, BarChart3, AlertCircle, ShoppingCart
+  Activity, Clock, ShieldCheck, Tag, BarChart3, AlertCircle, ShoppingCart, Info
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
@@ -21,6 +21,7 @@ export default function AnaliseVendasPage() {
 
   const [dadosClientes, setDadosClientes] = useState<any>({});
   const [dadosProdutos, setDadosProdutos] = useState<any>({});
+  const [qtdVendasCrm, setQtdVendasCrm] = useState(0);
 
   useEffect(() => {
     inicializarDataLake();
@@ -34,13 +35,13 @@ export default function AnaliseVendasPage() {
 
       const { data: perfilLogado } = await supabase.from('perfis').select('cargo, nome').eq('id', user.id).single();
 
-      // 1. Busca Vendas do CRM de forma SEGURA (sem joins que podem quebrar)
+      // 1. Busca Vendas do CRM de forma SEGURA 
       let queryVendas = supabase.from('pipeline').select('*').eq('status', 'fechado').order('created_at', { ascending: true });
       if (perfilLogado && perfilLogado.cargo !== 'admin') {
           queryVendas = queryVendas.eq('user_id', user.id);
       }
 
-      // 2. Busca Perfis separados para evitar erros de Foreign Key
+      // 2. Busca Perfis separados
       const queryPerfis = supabase.from('perfis').select('id, nome');
 
       // 3. Executa todas as requisições em paralelo
@@ -56,7 +57,8 @@ export default function AnaliseVendasPage() {
       const listaAPIProdutos = (resProdutos.success && Array.isArray(resProdutos.data)) ? resProdutos.data : [];
       const listaAPIClientes = (resClientes.success && Array.isArray(resClientes.data)) ? resClientes.data : [];
 
-      // Dicionário de Vendedores para cruzar os IDs rapidamente
+      setQtdVendasCrm(vendasCRM.length);
+
       const mapaVendedores: any = {};
       perfis.forEach(p => mapaVendedores[p.id] = p.nome);
 
@@ -68,14 +70,22 @@ export default function AnaliseVendasPage() {
     }
   };
 
-  // Função para limpar ® ™ e acentos, garantindo que o Match seja perfeito
-  const normalizeChave = (str: string) => String(str || '').replace(/[®™]/g, '').trim().toUpperCase();
+  // --- O "TRATOR" DE NORMALIZAÇÃO ---
+  // Arranca acentos, espaços, símbolos (® ™), traços, pontos. Deixa só letras e números em maiúsculo.
+  const normalizeChave = (str: string) => {
+      if (!str) return 'DESCONHECIDO';
+      return String(str)
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '') // remove acentos
+          .replace(/[^a-zA-Z0-9]/g, '') // remove TUDO que não for letra ou número
+          .toUpperCase();
+  };
 
   const construirInteligencia = (vendasCRM: any[], listaAPIProdutos: any[], listaAPIClientes: any[], mapaVendedores: any) => {
     const mapaClientes: any = {};
     const mapaProdutos: any = {};
 
-    // 1. Injeta TODOS os produtos da API no mapa (Para a lista lateral)
+    // 1. Injeta TODOS os produtos da API
     listaAPIProdutos.forEach(p => {
         if (!p.ativo) return;
         const nomeOriginal = p.ativo.trim();
@@ -92,7 +102,7 @@ export default function AnaliseVendasPage() {
         }
     });
 
-    // 2. Injeta TODOS os clientes da API no mapa
+    // 2. Injeta TODOS os clientes da API
     listaAPIClientes.forEach(c => {
         const nomeOriginal = (c.fantasia || c.nome_fantasia || c.razao_social || '').trim();
         if (!nomeOriginal) return;
@@ -111,7 +121,7 @@ export default function AnaliseVendasPage() {
         }
     });
 
-    // 3. Processa as Vendas Fechadas do CRM e alimenta as fichas
+    // 3. Processa Vendas Fechadas
     vendasCRM.forEach(venda => {
         const nomeClienteCRM = venda.nome_cliente || 'Cliente Avulso';
         const nomeProdutoCRM = venda.produto || 'Produto Diversos';
@@ -123,7 +133,7 @@ export default function AnaliseVendasPage() {
         const dataVenda = venda.data_entrada || venda.created_at;
         const vendedor = mapaVendedores[venda.user_id] || 'Consultor Base';
 
-        // Atualiza o Cliente
+        // Atualiza Cliente
         if (!mapaClientes[cKey]) {
             mapaClientes[cKey] = { nome_original: nomeClienteCRM, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set(), cidade: '', uf: '', vendedor_erp: '' };
         }
@@ -136,7 +146,7 @@ export default function AnaliseVendasPage() {
             id: venda.id, data: dataVenda, produto: nomeProdutoCRM, valor: valor, vendedor: vendedor, tipo: isRecompra ? 'Recompra' : 'Nova Compra', kg: venda.kg_proposto
         });
 
-        // Atualiza o Produto
+        // Atualiza Produto
         if (!mapaProdutos[pKey]) {
             mapaProdutos[pKey] = { nome_original: nomeProdutoCRM, totalVendido: 0, quantidadeVendas: 0, historico: [], clientes: new Set(), preco_base: 0 };
         }
@@ -156,33 +166,31 @@ export default function AnaliseVendasPage() {
   const formatCurrency = (val: number) => (Number(val)||0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
 
-  // Listas de navegação filtradas e ordenadas (maior receita no topo)
   const listaDados = visaoAtiva === 'clientes' ? Object.values(dadosClientes) : Object.values(dadosProdutos);
   const listaLateral = listaDados
       .filter((item: any) => item.nome_original.toLowerCase().includes(busca.toLowerCase()))
       .sort((a: any, b: any) => {
           const valA = a.totalGasto || a.totalVendido || 0;
           const valB = b.totalGasto || b.totalVendido || 0;
-          if (valB !== valA) return valB - valA; // Maior valor primeiro
-          return a.nome_original.localeCompare(b.nome_original); // Desempate alfabético
+          if (valB !== valA) return valB - valA; 
+          return a.nome_original.localeCompare(b.nome_original);
       })
-      .slice(0, 150); // Limita a 150 para performance extrema
+      .slice(0, 150); 
 
   const detalhesItem = itemSelecionado 
       ? (visaoAtiva === 'clientes' ? dadosClientes[itemSelecionado] : dadosProdutos[itemSelecionado]) 
       : null;
 
-  // Monta dados para o Gráfico Recharts dinamicamente
   const montarDadosGrafico = (historico: any[]) => {
       const agregado: Record<string, number> = {};
       historico.forEach(h => {
           if(!h.data) return;
-          const mesAno = h.data.substring(0, 7); // Extrai YYYY-MM
+          const mesAno = h.data.substring(0, 7); 
           if(!agregado[mesAno]) agregado[mesAno] = 0;
           agregado[mesAno] += h.valor;
       });
       return Object.keys(agregado).sort().map(k => ({
-          name: k.split('-').reverse().join('/'), // Formata para MM/YYYY
+          name: k.split('-').reverse().join('/'), 
           valor: agregado[k]
       }));
   };
@@ -199,12 +207,12 @@ export default function AnaliseVendasPage() {
                 </h1>
                 <p className="text-slate-500 mt-1 font-medium">Drill-down das propostas ganhas no CRM cruzadas com o ERP.</p>
             </div>
-            <div className="bg-white px-5 py-2.5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
-                <div className="flex -space-x-2">
-                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center border-2 border-white text-blue-600"><Package size={14}/></div>
-                    <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center border-2 border-white text-emerald-600"><Users size={14}/></div>
+            
+            <div className="flex gap-3">
+                <div className="bg-white px-5 py-2.5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3" title="Quantidade de propostas com status FECHADO registradas na aba Pipeline.">
+                    <Info size={16} className="text-blue-500"/>
+                    <span className="text-sm font-bold text-slate-600">Vendas no CRM: <strong className="text-blue-600 text-lg">{qtdVendasCrm}</strong></span>
                 </div>
-                <span className="text-sm font-bold text-slate-600">{Object.keys(dadosProdutos).length} Produtos mapeados</span>
             </div>
         </div>
 
@@ -335,7 +343,7 @@ export default function AnaliseVendasPage() {
                                         <Clock size={24}/>
                                     </div>
                                     <h3 className="text-lg font-bold text-slate-700 mb-2">Aguardando a Primeira Venda</h3>
-                                    <p className="text-slate-500 text-sm">Este {visaoAtiva === 'clientes' ? 'cliente' : 'produto'} consta na nossa base oficial do ERP, mas ainda não possui propostas fechadas através do seu Pipeline no CRM.</p>
+                                    <p className="text-slate-500 text-sm">Nenhuma proposta com o status <strong className="text-slate-700">"FECHADO"</strong> foi encontrada para este {visaoAtiva === 'clientes' ? 'cliente' : 'produto'} no Pipeline do CRM.</p>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
