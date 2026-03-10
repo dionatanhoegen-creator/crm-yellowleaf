@@ -274,11 +274,9 @@ export default function PipelinePage() {
     
     // --- BUSCA PROFUNDA (DEEP SEARCH) NO ERP ---
     const clienteNaBase = baseClientesExterna.find(c => {
-        // Tenta achar pelas chaves comuns
         const cnpjDireto = String(c.cnpj || c.CNPJ || c.documento || c.Documento || '').replace(/\D/g, '');
         if (cnpjDireto === cnpjLimpo) return true;
 
-        // Se falhar, varre TODAS as propriedades do objeto daquela linha do Excel
         return Object.values(c).some(val => {
             if (val && (typeof val === 'string' || typeof val === 'number')) {
                 return String(val).replace(/\D/g, '') === cnpjLimpo;
@@ -288,7 +286,6 @@ export default function PipelinePage() {
     });
 
     if (clienteNaBase) {
-        // Normaliza as chaves do objeto para minúsculas para não dar erro de leitura
         const chavesERP = Object.keys(clienteNaBase).reduce((acc, key) => {
             acc[key.toLowerCase().trim()] = clienteNaBase[key];
             return acc;
@@ -303,23 +300,36 @@ export default function PipelinePage() {
         if (isBloqueado) {
             setBlockModal({
                 open: true,
-                title: 'CLIENTE BLOQUEADO',
-                message: 'Este CNPJ possui restrições administrativas no ERP Oficial.',
-                motivo: motivoBloqueio
+                title: 'ACESSO NEGADO',
+                message: `A farmácia "${nomeFantasiaOuRazao.toUpperCase()}" JÁ ESTÁ CADASTRADA no ERP.`,
+                motivo: `Restrição Financeira/Administrativa: ${motivoBloqueio}`
             });
             setFormData(prev => ({ ...prev, cnpj: '' }));
             setLoadingCNPJ(false);
             return; 
         }
 
-        // Bloqueio 2: Carteira Fechada
+        // Bloqueio 2: Carteira Fechada (Redirecionamento para o bloqueio vermelho)
         if (vendedorERP && String(vendedorERP).trim() !== "") {
             if (usuarioLogado?.cargo !== 'admin' && String(vendedorERP).toLowerCase().trim() !== String(usuarioLogado?.nome || '').toLowerCase().trim()) {
                 setBlockModal({
                     open: true,
-                    title: 'CARTEIRA DEFINIDA',
-                    message: 'Este cliente já pertence à carteira de outro representante.',
-                    motivo: `Carteira exclusiva de: ${vendedorERP}`
+                    title: 'ACESSO NEGADO',
+                    message: `A farmácia "${nomeFantasiaOuRazao.toUpperCase()}" JÁ ESTÁ CADASTRADA.`,
+                    motivo: `Pertence ao vendedor: ${vendedorERP}. Não é possível avançar pois você não é o vendedor desta carteira.`
+                });
+                setFormData(prev => ({ ...prev, cnpj: '' }));
+                setLoadingCNPJ(false);
+                return; 
+            }
+        } else {
+             // Se não tiver vendedor listado no ERP, bloqueia por segurança e pede para verificar
+             if (usuarioLogado?.cargo !== 'admin') {
+                setBlockModal({
+                    open: true,
+                    title: 'ACESSO NEGADO',
+                    message: `A farmácia "${nomeFantasiaOuRazao.toUpperCase()}" JÁ ESTÁ CADASTRADA.`,
+                    motivo: `Não é possível avançar pois a carteira deste cliente não está vinculada a você. Verifique no ERP.`
                 });
                 setFormData(prev => ({ ...prev, cnpj: '' }));
                 setLoadingCNPJ(false);
@@ -327,20 +337,9 @@ export default function PipelinePage() {
             }
         }
 
-        // ALERTA 3: É cliente ativo e não tem bloqueios (Exibe Modal Amarelo)
-        setConfirmModal({
-            open: true,
-            message: `ATENÇÃO: A farmácia "${nomeFantasiaOuRazao.toUpperCase()}" JÁ ESTÁ CADASTRADA no ERP Oficial como cliente ativo. Deseja criar uma nova proposta (Upsell) para ela?`,
-            onConfirm: () => {
-                setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
-                preencherDadosAPI(cnpjLimpo, chavesERP);
-            },
-            onCancel: () => {
-                setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
-                setFormData(prev => ({ ...prev, cnpj: '' })); 
-                setLoadingCNPJ(false);
-            }
-        });
+        // Só chega aqui se for ADMIN ou se for o próprio VENDEDOR DA CONTA.
+        // Nesse caso, o sistema preenche os dados e deixa criar a proposta sem alerta.
+        preencherDadosAPI(cnpjLimpo, chavesERP);
         return;
     }
 
@@ -362,7 +361,6 @@ export default function PipelinePage() {
           }));
       }
     } catch (e) {
-       // Se a API Brasil falhar (offline), usa os dados do ERP se existirem
        if (chavesERP) {
           setFormData(prev => ({
              ...prev,
@@ -1021,7 +1019,7 @@ export default function PipelinePage() {
         </div>, document.body
       )}
 
-      {/* MODAL DUPLICIDADE E ALERTA DE CLIENTE DA BASE */}
+      {/* MODAL ALERTA GERAL */}
       {confirmModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
@@ -1044,7 +1042,7 @@ export default function PipelinePage() {
         </div>, document.body
       )}
 
-      {/* MODAL BLOQUEIO */}
+      {/* MODAL BLOQUEIO TOTAL E IRREVERSÍVEL (VERMELHO) */}
       {blockModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in duration-300">
            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
@@ -1053,15 +1051,14 @@ export default function PipelinePage() {
                  <h2 className="text-2xl font-black uppercase tracking-tight text-center">{blockModal.title}</h2>
               </div>
               <div className="p-8 text-center">
-                 <p className="text-slate-600 font-bold text-lg mb-2">{blockModal.message}</p>
+                 <p className="text-slate-800 font-bold text-lg mb-2">{blockModal.message}</p>
                  <div className="bg-red-50 border border-red-100 rounded-xl p-4 mt-4">
-                    <p className="text-xs text-red-500 font-bold uppercase tracking-wider mb-1">Motivo do Bloqueio</p>
-                    <p className="text-red-800 font-bold text-sm">{blockModal.motivo}</p>
+                    <p className="text-red-600 font-bold text-sm leading-relaxed">{blockModal.motivo}</p>
                  </div>
               </div>
               <div className="p-4 bg-slate-50 border-t border-slate-100">
                  <button onClick={() => setBlockModal({ ...blockModal, open: false })} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-xl transition transform active:scale-[0.98]">
-                    ENTENDIDO, FECHAR AVISO
+                    ENTENDIDO, FECHAR
                  </button>
               </div>
            </div>
