@@ -52,7 +52,6 @@ export default function PipelinePage() {
   const [loadingProdutos, setLoadingProdutos] = useState(true);
   const [buscaTermo, setBuscaTermo] = useState(""); 
   
-  // --- ESTADOS DO USUÁRIO LOGADO ---
   const [usuarioLogado, setUsuarioLogado] = useState<any>(null);
   
   // MODAIS
@@ -69,16 +68,8 @@ export default function PipelinePage() {
   const [novaNotaInput, setNovaNotaInput] = useState("");
 
   const [reportColumns, setReportColumns] = useState({
-      numero: true,
-      cliente: true,
-      produto: true,
-      estagio: true,
-      valor: true,
-      entrada: true,
-      canal: true,
-      cidade: false,
-      uf: false,
-      contato: false
+      numero: true, cliente: true, produto: true, estagio: true,
+      valor: true, entrada: true, canal: true, cidade: false, uf: false, contato: false
   });
 
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
@@ -92,18 +83,11 @@ export default function PipelinePage() {
 
   const [formData, setFormData] = useState({
     cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '',
-    aplicacao: '', valor: '', 
-    data_entrada: getLocalData(), 
-    data_lembrete: '', 
-    canal_contato: 'WhatsApp',
-    observacoes: '',
-    observacoes_proposta: '', 
-    status: 'prospeccao',
-    kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45',
+    aplicacao: '', valor: '', data_entrada: getLocalData(), data_lembrete: '', 
+    canal_contato: 'WhatsApp', observacoes: '', observacoes_proposta: '', 
+    status: 'prospeccao', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45',
     peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', 
-    cidade_exclusividade: '', uf_exclusividade: '', 
-    valor_g_tabela: '0',
-    numero_proposta: 0
+    cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0
   });
 
   useEffect(() => { 
@@ -113,7 +97,6 @@ export default function PipelinePage() {
 
   const inicializarDados = async () => {
     setLoading(true);
-    
     const { data: { user } } = await supabase.auth.getUser();
     let perfilUsuario = null;
     
@@ -137,16 +120,11 @@ export default function PipelinePage() {
     if (typeof valor === 'number') return valor;
     if (!valor) return 0;
     let str = String(valor).replace('R$', '').trim();
-    if (str.includes(',')) {
-        str = str.replace(/\./g, '').replace(',', '.');
-    }
+    if (str.includes(',')) str = str.replace(/\./g, '').replace(',', '.');
     return parseFloat(str) || 0;
   };
 
-  const formatPropostaId = (id: any) => {
-      if (!id) return '';
-      return String(id).padStart(5, '0');
-  };
+  const formatPropostaId = (id: any) => String(id).padStart(5, '0');
 
   const carregarExclusividades = async () => {
     const { data } = await supabase.from('exclusividades').select('*');
@@ -157,9 +135,7 @@ export default function PipelinePage() {
     try {
         const res = await fetch(`${API_CLIENTES_URL}?path=clientes`);
         const json = await res.json();
-        if (json.success && Array.isArray(json.data)) {
-            setBaseClientesExterna(json.data);
-        }
+        if (json.success && Array.isArray(json.data)) setBaseClientesExterna(json.data);
     } catch (e) { console.error("Erro base externa:", e); }
   };
 
@@ -168,7 +144,6 @@ export default function PipelinePage() {
     try {
         const res = await fetch(`${API_PRODUTOS_URL}?path=produtos`);
         const json = await res.json();
-        
         if (json.success && Array.isArray(json.data)) {
             const produtosLimpos = json.data.map((p: any) => ({
                 ativo: p.ativo ? p.ativo.trim() : 'Sem Nome',
@@ -177,17 +152,13 @@ export default function PipelinePage() {
             }));
             setProdutosApi(produtosLimpos.sort((a: any, b: any) => a.ativo.localeCompare(b.ativo)));
         }
-    } catch (e) { console.error("Erro API Produtos:", e); }
+    } catch (e) {}
     setLoadingProdutos(false);
   };
 
   const carregarOportunidades = async (perfil: any) => {
     let query = supabase.from('pipeline').select('*').order('created_at', { ascending: false });
-    
-    if (perfil && perfil.cargo !== 'admin') {
-        query = query.eq('user_id', perfil.id);
-    }
-    
+    if (perfil && perfil.cargo !== 'admin') query = query.eq('user_id', perfil.id);
     const { data } = await query;
     setOportunidades(data || []);
   };
@@ -196,17 +167,12 @@ export default function PipelinePage() {
     const nomeProduto = prod.ativo;
     const ufAtual = (formData.uf_exclusividade || '').toUpperCase().trim();
     const cidadeAtual = (formData.cidade_exclusividade || '').toUpperCase().trim();
-
     if (!ufAtual) return true;
-
-    const bloqueado = exclusividades.some(ex => 
-      ex.produto === nomeProduto && 
-      ex.uf === ufAtual && 
+    return !exclusividades.some(ex => 
+      ex.produto === nomeProduto && ex.uf === ufAtual && 
       (ex.cidade === cidadeAtual || ex.cidade === 'TODAS') &&
       ex.nome_cliente !== formData.nome_cliente
     );
-
-    return !bloqueado; 
   });
 
   useEffect(() => {
@@ -228,11 +194,7 @@ export default function PipelinePage() {
     const precoG = parseMoney(formData.valor_g_tabela);
     const kg = parseMoney(formData.kg_proposto);
     const vTotal = (precoG * 1000 * kg).toFixed(2); 
-
-    setFormData(prev => {
-        if (prev.valor === vTotal) return prev; 
-        return { ...prev, valor: vTotal };
-    });
+    setFormData(prev => prev.valor === vTotal ? prev : { ...prev, valor: vTotal });
   }, [formData.valor_g_tabela, formData.kg_proposto]);
 
   const buscarDadosCNPJ = async () => {
@@ -242,14 +204,9 @@ export default function PipelinePage() {
     setLoadingCNPJ(true);
 
     if (!editingOp) {
-        const propostaExistente = oportunidades.find(op => {
-            const opCnpj = op.cnpj?.replace(/\D/g, '') || '';
-            return opCnpj === cnpjLimpo;
-        });
-
+        const propostaExistente = oportunidades.find(op => (op.cnpj?.replace(/\D/g, '') || '') === cnpjLimpo);
         if (propostaExistente) {
             const statusLabel = ESTAGIOS.find(e => e.id === propostaExistente.status)?.label || propostaExistente.status;
-            
             setConfirmModal({
                 open: true,
                 message: `Você já tem uma proposta para este CNPJ no status "${statusLabel.toUpperCase()}". Deseja realmente abrir uma NOVA proposta?`,
@@ -293,15 +250,16 @@ export default function PipelinePage() {
 
         const isBloqueado = chavesERP.bloqueado === true || String(chavesERP.bloqueado).toLowerCase() === 'sim';
         const motivoBloqueio = chavesERP.motivobloqueio || chavesERP.motivo || 'Verifique com o financeiro.';
-        const vendedorERP = chavesERP.vendedor || chavesERP.consultor || chavesERP.representante || '';
-        const nomeFantasiaOuRazao = chavesERP.fantasia || chavesERP['nome fantasia'] || chavesERP.razaosocial || chavesERP['razão social'] || 'Cliente do ERP';
+        const vendedorERP = String(chavesERP.vendedor || chavesERP.consultor || chavesERP.representante || '').trim();
+        const nomeFantasiaOuRazao = String(chavesERP.fantasia || chavesERP['nome fantasia'] || chavesERP.razaosocial || chavesERP['razão social'] || 'Cliente do ERP').toUpperCase();
+        const meuNome = String(usuarioLogado?.nome || '').trim();
 
         // Bloqueio 1: Cliente Inadimplente/Bloqueado
         if (isBloqueado) {
             setBlockModal({
                 open: true,
                 title: 'ACESSO NEGADO',
-                message: `A farmácia "${nomeFantasiaOuRazao.toUpperCase()}" JÁ ESTÁ CADASTRADA no ERP.`,
+                message: `A farmácia "${nomeFantasiaOuRazao}" JÁ ESTÁ CADASTRADA no ERP.`,
                 motivo: `Restrição Financeira/Administrativa: ${motivoBloqueio}`
             });
             setFormData(prev => ({ ...prev, cnpj: '' }));
@@ -309,37 +267,47 @@ export default function PipelinePage() {
             return; 
         }
 
-        // Bloqueio 2: Carteira Fechada (Redirecionamento para o bloqueio vermelho)
-        if (vendedorERP && String(vendedorERP).trim() !== "") {
-            if (usuarioLogado?.cargo !== 'admin' && String(vendedorERP).toLowerCase().trim() !== String(usuarioLogado?.nome || '').toLowerCase().trim()) {
+        // Bloqueio 2: Carteira Fechada - REGRA IRREDUTÍVEL PARA TODOS (SEM BYPASS DE ADMIN)
+        if (vendedorERP !== "") {
+            // Se o nome do vendedor no ERP for diferente do nome do usuário logado, BLOQUEIA NA HORA.
+            if (vendedorERP.toLowerCase() !== meuNome.toLowerCase()) {
                 setBlockModal({
                     open: true,
                     title: 'ACESSO NEGADO',
-                    message: `A farmácia "${nomeFantasiaOuRazao.toUpperCase()}" JÁ ESTÁ CADASTRADA.`,
-                    motivo: `Pertence ao vendedor: ${vendedorERP}. Não é possível avançar pois você não é o vendedor desta carteira.`
+                    message: `A farmácia "${nomeFantasiaOuRazao}" JÁ ESTÁ CADASTRADA.`,
+                    motivo: `Pertence ao vendedor: ${vendedorERP.toUpperCase()}.\n\nNão é possível avançar pois você não é o vendedor desta carteira.`
                 });
                 setFormData(prev => ({ ...prev, cnpj: '' }));
                 setLoadingCNPJ(false);
                 return; 
             }
         } else {
-             // Se não tiver vendedor listado no ERP, bloqueia por segurança e pede para verificar
-             if (usuarioLogado?.cargo !== 'admin') {
-                setBlockModal({
-                    open: true,
-                    title: 'ACESSO NEGADO',
-                    message: `A farmácia "${nomeFantasiaOuRazao.toUpperCase()}" JÁ ESTÁ CADASTRADA.`,
-                    motivo: `Não é possível avançar pois a carteira deste cliente não está vinculada a você. Verifique no ERP.`
-                });
-                setFormData(prev => ({ ...prev, cnpj: '' }));
-                setLoadingCNPJ(false);
-                return; 
-            }
+             // Se estiver no ERP mas sem vendedor definido
+             setBlockModal({
+                 open: true,
+                 title: 'ACESSO NEGADO',
+                 message: `A farmácia "${nomeFantasiaOuRazao}" JÁ ESTÁ CADASTRADA.`,
+                 motivo: `Não é possível avançar pois a carteira deste cliente não possui um vendedor vinculado a você. Verifique o ERP Oficial.`
+             });
+             setFormData(prev => ({ ...prev, cnpj: '' }));
+             setLoadingCNPJ(false);
+             return; 
         }
 
-        // Só chega aqui se for ADMIN ou se for o próprio VENDEDOR DA CONTA.
-        // Nesse caso, o sistema preenche os dados e deixa criar a proposta sem alerta.
-        preencherDadosAPI(cnpjLimpo, chavesERP);
+        // ALERTA 3: É cliente ativo DA PRÓPRIA PESSOA (Upsell)
+        setConfirmModal({
+            open: true,
+            message: `A farmácia "${nomeFantasiaOuRazao}" já é sua cliente oficial. Deseja criar uma nova proposta (Upsell) para ela?`,
+            onConfirm: () => {
+                setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
+                preencherDadosAPI(cnpjLimpo, chavesERP);
+            },
+            onCancel: () => {
+                setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
+                setFormData(prev => ({ ...prev, cnpj: '' })); 
+                setLoadingCNPJ(false);
+            }
+        });
         return;
     }
 
@@ -371,7 +339,6 @@ export default function PipelinePage() {
           }));
        }
     }
-    
     setLoadingCNPJ(false);
   };
 
@@ -379,10 +346,8 @@ export default function PipelinePage() {
 
   const adicionarNotaAoHistorico = () => {
       if (!novaNotaInput.trim()) return;
-
       const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
       const novaEntrada = `📅 ${dataHora} | 💬 ${novaNotaInput}\n────────────────────────────────────────\n${formData.observacoes || ''}`;
-      
       setFormData({ ...formData, observacoes: novaEntrada });
       setNovaNotaInput(""); 
   };
@@ -390,18 +355,13 @@ export default function PipelinePage() {
   const gerarRelatorioGeral = () => {
     const doc = new jsPDF({ orientation: "landscape" });
     
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.setTextColor(30, 41, 59);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(30, 41, 59);
     doc.text("RELATÓRIO GERAL DE PIPELINE", 14, 15);
     
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(100);
+    doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(100);
     doc.text(`Gerado em: ${new Date().toLocaleDateString()} às ${new Date().toLocaleTimeString()} por ${usuarioLogado?.nome || 'Sistema'}`, 14, 21);
 
     let dadosOrdenados = [...oportunidades];
-    
     if (reportSort === 'cliente') {
         dadosOrdenados.sort((a, b) => a.nome_cliente.localeCompare(b.nome_cliente));
     } else if (reportSort === 'estagio') {
@@ -411,8 +371,7 @@ export default function PipelinePage() {
         dadosOrdenados.sort((a, b) => (b.numero_proposta || 0) - (a.numero_proposta || 0));
     }
 
-    let headers = [];
-    let dataKeys: any[] = [];
+    let headers = []; let dataKeys: any[] = [];
 
     if (reportColumns.numero) { headers.push('Nº'); dataKeys.push('numero'); }
     if (reportColumns.cliente) { headers.push('Cliente'); dataKeys.push('cliente'); }
@@ -435,11 +394,7 @@ export default function PipelinePage() {
         if (reportColumns.produto) row.push(op.produto || '-');
         if (reportColumns.estagio) row.push(ESTAGIOS.find(e => e.id === op.status)?.label || op.status);
         if (reportColumns.valor) row.push(formatCurrency(op.valor));
-        
-        if (reportColumns.entrada) {
-            row.push(op.data_entrada ? op.data_entrada.split('-').reverse().join('/') : '-');
-        }
-
+        if (reportColumns.entrada) row.push(op.data_entrada ? op.data_entrada.split('-').reverse().join('/') : '-');
         if (reportColumns.canal) row.push(op.canal_contato);
         
         (row as any)._statusId = op.status;
@@ -449,18 +404,14 @@ export default function PipelinePage() {
     const stageColIndex = headers.indexOf('Estágio');
 
     autoTable(doc, {
-        startY: 30,
-        head: [headers],
-        body: tableBody,
-        theme: 'grid',
+        startY: 30, head: [headers], body: tableBody, theme: 'grid',
         headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
         styles: { fontSize: 8, cellPadding: 2, textColor: 60 },
         alternateRowStyles: { fillColor: [248, 250, 252] },
         didParseCell: (data) => {
             if (data.section === 'body' && data.column.index === stageColIndex) {
                 const statusId = (data.row.raw as any)._statusId;
-                const color = STAGE_COLORS[statusId] || [60, 60, 60];
-                data.cell.styles.textColor = color;
+                data.cell.styles.textColor = STAGE_COLORS[statusId] || [60, 60, 60];
                 data.cell.styles.fontStyle = 'bold';
             }
         }
@@ -472,30 +423,12 @@ export default function PipelinePage() {
 
   const cleanHtmlForPdf = (html: string) => {
     if (!html) return "";
-    let text = html;
-    
-    text = text.replace(/<p><br><\/p>/gi, "\n\n");
-    text = text.replace(/<br\s*\/?>/gi, "\n");
-    text = text.replace(/<\/p>/gi, "\n\n");
-    text = text.replace(/<p>/gi, "");
-    text = text.replace(/<ul>/gi, "");
-    text = text.replace(/<\/ul>/gi, "\n");
-    text = text.replace(/<ol>/gi, "");
-    text = text.replace(/<\/ol>/gi, "\n");
-    text = text.replace(/<li>/gi, "   • ");
-    text = text.replace(/<\/li>/gi, "\n");
-    text = text.replace(/<strong[^>]*>(.*?)<\/strong>/gi, (match, p1) => p1.toUpperCase());
-    text = text.replace(/<b[^>]*>(.*?)<\/b>/gi, (match, p1) => p1.toUpperCase());
-    text = text.replace(/<u[^>]*>(.*?)<\/u>/gi, (match, p1) => `_${p1}_`);
-    text = text.replace(/<[^>]+>/g, "");
-    text = text.replace(/&nbsp;/gi, " ");
-    text = text.replace(/&amp;/gi, "&");
-    text = text.replace(/\n{3,}/g, "\n\n").trim();
-    
+    let text = html.replace(/<p><br><\/p>/gi, "\n\n").replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n\n").replace(/<p>/gi, "").replace(/<ul>/gi, "").replace(/<\/ul>/gi, "\n").replace(/<ol>/gi, "").replace(/<\/ol>/gi, "\n").replace(/<li>/gi, "   • ").replace(/<\/li>/gi, "\n");
+    text = text.replace(/<strong[^>]*>(.*?)<\/strong>/gi, (match, p1) => p1.toUpperCase()).replace(/<b[^>]*>(.*?)<\/b>/gi, (match, p1) => p1.toUpperCase()).replace(/<u[^>]*>(.*?)<\/u>/gi, (match, p1) => `_${p1}_`);
+    text = text.replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\n{3,}/g, "\n\n").trim();
     return text;
   };
 
-  // --- PDF PREMIUM COM ASSINATURA DINÂMICA ---
   const gerarPDFPremium = (item: any) => {
     const doc = new jsPDF();
     const verdeEscuro: [number, number, number] = [20, 83, 45];
@@ -510,9 +443,7 @@ export default function PipelinePage() {
     doc.text("PROPOSTA COMERCIAL", 190, 20, { align: 'right' });
     
     doc.setFontSize(10); doc.setTextColor(150);
-    if(item.numero_proposta) {
-        doc.text(`Nº ${formatPropostaId(item.numero_proposta)}`, 190, 26, { align: 'right' });
-    }
+    if(item.numero_proposta) doc.text(`Nº ${formatPropostaId(item.numero_proposta)}`, 190, 26, { align: 'right' });
 
     doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(120);
     doc.text("YellowLeaf – Nutraceuticals Company", 190, 32, { align: 'right' });
@@ -522,8 +453,7 @@ export default function PipelinePage() {
 
     doc.setFillColor(cinzaSuave[0], cinzaSuave[1], cinzaSuave[2]);
     doc.rect(20, 50, 170, 25, 'F');
-    doc.setFont("helvetica", "bold"); 
-    doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); 
+    doc.setFont("helvetica", "bold"); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); 
     doc.text("DADOS DO CLIENTE", 25, 57);
     
     doc.setFontSize(10); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
@@ -571,10 +501,7 @@ export default function PipelinePage() {
         [`Custo Matéria-Prima (Dose ${doseSugerida}g)`, formatCurrency(custoMatPrimaFormula)],
     ];
 
-    if (custoFixoOp > 0) {
-        paybackBody.push([`Custo Fixo Operacional (Embalagem, etc)`, formatCurrency(custoFixoOp)]);
-    }
-
+    if (custoFixoOp > 0) paybackBody.push([`Custo Fixo Operacional (Embalagem, etc)`, formatCurrency(custoFixoOp)]);
     paybackBody.push([`Custo Total por Fórmula (Manipulado)`, { content: formatCurrency(custoTotalFarmacia), styles: { fontStyle: 'bold' } }]);
     paybackBody.push([`Sugestão de Venda (Fator ${item.fator_lucro || 5} no Ativo)`, formatCurrency(precoVendaSugestao)]);
     paybackBody.push([{ content: 'META DE VIABILIDADE', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: [0, 128, 0], fontSize: 12, halign: 'right' } }]);
@@ -621,7 +548,6 @@ export default function PipelinePage() {
       else { doc.addPage(); doc.addImage("/selo.jpg", "JPEG", xPos, 20, imgW, imgH); }
     } catch (e) {}
 
-    // --- ASSINATURA DINÂMICA BASEADA NO USUÁRIO LOGADO ---
     const nomeAssinatura = usuarioLogado?.nome || 'Consultor Comercial';
     const telAssinatura = usuarioLogado?.telefone || '';
     
@@ -1019,7 +945,7 @@ export default function PipelinePage() {
         </div>, document.body
       )}
 
-      {/* MODAL ALERTA GERAL */}
+      {/* MODAL ALERTA DE CLIENTE DA BASE (AMARELO - UPSELL) */}
       {confirmModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
@@ -1027,7 +953,7 @@ export default function PipelinePage() {
                  <div className="mx-auto w-16 h-16 bg-yellow-50 text-yellow-600 rounded-full flex items-center justify-center mb-6">
                     <AlertTriangle size={32} />
                  </div>
-                 <h2 className="text-xl font-black text-slate-800 mb-3">AVISO IMPORTANTE</h2>
+                 <h2 className="text-xl font-black text-slate-800 mb-3">AVISO DE UPSELL</h2>
                  <p className="text-slate-500 font-medium leading-relaxed">{confirmModal.message}</p>
               </div>
               <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
@@ -1052,8 +978,9 @@ export default function PipelinePage() {
               </div>
               <div className="p-8 text-center">
                  <p className="text-slate-800 font-bold text-lg mb-2">{blockModal.message}</p>
-                 <div className="bg-red-50 border border-red-100 rounded-xl p-4 mt-4">
-                    <p className="text-red-600 font-bold text-sm leading-relaxed">{blockModal.motivo}</p>
+                 <div className="bg-red-50 border border-red-100 rounded-xl p-4 mt-4 text-left">
+                    <p className="text-xs text-red-500 font-bold uppercase tracking-wider mb-1">Motivo do Bloqueio</p>
+                    <p className="text-red-800 font-bold text-sm whitespace-pre-wrap leading-relaxed">{blockModal.motivo}</p>
                  </div>
               </div>
               <div className="p-4 bg-slate-50 border-t border-slate-100">
