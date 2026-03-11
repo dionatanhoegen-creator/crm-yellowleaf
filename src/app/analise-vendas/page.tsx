@@ -43,15 +43,13 @@ export default function AnaliseVendasPage() {
       }
       const queryPerfis = supabase.from('perfis').select('id, nome');
 
-      // 2. Busca de TODAS as fontes (Produtos, Clientes, e o Faturamento Bruto do ERP)
+      // 2. Busca todas as fontes
       const [resCRM, resPerfis, resProdutos, resClientes, resFaturamento, resVendasERP] = await Promise.all([
           queryVendas,
           queryPerfis,
           fetch(`${API_PRODUTOS_URL}?path=produtos`).then(r => r.json()).catch(() => ({success: false, data: []})),
           fetch(`${API_CLIENTES_URL}?path=clientes`).then(r => r.json()).catch(() => ({success: false, data: []})),
-          // Tenta ler a aba de Faturamento bruto do Google Sheets
           fetch(`${API_CLIENTES_URL}?path=faturamento`).then(r => r.json()).catch(() => ({success: false, data: []})),
-          // Fallback caso a aba se chame 'vendas'
           fetch(`${API_CLIENTES_URL}?path=vendas`).then(r => r.json()).catch(() => ({success: false, data: []}))
       ]);
 
@@ -60,20 +58,34 @@ export default function AnaliseVendasPage() {
       const listaAPIProdutos = (resProdutos.success && Array.isArray(resProdutos.data)) ? resProdutos.data : [];
       const listaAPIClientes = (resClientes.success && Array.isArray(resClientes.data)) ? resClientes.data : [];
       
-      // Define a base de vendas do ERP (a que retornar os dados corretos da planilha)
-      let vendasDaPlanilha = [];
-      if (resFaturamento.success && Array.isArray(resFaturamento.data)) {
-          vendasDaPlanilha = resFaturamento.data;
-      } else if (resVendasERP.success && Array.isArray(resVendasERP.data)) {
-          vendasDaPlanilha = resVendasERP.data;
+      // Vendas do ERP (Desempacota aba separada ou do histórico dos clientes)
+      let vendasERPExtraidas: any[] = [];
+      if (resFaturamento.success && Array.isArray(resFaturamento.data) && resFaturamento.data.length > 0) {
+          vendasERPExtraidas = resFaturamento.data;
+      } else if (resVendasERP.success && Array.isArray(resVendasERP.data) && resVendasERP.data.length > 0) {
+          vendasERPExtraidas = resVendasERP.data;
+      } else {
+          // Fallback: Procura dentro do objeto de cada cliente (o flattening)
+          listaAPIClientes.forEach(cliente => {
+              const historico = cliente.historico || cliente.historico_compras || cliente.vendas || cliente.compras || [];
+              if (Array.isArray(historico)) {
+                  historico.forEach(compra => {
+                      vendasERPExtraidas.push({
+                          ...compra,
+                          nome_cliente_pai: cliente.fantasia || cliente.nome_fantasia || cliente.razao_social || 'Cliente ERP',
+                          vendedor_pai: cliente.vendedor || cliente.consultor || 'Vendedor ERP'
+                      });
+                  });
+              }
+          });
       }
 
-      setMetricas({ crm: vendasCRM.length, erp: vendasDaPlanilha.length });
+      setMetricas({ crm: vendasCRM.length, erp: vendasERPExtraidas.length });
 
       const mapaVendedores: any = {};
       perfis.forEach(p => mapaVendedores[p.id] = p.nome);
 
-      construirInteligencia(vendasCRM, vendasDaPlanilha, listaAPIProdutos, listaAPIClientes, mapaVendedores);
+      construirInteligencia(vendasCRM, vendasERPExtraidas, listaAPIProdutos, listaAPIClientes, mapaVendedores);
     } catch (e) {
       console.error("Erro crítico ao carregar dados:", e);
     } finally {
@@ -81,13 +93,28 @@ export default function AnaliseVendasPage() {
     }
   };
 
-  // Limpeza profunda de texto para o CRM e ERP se conectarem perfeitamente
+  // --- FUNÇÕES DE LIMPEZA E TRADUÇÃO DE DADOS ---
+
   const normalizeChave = (str: string) => {
       if (!str) return 'DESCONHECIDO';
       return String(str).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   };
 
-  // Funções Anti-Crash para Datas vindo do Google Sheets
+  // Converte "R$ 1.500,00" ou "1,5" para número legível em JS sem zerar
+  const parseBRNumber = (val: any) => {
+      if (typeof val === 'number') return val;
+      if (!val) return 0;
+      let str = String(val).replace(/[^\d.,-]/g, '').trim();
+      if (str.includes('.') && str.includes(',')) {
+          str = str.replace(/\./g, '').replace(',', '.');
+      } else if (str.includes(',')) {
+          str = str.replace(',', '.');
+      }
+      const num = parseFloat(str);
+      return isNaN(num) ? 0 : num;
+  };
+
+  // Data helpers
   const extractYYYYMM = (str: string) => {
       const s = String(str || '').trim();
       if (s.includes('T')) return s.substring(0, 7); 
@@ -96,7 +123,7 @@ export default function AnaliseVendasPage() {
           const parts = s.substring(0,10).split('/');
           return `${parts[2]}-${parts[1]}`;
       }
-      return '2000-01'; // Fallback seguro
+      return '2000-01'; 
   };
 
   const getTimestamp = (str: string) => {
@@ -118,23 +145,45 @@ export default function AnaliseVendasPage() {
       return s;
   };
 
-  const formatCurrencySafe = (val: any) => {
-      const num = Number(val);
-      if (isNaN(num)) return 'R$ 0,00';
-      return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  };
 
   const construirInteligencia = (vendasCRM: any[], vendasERP: any[], listaAPIProdutos: any[], listaAPIClientes: any[], mapaVendedores: any) => {
     const mapaClientes: any = {};
     const mapaProdutos: any = {};
+    
+    // Lista auxiliar para a função de agrupamento inteligente
+    const chavesProdutosOficiais: string[] = [];
 
-    // Injeta Base Oficial
+    // 1. Injeta Base Oficial de Produtos
     listaAPIProdutos.forEach(p => {
         if (!p.ativo) return;
         const key = normalizeChave(p.ativo);
-        if (!mapaProdutos[key]) mapaProdutos[key] = { nome_original: p.ativo.trim(), totalVendido: 0, quantidadeVendas: 0, historico: [], clientes: new Set(), totalKg: 0 };
+        chavesProdutosOficiais.push(key);
+        if (!mapaProdutos[key]) {
+            mapaProdutos[key] = { 
+                nome_original: p.ativo.trim(), 
+                totalVendido: 0, quantidadeVendas: 0, historico: [], clientes: new Set(), totalKg: 0 
+            };
+        }
     });
 
+    // Função que funde "ANETHIN 1KG" com "ANETHIN"
+    const padronizarProduto = (nomeBruto: string) => {
+        if (!nomeBruto) return { key: 'DIVERSOS', nome: 'Produto Diverso' };
+        
+        const keyLimpa = normalizeChave(nomeBruto);
+        // Remove sufixos comuns temporariamente para tentar encontrar o nome pai (ex: 1KG)
+        const keySemPeso = keyLimpa.replace(/(1KG|5KG|10KG|500G|250G|100G)/g, '');
+
+        // Procura se esse nome do ERP contém a palavra chave de algum produto oficial nosso
+        for (const oficial of chavesProdutosOficiais.sort((a,b) => b.length - a.length)) {
+            if (keyLimpa.includes(oficial) || keySemPeso.includes(oficial)) {
+                return { key: oficial, nome: mapaProdutos[oficial].nome_original };
+            }
+        }
+        return { key: keyLimpa, nome: nomeBruto.trim() };
+    };
+
+    // 2. Injeta Base de Clientes
     listaAPIClientes.forEach(c => {
         const nomeOriginal = (c.fantasia || c.nome_fantasia || c.razao_social || '').trim();
         if (!nomeOriginal) return;
@@ -142,45 +191,47 @@ export default function AnaliseVendasPage() {
         if (!mapaClientes[key]) mapaClientes[key] = { nome_original: nomeOriginal, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set(), totalKg: 0, vendedor_erp: c.vendedor || '' };
     });
 
-    // Padroniza CRM e ERP
+    // 3. Padroniza CRM e ERP
     const formatarHistorico = (venda: any, origem: 'CRM' | 'ERP') => {
         if (origem === 'CRM') {
+            const prod = padronizarProduto(venda.produto);
             return {
                 id: venda.id,
                 cliente_chave: normalizeChave(venda.nome_cliente),
                 cliente_nome: venda.nome_cliente || 'Cliente Avulso',
-                produto_chave: normalizeChave(venda.produto),
-                produto_nome: venda.produto || 'Produto Diverso',
-                valor: Number(venda.valor) || 0,
+                produto_chave: prod.key,
+                produto_nome: prod.nome,
+                valor: parseBRNumber(venda.valor),
                 data: venda.data_entrada || venda.created_at || '',
                 vendedor: mapaVendedores[venda.user_id] || 'Consultor',
-                kg: Number(venda.kg_proposto) || 0,
+                kg: parseBRNumber(venda.kg_proposto),
                 fonte: 'CRM'
             };
         } else {
+            const prod = padronizarProduto(venda.produto || venda.ativo || venda.item);
             return {
                 id: `erp-${Math.random()}`,
-                cliente_chave: normalizeChave(venda.cliente || venda.razao_social || venda.fantasia),
-                cliente_nome: String(venda.cliente || venda.razao_social || venda.fantasia || 'Cliente ERP').trim(),
-                produto_chave: normalizeChave(venda.produto || venda.ativo || venda.item),
-                produto_nome: String(venda.produto || venda.ativo || venda.item || 'Produto ERP').trim(),
-                valor: Number(venda.valor || venda.total || venda.faturamento || venda.preco || 0),
+                cliente_chave: normalizeChave(venda.cliente || venda.razao_social || venda.fantasia || venda.nome_cliente_pai),
+                cliente_nome: String(venda.cliente || venda.razao_social || venda.fantasia || venda.nome_cliente_pai || 'Cliente ERP').trim(),
+                produto_chave: prod.key,
+                produto_nome: prod.nome,
+                valor: parseBRNumber(venda.valor || venda.total || venda.faturamento || venda.preco),
                 data: String(venda.data || venda.data_venda || venda.criado_em || venda.data_faturamento || ''),
-                vendedor: String(venda.vendedor || venda.representante || 'Vendedor ERP').trim(),
-                kg: Number(venda.kg || venda.quantidade || venda.peso || 0),
+                vendedor: String(venda.vendedor || venda.representante || venda.vendedor_pai || 'Vendedor ERP').trim(),
+                kg: parseBRNumber(venda.kg || venda.quantidade || venda.peso || venda.qte),
                 fonte: 'ERP'
             };
         }
     };
 
-    // Une tudo numa linha do tempo global, ordenando da data mais antiga para a mais nova
     const todasAsVendas = [
         ...vendasERP.map(v => formatarHistorico(v, 'ERP')),
         ...vendasCRM.map(v => formatarHistorico(v, 'CRM'))
     ].sort((a, b) => getTimestamp(a.data) - getTimestamp(b.data));
 
-    // Processa a Linha do Tempo
+    // Processa a Linha do Tempo Unificada
     todasAsVendas.forEach(venda => {
+        // Atualiza Cliente
         if (!mapaClientes[venda.cliente_chave]) {
             mapaClientes[venda.cliente_chave] = { nome_original: venda.cliente_nome, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set(), totalKg: 0, vendedor_erp: venda.vendedor };
         }
@@ -195,6 +246,7 @@ export default function AnaliseVendasPage() {
             id: venda.id, data: venda.data, produto: venda.produto_nome, valor: venda.valor, vendedor: venda.vendedor, tipo: isRecompra ? 'Recompra' : 'Nova Compra', kg: venda.kg, fonte: venda.fonte
         });
 
+        // Atualiza Produto
         if (!mapaProdutos[venda.produto_chave]) {
             mapaProdutos[venda.produto_chave] = { nome_original: venda.produto_nome, totalVendido: 0, quantidadeVendas: 0, historico: [], clientes: new Set(), totalKg: 0 };
         }
@@ -211,6 +263,18 @@ export default function AnaliseVendasPage() {
 
     setDadosClientes(mapaClientes);
     setDadosProdutos(mapaProdutos);
+  };
+
+  const formatCurrencySafe = (val: any) => {
+      const num = Number(val);
+      if (isNaN(num)) return 'R$ 0,00';
+      return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  };
+
+  const formatKg = (val: any) => {
+      const num = Number(val);
+      if (isNaN(num) || num === 0) return '0';
+      return num.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
   };
 
   const listaDados = visaoAtiva === 'clientes' ? Object.values(dadosClientes) : Object.values(dadosProdutos);
@@ -256,7 +320,7 @@ export default function AnaliseVendasPage() {
             <div className="flex flex-wrap gap-3">
                 <div className="bg-white px-5 py-2.5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
                     <Database size={16} className="text-emerald-500"/>
-                    <span className="text-sm font-bold text-slate-600">Planilha ERP: <strong className="text-emerald-600 text-lg">{metricas.erp}</strong> linhas</span>
+                    <span className="text-sm font-bold text-slate-600">Planilha ERP: <strong className="text-emerald-600 text-lg">{metricas.erp}</strong> transações</span>
                 </div>
                 <div className="bg-white px-5 py-2.5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
                     <Activity size={16} className="text-blue-500"/>
@@ -360,7 +424,7 @@ export default function AnaliseVendasPage() {
                                     </div>
                                     <div className="bg-white/10 p-4 rounded-2xl border border-white/10 backdrop-blur-sm">
                                         <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><Package size={12}/> Volume (KG)</p>
-                                        <p className="text-2xl font-black text-[#82D14D]">{Number(detalhesItem.totalKg || 0).toLocaleString('pt-BR')} <span className="text-sm text-white/50 font-medium">kg</span></p>
+                                        <p className="text-2xl font-black text-[#82D14D]">{formatKg(detalhesItem.totalKg)} <span className="text-sm text-white/50 font-medium">kg</span></p>
                                     </div>
                                     <div className="bg-white/10 p-4 rounded-2xl border border-white/10 backdrop-blur-sm">
                                         <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><ShoppingCart size={12}/> Transações</p>
@@ -446,7 +510,7 @@ export default function AnaliseVendasPage() {
                                                                 <User size={12} className="text-blue-500"/> {hist.vendedor}
                                                             </div>
                                                             <div className="text-right">
-                                                                {hist.kg > 0 && <span className="text-[10px] font-bold text-slate-400 mr-2">{hist.kg} kg</span>}
+                                                                {hist.kg > 0 && <span className="text-[10px] font-bold text-slate-400 mr-2">{formatKg(hist.kg)} kg</span>}
                                                                 <span className="font-black text-slate-700 text-sm">{formatCurrencySafe(hist.valor)}</span>
                                                             </div>
                                                         </div>
