@@ -2,9 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+// IMPORTAÇÃO BLINDADA COM TODOS OS ÍCONES
 import { 
   TrendingUp, Users, Package, Search, Calendar, DollarSign, 
-  Activity, Clock, ShieldCheck, Tag, BarChart3, AlertCircle, ShoppingCart, Info
+  Activity, Clock, ShieldCheck, Tag, BarChart3, AlertCircle, 
+  ShoppingCart, Info, CheckCircle2, User
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
@@ -35,16 +37,13 @@ export default function AnaliseVendasPage() {
 
       const { data: perfilLogado } = await supabase.from('perfis').select('cargo, nome').eq('id', user.id).single();
 
-      // 1. Busca Vendas do CRM de forma SEGURA 
       let queryVendas = supabase.from('pipeline').select('*').eq('status', 'fechado').order('created_at', { ascending: true });
       if (perfilLogado && perfilLogado.cargo !== 'admin') {
           queryVendas = queryVendas.eq('user_id', user.id);
       }
 
-      // 2. Busca Perfis separados
       const queryPerfis = supabase.from('perfis').select('id, nome');
 
-      // 3. Executa todas as requisições em paralelo
       const [resCRM, resPerfis, resProdutos, resClientes] = await Promise.all([
           queryVendas,
           queryPerfis,
@@ -70,14 +69,12 @@ export default function AnaliseVendasPage() {
     }
   };
 
-  // --- O "TRATOR" DE NORMALIZAÇÃO ---
-  // Arranca acentos, espaços, símbolos (® ™), traços, pontos. Deixa só letras e números em maiúsculo.
   const normalizeChave = (str: string) => {
       if (!str) return 'DESCONHECIDO';
       return String(str)
           .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '') // remove acentos
-          .replace(/[^a-zA-Z0-9]/g, '') // remove TUDO que não for letra ou número
+          .replace(/[\u0300-\u036f]/g, '') 
+          .replace(/[^a-zA-Z0-9]/g, '') 
           .toUpperCase();
   };
 
@@ -85,7 +82,6 @@ export default function AnaliseVendasPage() {
     const mapaClientes: any = {};
     const mapaProdutos: any = {};
 
-    // 1. Injeta TODOS os produtos da API
     listaAPIProdutos.forEach(p => {
         if (!p.ativo) return;
         const nomeOriginal = p.ativo.trim();
@@ -102,7 +98,6 @@ export default function AnaliseVendasPage() {
         }
     });
 
-    // 2. Injeta TODOS os clientes da API
     listaAPIClientes.forEach(c => {
         const nomeOriginal = (c.fantasia || c.nome_fantasia || c.razao_social || '').trim();
         if (!nomeOriginal) return;
@@ -121,7 +116,6 @@ export default function AnaliseVendasPage() {
         }
     });
 
-    // 3. Processa Vendas Fechadas
     vendasCRM.forEach(venda => {
         const nomeClienteCRM = venda.nome_cliente || 'Cliente Avulso';
         const nomeProdutoCRM = venda.produto || 'Produto Diversos';
@@ -133,7 +127,6 @@ export default function AnaliseVendasPage() {
         const dataVenda = venda.data_entrada || venda.created_at;
         const vendedor = mapaVendedores[venda.user_id] || 'Consultor Base';
 
-        // Atualiza Cliente
         if (!mapaClientes[cKey]) {
             mapaClientes[cKey] = { nome_original: nomeClienteCRM, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set(), cidade: '', uf: '', vendedor_erp: '' };
         }
@@ -146,7 +139,6 @@ export default function AnaliseVendasPage() {
             id: venda.id, data: dataVenda, produto: nomeProdutoCRM, valor: valor, vendedor: vendedor, tipo: isRecompra ? 'Recompra' : 'Nova Compra', kg: venda.kg_proposto
         });
 
-        // Atualiza Produto
         if (!mapaProdutos[pKey]) {
             mapaProdutos[pKey] = { nome_original: nomeProdutoCRM, totalVendido: 0, quantidadeVendas: 0, historico: [], clientes: new Set(), preco_base: 0 };
         }
@@ -199,7 +191,6 @@ export default function AnaliseVendasPage() {
     <div className="p-6 md:p-8 bg-slate-50 min-h-screen font-sans text-slate-800">
       <div className="max-w-[1600px] mx-auto">
         
-        {/* CABEÇALHO */}
         <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
                 <h1 className="text-3xl font-black text-[#0f392b] tracking-tight flex items-center gap-3">
@@ -218,7 +209,6 @@ export default function AnaliseVendasPage() {
 
         <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-180px)]">
             
-            {/* BARRA LATERAL */}
             <div className="lg:w-[400px] bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden shrink-0">
                 <div className="p-5 border-b border-slate-100 bg-slate-50/80">
                     <div className="flex bg-slate-200/70 p-1 rounded-xl mb-4">
@@ -274,7 +264,6 @@ export default function AnaliseVendasPage() {
                 </div>
             </div>
 
-            {/* PAINEL PRINCIPAL (FICHA / DRILL-DOWN) */}
             <div className="flex-1 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
                 {!detalhesItem ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-center p-10 bg-slate-50/50">
@@ -287,7 +276,6 @@ export default function AnaliseVendasPage() {
                 ) : (
                     <div className="flex flex-col h-full animate-in fade-in duration-300">
                         
-                        {/* CABEÇALHO DO DETALHE */}
                         <div className="p-8 lg:p-10 border-b border-slate-100 bg-[#0f392b] text-white shrink-0 relative overflow-hidden">
                             <div className="absolute right-0 top-1/2 -translate-y-1/2 text-white/5 transform -rotate-12 pointer-events-none">
                                 {visaoAtiva === 'clientes' ? <Users size={300}/> : <Package size={300}/>}
@@ -334,9 +322,7 @@ export default function AnaliseVendasPage() {
                             </div>
                         </div>
 
-                        {/* GRÁFICO E TIMELINE */}
                         <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50 p-8">
-                            
                             {detalhesItem.historico.length === 0 ? (
                                 <div className="bg-white rounded-2xl border border-slate-200 border-dashed p-12 text-center max-w-lg mx-auto mt-10">
                                     <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -347,8 +333,6 @@ export default function AnaliseVendasPage() {
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-                                    
-                                    {/* GRÁFICO */}
                                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                                         <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
                                             <BarChart3 className="text-blue-600"/> Evolução de Negócios (Mensal)
@@ -370,7 +354,6 @@ export default function AnaliseVendasPage() {
                                         </div>
                                     </div>
 
-                                    {/* TIMELINE */}
                                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col max-h-[400px]">
                                         <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2 shrink-0">
                                             <Clock className="text-blue-600"/> Histórico de {visaoAtiva === 'clientes' ? 'Compras' : 'Vendas'}

@@ -3,8 +3,11 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+// IMPORTAÇÃO BLINDADA COM TODOS OS ÍCONES
 import { 
-  Search, Plus, MapPin, Phone, Star, Edit, X, Stethoscope, Save, Building2, CalendarCheck, FileText, ChevronRight, User, AlignLeft, Activity, Trash2, Clock, Beaker, Check, AlertCircle, ChevronDown, MessageCircle
+  Search, Plus, MapPin, Phone, Star, Edit, X, Stethoscope, Save, Building2, 
+  CalendarCheck, FileText, ChevronRight, User, AlignLeft, Activity, Trash2, 
+  Clock, Beaker, Check, AlertCircle, ChevronDown, MessageCircle, Loader2
 } from 'lucide-react';
 
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
@@ -25,21 +28,17 @@ export default function PrescritoresPage() {
   const [busca, setBusca] = useState("");
   const [mounted, setMounted] = useState(false);
   
-  // Modais
   const [modalAberto, setModalAberto] = useState(false);
   const [modalInteracoes, setModalInteracoes] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
   
-  // Estados para a inteligência de interações (Diário)
   const [prescritorAtivo, setPrescritorAtivo] = useState<any>(null);
   const [interacoes, setInteracoes] = useState<any[]>([]);
   
-  // Bases da API do Sheets
   const [produtosApi, setProdutosApi] = useState<string[]>([]);
   const [baseFarmaciasApi, setBaseFarmaciasApi] = useState<any[]>([]);
 
-  // Controles de Dropdown
   const [termoProdutoDropdown, setTermoProdutoDropdown] = useState("");
   const [dropdownProdutosAberto, setDropdownProdutosAberto] = useState(false);
   const [farmaciasBuscadas, setFarmaciasBuscadas] = useState<any[]>([]);
@@ -54,7 +53,6 @@ export default function PrescritoresPage() {
       data_proximo_contato: ''
   });
   
-  // Formulário de Cadastro
   const [form, setForm] = useState({
     id: '', nome: '', crm_crn: '', especialidade: '', telefone: '', clinica: '', 
     endereco: '', bairro: '', cidade: '', uf: '', 
@@ -76,7 +74,7 @@ export default function PrescritoresPage() {
             const listaNomes = json.data.map((p: any) => p.ativo?.trim()).filter(Boolean);
             setProdutosApi(Array.from(new Set(listaNomes)).sort() as string[]);
         }
-    } catch (e) { console.error("Erro API Produtos:", e); }
+    } catch (e) {}
   };
 
   const carregarBaseFarmacias = async () => {
@@ -86,18 +84,16 @@ export default function PrescritoresPage() {
         if (json.success && Array.isArray(json.data)) {
             setBaseFarmaciasApi(json.data);
         }
-    } catch (e) { console.error("Erro API Farmácias:", e); }
+    } catch (e) {}
   };
 
   const carregarPrescritores = async () => {
     setLoading(true);
     try {
-      // Busca global sem filtro de túnel
       const { data, error } = await supabase.from('prescritores').select('*').order('nome', { ascending: true });
       if (error) throw error;
       if (data) setPrescritores(data);
     } catch (error) {
-      console.error("Erro ao carregar prescritores:", error);
     } finally {
       setLoading(false);
     }
@@ -160,11 +156,10 @@ export default function PrescritoresPage() {
           await supabase.from('prescritores').delete().eq('id', form.id);
           setModalAberto(false);
           carregarPrescritores();
-      } catch (error: any) { alert(`Erro ao excluir: ${error.message}`); } 
+      } catch (error: any) {} 
       finally { setExcluindo(false); }
   };
 
-  // --- FUNÇÕES DO DIÁRIO / PIPELINE DE P&D ---
   const abrirInteracoes = async (medico: any) => {
       setPrescritorAtivo(medico);
       setModalInteracoes(true);
@@ -194,9 +189,8 @@ export default function PrescritoresPage() {
               const cnpj = String(f.cnpj || f.documento || '').replace(/\D/g, '');
 
               return fantasia.includes(termoLimpo) || razao.includes(termoLimpo) || (termoNum && cnpj.includes(termoNum));
-          }).slice(0, 10); // Limita a 10 para não travar a tela
+          }).slice(0, 10); 
 
-          // Formata para exibição
           const formatadas = filtradas.map(f => ({
               nome: f.fantasia || f.nome_fantasia || f.razao_social || 'Desconhecida',
               documento: f.cnpj || f.documento || ''
@@ -234,7 +228,7 @@ export default function PrescritoresPage() {
               farmacia_vinculada: novaInteracao.farmacia_vinculada,
               produtos_vinculados: novaInteracao.produtos_vinculados.join(';'),
               data_proximo_contato: novaInteracao.data_proximo_contato || null,
-              status: 'realizado' // Entra como realizado por padrão no Kanban
+              status: 'realizado'
           }]);
 
           if (novaInteracao.data_proximo_contato) {

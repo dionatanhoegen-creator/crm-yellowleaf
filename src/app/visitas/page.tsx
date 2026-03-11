@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+// IMPORTAÇÃO BLINDADA COM TODOS OS ÍCONES
 import { 
   CalendarCheck, Search, Printer, AlertCircle, Clock, MapPin, 
   Building2, Edit, MessageCircle, X, FileText, ChevronRight, 
@@ -29,16 +30,13 @@ export default function PipelinePDPage() {
   const [busca, setBusca] = useState("");
   const [mounted, setMounted] = useState(false);
 
-  // Estados do Modal de Edição Rápida
   const [modalAberto, setModalAberto] = useState(false);
   const [visitaEditando, setVisitaEditando] = useState<any>(null);
   const [salvando, setSalvando] = useState(false);
 
-  // Bases da API
   const [produtosApi, setProdutosApi] = useState<string[]>([]);
   const [baseFarmaciasApi, setBaseFarmaciasApi] = useState<any[]>([]);
 
-  // Controles de Dropdown na edição
   const [termoProdutoDropdown, setTermoProdutoDropdown] = useState("");
   const [dropdownProdutosAberto, setDropdownProdutosAberto] = useState(false);
   const [farmaciasBuscadas, setFarmaciasBuscadas] = useState<any[]>([]);
@@ -59,7 +57,7 @@ export default function PipelinePDPage() {
             const listaNomes = json.data.map((p: any) => p.ativo?.trim()).filter(Boolean);
             setProdutosApi(Array.from(new Set(listaNomes)).sort() as string[]);
         }
-    } catch (e) { console.error("Erro API Produtos:", e); }
+    } catch (e) {}
   };
 
   const carregarBaseFarmacias = async () => {
@@ -69,7 +67,7 @@ export default function PipelinePDPage() {
         if (json.success && Array.isArray(json.data)) {
             setBaseFarmaciasApi(json.data);
         }
-    } catch (e) { console.error("Erro API Farmácias:", e); }
+    } catch (e) {}
   };
 
   const carregarVisitas = async () => {
@@ -78,7 +76,6 @@ export default function PipelinePDPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Puxa as interações GLOBALMENTE (Fim da visão de túnel)
       const { data, error } = await supabase.from('interacoes')
           .select('*, prescritores(nome, especialidade, clinica, cidade, uf, telefone), perfis(nome)')
           .order('data_proximo_contato', { ascending: true, nullsFirst: false });
@@ -88,7 +85,6 @@ export default function PipelinePDPage() {
       const formatadas = (data || []).map(v => ({ ...v, status: v.status || 'realizado' }));
       setVisitas(formatadas);
     } catch (e) {
-      console.error(e);
     } finally {
       setLoading(false);
     }
@@ -323,7 +319,7 @@ export default function PipelinePDPage() {
                   
                   <div className="bg-[#1e293b] p-6 flex justify-between items-center text-white shrink-0">
                       <div>
-                          <h2 className="text-lg font-black uppercase tracking-wide flex items-center gap-2"><Edit className="text-blue-400" size={20}/> Editar Histórico da Visita</h2>
+                          <h2 className="text-lg font-black uppercase tracking-wide flex items-center gap-2"><Edit className="text-blue-400" size={20}/> Editar Registro da Visita</h2>
                           <p className="text-sm font-medium text-slate-300 mt-1">{visitaEditando.prescritores?.nome || 'Médico'}</p>
                       </div>
                       <button type="button" onClick={() => setModalAberto(false)} className="hover:bg-white/20 p-2 rounded-full transition bg-white/10"><X size={20}/></button>
@@ -349,7 +345,6 @@ export default function PipelinePDPage() {
                           </div>
                       </div>
 
-                      {/* EDIÇÃO: PRODUTOS E FARMÁCIAS */}
                       <div className="relative">
                           <label className="text-xs font-bold text-slate-700 mb-1.5 block">Ativos Apresentados (Selecione da lista)</label>
                           <div className="min-h-[52px] w-full bg-white border border-slate-300 hover:border-blue-400 focus-within:border-blue-500 rounded-xl p-2 flex flex-wrap gap-2 items-center cursor-text transition shadow-sm" onClick={() => setDropdownProdutosAberto(true)}>
@@ -393,7 +388,7 @@ export default function PipelinePDPage() {
                                   <div className="fixed inset-0 z-30" onClick={() => setDropdownFarmaciaAberto(false)}></div>
                                   <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden z-40">
                                       {farmaciasBuscadas.map((f, i) => (
-                                          <button type="button" key={i} onClick={() => {setVisitaEditando({...visitaEditando, farmacia_vinculada: f.nome}); setDropdownFarmaciaAberto(false);}} className="w-full text-left px-4 py-3 hover:bg-slate-50 transition border-b border-slate-50 last:border-0 flex flex-col">
+                                          <button type="button" key={i} onClick={() => {setVisitaEditando({...visitaEditando, farmacia_vinculada: f.nome}); setDropdownFarmaciaAberto(false);}} className="w-full text-left px-4 py-3 hover:bg-slate-50 transition text-sm font-bold text-slate-700 border-b border-slate-50 last:border-0 flex flex-col">
                                               <span className="text-sm font-bold text-slate-700">{f.nome}</span>
                                               {f.documento && <span className="text-[10px] text-slate-400 font-mono">{f.documento}</span>}
                                           </button>
