@@ -2,11 +2,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-// IMPORTAÇÃO BLINDADA COM TODOS OS ÍCONES
 import { 
   TrendingUp, Users, Package, Search, Calendar, DollarSign, 
   Activity, Clock, ShieldCheck, Tag, BarChart3, AlertCircle, 
-  ShoppingCart, Info, CheckCircle2, User
+  ShoppingCart, Info, CheckCircle2, User, Database
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
@@ -23,7 +22,7 @@ export default function AnaliseVendasPage() {
 
   const [dadosClientes, setDadosClientes] = useState<any>({});
   const [dadosProdutos, setDadosProdutos] = useState<any>({});
-  const [qtdVendasCrm, setQtdVendasCrm] = useState(0);
+  const [metricas, setMetricas] = useState({ crm: 0, erp: 0 });
 
   useEffect(() => {
     inicializarDataLake();
@@ -37,31 +36,37 @@ export default function AnaliseVendasPage() {
 
       const { data: perfilLogado } = await supabase.from('perfis').select('cargo, nome').eq('id', user.id).single();
 
-      let queryVendas = supabase.from('pipeline').select('*').eq('status', 'fechado').order('created_at', { ascending: true });
+      // 1. Busca Vendas Novas (CRM)
+      let queryVendas = supabase.from('pipeline').select('*').eq('status', 'fechado');
       if (perfilLogado && perfilLogado.cargo !== 'admin') {
           queryVendas = queryVendas.eq('user_id', user.id);
       }
 
+      // 2. Busca Usuários do CRM
       const queryPerfis = supabase.from('perfis').select('id, nome');
 
-      const [resCRM, resPerfis, resProdutos, resClientes] = await Promise.all([
+      // 3. Executa todas as conexões com o Data Lake simultaneamente
+      const [resCRM, resPerfis, resProdutos, resClientes, resVendasERP] = await Promise.all([
           queryVendas,
           queryPerfis,
           fetch(`${API_PRODUTOS_URL}?path=produtos`).then(r => r.json()).catch(() => ({success: false, data: []})),
-          fetch(`${API_CLIENTES_URL}?path=clientes`).then(r => r.json()).catch(() => ({success: false, data: []}))
+          fetch(`${API_CLIENTES_URL}?path=clientes`).then(r => r.json()).catch(() => ({success: false, data: []})),
+          // ---> NOVA CONEXÃO: Busca o histórico maciço de vendas do ERP
+          fetch(`${API_CLIENTES_URL}?path=vendas`).then(r => r.json()).catch(() => ({success: false, data: []})) 
       ]);
 
       const vendasCRM = resCRM.data || [];
       const perfis = resPerfis.data || [];
       const listaAPIProdutos = (resProdutos.success && Array.isArray(resProdutos.data)) ? resProdutos.data : [];
       const listaAPIClientes = (resClientes.success && Array.isArray(resClientes.data)) ? resClientes.data : [];
+      const vendasERP = (resVendasERP.success && Array.isArray(resVendasERP.data)) ? resVendasERP.data : [];
 
-      setQtdVendasCrm(vendasCRM.length);
+      setMetricas({ crm: vendasCRM.length, erp: vendasERP.length });
 
       const mapaVendedores: any = {};
       perfis.forEach(p => mapaVendedores[p.id] = p.nome);
 
-      construirInteligencia(vendasCRM, listaAPIProdutos, listaAPIClientes, mapaVendedores);
+      construirInteligencia(vendasCRM, vendasERP, listaAPIProdutos, listaAPIClientes, mapaVendedores);
     } catch (e) {
       console.error("Erro crítico ao carregar dados:", e);
     } finally {
@@ -69,85 +74,94 @@ export default function AnaliseVendasPage() {
     }
   };
 
+  // Normaliza o nome para garantir que o CRM cruze com o ERP perfeitamente (Ignora acentos e espaços)
   const normalizeChave = (str: string) => {
       if (!str) return 'DESCONHECIDO';
-      return String(str)
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '') 
-          .replace(/[^a-zA-Z0-9]/g, '') 
-          .toUpperCase();
+      return String(str).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   };
 
-  const construirInteligencia = (vendasCRM: any[], listaAPIProdutos: any[], listaAPIClientes: any[], mapaVendedores: any) => {
+  const construirInteligencia = (vendasCRM: any[], vendasERP: any[], listaAPIProdutos: any[], listaAPIClientes: any[], mapaVendedores: any) => {
     const mapaClientes: any = {};
     const mapaProdutos: any = {};
 
+    // Injeta Base de Produtos
     listaAPIProdutos.forEach(p => {
         if (!p.ativo) return;
-        const nomeOriginal = p.ativo.trim();
-        const key = normalizeChave(nomeOriginal);
-        if (!mapaProdutos[key]) {
-            mapaProdutos[key] = {
-                nome_original: nomeOriginal,
-                totalVendido: 0,
-                quantidadeVendas: 0,
-                historico: [],
-                clientes: new Set(),
-                preco_base: p.preco_grama || 0
-            };
-        }
+        const key = normalizeChave(p.ativo);
+        if (!mapaProdutos[key]) mapaProdutos[key] = { nome_original: p.ativo.trim(), totalVendido: 0, quantidadeVendas: 0, historico: [], clientes: new Set(), totalKg: 0 };
     });
 
+    // Injeta Base de Clientes
     listaAPIClientes.forEach(c => {
         const nomeOriginal = (c.fantasia || c.nome_fantasia || c.razao_social || '').trim();
         if (!nomeOriginal) return;
         const key = normalizeChave(nomeOriginal);
-        if (!mapaClientes[key]) {
-            mapaClientes[key] = {
-                nome_original: nomeOriginal,
-                totalGasto: 0,
-                quantidadeCompras: 0,
-                historico: [],
-                produtosComprados: new Set(),
-                cidade: c.cidade || '',
-                uf: c.uf || '',
-                vendedor_erp: c.vendedor || c.consultor || ''
-            };
-        }
+        if (!mapaClientes[key]) mapaClientes[key] = { nome_original: nomeOriginal, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set(), totalKg: 0 };
     });
 
-    vendasCRM.forEach(venda => {
-        const nomeClienteCRM = venda.nome_cliente || 'Cliente Avulso';
-        const nomeProdutoCRM = venda.produto || 'Produto Diversos';
-        
-        const cKey = normalizeChave(nomeClienteCRM);
-        const pKey = normalizeChave(nomeProdutoCRM);
-        
-        const valor = Number(venda.valor) || 0;
-        const dataVenda = venda.data_entrada || venda.created_at;
-        const vendedor = mapaVendedores[venda.user_id] || 'Consultor Base';
+    // UNIFICAÇÃO DAS VENDAS: Transforma ERP e CRM no mesmo formato
+    const formatarHistorico = (venda: any, origem: 'CRM' | 'ERP') => {
+        if (origem === 'CRM') {
+            return {
+                id: venda.id,
+                cliente_chave: normalizeChave(venda.nome_cliente),
+                cliente_nome: venda.nome_cliente || 'Cliente Avulso',
+                produto_chave: normalizeChave(venda.produto),
+                produto_nome: venda.produto || 'Produto Diverso',
+                valor: Number(venda.valor) || 0,
+                data: venda.data_entrada || venda.created_at,
+                vendedor: mapaVendedores[venda.user_id] || 'Consultor',
+                kg: Number(venda.kg_proposto) || 0,
+                fonte: 'CRM'
+            };
+        } else {
+            return {
+                id: `erp-${Math.random()}`,
+                cliente_chave: normalizeChave(venda.cliente || venda.razao_social || venda.fantasia),
+                cliente_nome: (venda.cliente || venda.razao_social || venda.fantasia || 'Cliente ERP').trim(),
+                produto_chave: normalizeChave(venda.produto || venda.ativo || venda.item),
+                produto_nome: (venda.produto || venda.ativo || venda.item || 'Produto ERP').trim(),
+                valor: Number(venda.valor || venda.total || venda.faturamento || 0),
+                data: venda.data || venda.data_venda || venda.criado_em || new Date().toISOString(),
+                vendedor: (venda.vendedor || venda.representante || 'Vendedor ERP').trim(),
+                kg: Number(venda.kg || venda.quantidade || venda.peso || 0),
+                fonte: 'ERP'
+            };
+        }
+    };
 
-        if (!mapaClientes[cKey]) {
-            mapaClientes[cKey] = { nome_original: nomeClienteCRM, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set(), cidade: '', uf: '', vendedor_erp: '' };
+    const todasAsVendas = [
+        ...vendasERP.map(v => formatarHistorico(v, 'ERP')),
+        ...vendasCRM.map(v => formatarHistorico(v, 'CRM'))
+    ].sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()); // Ordena da mais antiga para a mais nova para calcular recompra
+
+    // Processa a Linha do Tempo Unificada
+    todasAsVendas.forEach(venda => {
+        // Atualiza Cliente
+        if (!mapaClientes[venda.cliente_chave]) {
+            mapaClientes[venda.cliente_chave] = { nome_original: venda.cliente_nome, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set(), totalKg: 0 };
         }
         
-        const isRecompra = mapaClientes[cKey].quantidadeCompras > 0;
-        mapaClientes[cKey].totalGasto += valor;
-        mapaClientes[cKey].quantidadeCompras += 1;
-        mapaClientes[cKey].produtosComprados.add(nomeProdutoCRM);
-        mapaClientes[cKey].historico.unshift({
-            id: venda.id, data: dataVenda, produto: nomeProdutoCRM, valor: valor, vendedor: vendedor, tipo: isRecompra ? 'Recompra' : 'Nova Compra', kg: venda.kg_proposto
+        const isRecompra = mapaClientes[venda.cliente_chave].quantidadeCompras > 0;
+        mapaClientes[venda.cliente_chave].totalGasto += venda.valor;
+        mapaClientes[venda.cliente_chave].totalKg += venda.kg;
+        mapaClientes[venda.cliente_chave].quantidadeCompras += 1;
+        mapaClientes[venda.cliente_chave].produtosComprados.add(venda.produto_nome);
+        mapaClientes[venda.cliente_chave].historico.unshift({
+            id: venda.id, data: venda.data, produto: venda.produto_nome, valor: venda.valor, vendedor: venda.vendedor, tipo: isRecompra ? 'Recompra' : 'Nova Compra', kg: venda.kg, fonte: venda.fonte
         });
 
-        if (!mapaProdutos[pKey]) {
-            mapaProdutos[pKey] = { nome_original: nomeProdutoCRM, totalVendido: 0, quantidadeVendas: 0, historico: [], clientes: new Set(), preco_base: 0 };
+        // Atualiza Produto
+        if (!mapaProdutos[venda.produto_chave]) {
+            mapaProdutos[venda.produto_chave] = { nome_original: venda.produto_nome, totalVendido: 0, quantidadeVendas: 0, historico: [], clientes: new Set(), totalKg: 0 };
         }
         
-        mapaProdutos[pKey].totalVendido += valor;
-        mapaProdutos[pKey].quantidadeVendas += 1;
-        mapaProdutos[pKey].clientes.add(nomeClienteCRM);
-        mapaProdutos[pKey].historico.unshift({
-            id: venda.id, data: dataVenda, cliente: nomeClienteCRM, valor: valor, vendedor: vendedor, kg: venda.kg_proposto
+        mapaProdutos[venda.produto_chave].totalVendido += venda.valor;
+        mapaProdutos[venda.produto_chave].totalKg += venda.kg;
+        mapaProdutos[venda.produto_chave].quantidadeVendas += 1;
+        mapaProdutos[venda.produto_chave].clientes.add(venda.cliente_nome);
+        mapaProdutos[venda.produto_chave].historico.unshift({
+            id: venda.id, data: venda.data, cliente: venda.cliente_nome, valor: venda.valor, vendedor: venda.vendedor, kg: venda.kg, fonte: venda.fonte
         });
     });
 
@@ -177,7 +191,7 @@ export default function AnaliseVendasPage() {
       const agregado: Record<string, number> = {};
       historico.forEach(h => {
           if(!h.data) return;
-          const mesAno = h.data.substring(0, 7); 
+          const mesAno = String(h.data).substring(0, 7); 
           if(!agregado[mesAno]) agregado[mesAno] = 0;
           agregado[mesAno] += h.valor;
       });
@@ -196,13 +210,17 @@ export default function AnaliseVendasPage() {
                 <h1 className="text-3xl font-black text-[#0f392b] tracking-tight flex items-center gap-3">
                     <TrendingUp className="text-[#82D14D]" size={32} /> Análise Profunda de Vendas
                 </h1>
-                <p className="text-slate-500 mt-1 font-medium">Drill-down das propostas ganhas no CRM cruzadas com o ERP.</p>
+                <p className="text-slate-500 mt-1 font-medium">Unificação total do histórico: Propostas do CRM + Vendas do ERP.</p>
             </div>
             
-            <div className="flex gap-3">
-                <div className="bg-white px-5 py-2.5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3" title="Quantidade de propostas com status FECHADO registradas na aba Pipeline.">
-                    <Info size={16} className="text-blue-500"/>
-                    <span className="text-sm font-bold text-slate-600">Vendas no CRM: <strong className="text-blue-600 text-lg">{qtdVendasCrm}</strong></span>
+            <div className="flex flex-wrap gap-3">
+                <div className="bg-white px-5 py-2.5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+                    <Database size={16} className="text-emerald-500"/>
+                    <span className="text-sm font-bold text-slate-600">Histórico ERP: <strong className="text-emerald-600 text-lg">{metricas.erp}</strong> linhas</span>
+                </div>
+                <div className="bg-white px-5 py-2.5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+                    <Activity size={16} className="text-blue-500"/>
+                    <span className="text-sm font-bold text-slate-600">Novas CRM: <strong className="text-blue-600 text-lg">{metricas.crm}</strong> vendas</span>
                 </div>
             </div>
         </div>
@@ -271,7 +289,7 @@ export default function AnaliseVendasPage() {
                             {visaoAtiva === 'clientes' ? <Users size={40} className="text-slate-300"/> : <Package size={40} className="text-slate-300"/>}
                         </div>
                         <h2 className="text-2xl font-black text-slate-700 mb-2">Painel de Raio-X</h2>
-                        <p className="text-slate-500 font-medium max-w-md">Selecione um {visaoAtiva === 'clientes' ? 'cliente' : 'produto'} no menu à esquerda para visualizar métricas detalhadas, gráficos de crescimento e histórico de interações.</p>
+                        <p className="text-slate-500 font-medium max-w-md">Selecione um {visaoAtiva === 'clientes' ? 'cliente' : 'produto'} no menu à esquerda para visualizar a soma total do histórico do ERP com as vendas do CRM.</p>
                     </div>
                 ) : (
                     <div className="flex flex-col h-full animate-in fade-in duration-300">
@@ -295,27 +313,25 @@ export default function AnaliseVendasPage() {
 
                                 <h2 className="text-3xl lg:text-4xl font-black tracking-tight mb-8 leading-tight max-w-3xl">{detalhesItem.nome_original}</h2>
                                 
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                                    <div className="bg-white/10 p-4 rounded-2xl border border-white/10 backdrop-blur-sm">
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                    <div className="bg-white/10 p-4 rounded-2xl border border-white/10 backdrop-blur-sm md:col-span-2">
                                         <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><DollarSign size={12}/> {visaoAtiva === 'clientes' ? 'LTV (Gasto Total)' : 'Receita Gerada'}</p>
                                         <p className="text-2xl font-black text-white">{formatCurrency(detalhesItem.totalGasto || detalhesItem.totalVendido)}</p>
                                     </div>
                                     <div className="bg-white/10 p-4 rounded-2xl border border-white/10 backdrop-blur-sm">
-                                        <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><ShoppingCart size={12}/> {visaoAtiva === 'clientes' ? 'Nº de Compras' : 'Volume de Vendas'}</p>
-                                        <p className="text-2xl font-black text-white">{detalhesItem.quantidadeCompras || detalhesItem.quantidadeVendas} <span className="text-sm text-white/50 font-medium">transações</span></p>
+                                        <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><Package size={12}/> Volume (KG)</p>
+                                        <p className="text-2xl font-black text-[#82D14D]">{detalhesItem.totalKg} <span className="text-sm text-white/50 font-medium">kg</span></p>
                                     </div>
                                     <div className="bg-white/10 p-4 rounded-2xl border border-white/10 backdrop-blur-sm">
-                                        <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><Tag size={12}/> {visaoAtiva === 'clientes' ? 'Ativos Diferentes' : 'Clientes Únicos'}</p>
-                                        <p className="text-2xl font-black text-white">
-                                            {visaoAtiva === 'clientes' ? detalhesItem.produtosComprados.size : detalhesItem.clientes.size} <span className="text-sm text-white/50 font-medium">únicos</span>
-                                        </p>
+                                        <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><ShoppingCart size={12}/> Transações</p>
+                                        <p className="text-2xl font-black text-white">{detalhesItem.quantidadeCompras || detalhesItem.quantidadeVendas}</p>
                                     </div>
                                     <div className="bg-white/10 p-4 rounded-2xl border border-white/10 backdrop-blur-sm">
                                         <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><Activity size={12}/> Ticket Médio</p>
-                                        <p className="text-2xl font-black text-white">
+                                        <p className="text-xl font-black text-white">
                                             {(detalhesItem.quantidadeCompras || detalhesItem.quantidadeVendas) > 0 
                                                 ? formatCurrency((detalhesItem.totalGasto || detalhesItem.totalVendido) / (detalhesItem.quantidadeCompras || detalhesItem.quantidadeVendas)) 
-                                                : 'R$ 0,00'}
+                                                : 'R$ 0'}
                                         </p>
                                     </div>
                                 </div>
@@ -328,11 +344,13 @@ export default function AnaliseVendasPage() {
                                     <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-4">
                                         <Clock size={24}/>
                                     </div>
-                                    <h3 className="text-lg font-bold text-slate-700 mb-2">Aguardando a Primeira Venda</h3>
-                                    <p className="text-slate-500 text-sm">Nenhuma proposta com o status <strong className="text-slate-700">"FECHADO"</strong> foi encontrada para este {visaoAtiva === 'clientes' ? 'cliente' : 'produto'} no Pipeline do CRM.</p>
+                                    <h3 className="text-lg font-bold text-slate-700 mb-2">Sem histórico de vendas</h3>
+                                    <p className="text-slate-500 text-sm">Este {visaoAtiva === 'clientes' ? 'cliente' : 'produto'} não possui registros nem no ERP e nem no CRM.</p>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                                    
+                                    {/* GRÁFICO */}
                                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                                         <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
                                             <BarChart3 className="text-blue-600"/> Evolução de Negócios (Mensal)
@@ -354,6 +372,7 @@ export default function AnaliseVendasPage() {
                                         </div>
                                     </div>
 
+                                    {/* TIMELINE */}
                                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col max-h-[400px]">
                                         <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2 shrink-0">
                                             <Clock className="text-blue-600"/> Histórico de {visaoAtiva === 'clientes' ? 'Compras' : 'Vendas'}
@@ -366,9 +385,15 @@ export default function AnaliseVendasPage() {
                                                     </div>
                                                     <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl flex-1 group-hover:border-blue-300 transition-colors">
                                                         <div className="flex justify-between items-start mb-2">
-                                                            <span className="text-[10px] font-black text-slate-500 flex items-center gap-1">
-                                                                <Calendar size={12}/> {formatDate(hist.data)}
-                                                            </span>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded flex items-center gap-1 ${hist.fonte === 'ERP' ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white'}`}>
+                                                                    {hist.fonte === 'ERP' ? <Database size={10}/> : <Activity size={10}/>} {hist.fonte}
+                                                                </span>
+                                                                <span className="text-[10px] font-black text-slate-500 flex items-center gap-1">
+                                                                    <Calendar size={12}/> {formatDate(hist.data)}
+                                                                </span>
+                                                            </div>
+                                                            
                                                             {visaoAtiva === 'clientes' && (
                                                                 <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${hist.tipo === 'Nova Compra' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-purple-50 text-purple-700 border-purple-200'}`}>
                                                                     {hist.tipo}
@@ -383,7 +408,7 @@ export default function AnaliseVendasPage() {
                                                                 <User size={12} className="text-blue-500"/> {hist.vendedor}
                                                             </div>
                                                             <div className="text-right">
-                                                                {hist.kg && <span className="text-[10px] font-bold text-slate-400 mr-2">{hist.kg} kg</span>}
+                                                                {hist.kg > 0 && <span className="text-[10px] font-bold text-slate-400 mr-2">{hist.kg} kg</span>}
                                                                 <span className="font-black text-slate-700 text-sm">{formatCurrency(hist.valor)}</span>
                                                             </div>
                                                         </div>
