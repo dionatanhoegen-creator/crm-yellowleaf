@@ -41,50 +41,39 @@ export default function AnaliseVendasPage() {
       if (perfilLogado && perfilLogado.cargo !== 'admin') {
           queryVendas = queryVendas.eq('user_id', user.id);
       }
-
-      // 2. Busca Usuários do CRM
       const queryPerfis = supabase.from('perfis').select('id, nome');
 
-      // 3. Executa as conexões com o Data Lake
-      const [resCRM, resPerfis, resProdutos, resClientes] = await Promise.all([
+      // 2. Busca de TODAS as fontes (Produtos, Clientes, e o Faturamento Bruto do ERP)
+      const [resCRM, resPerfis, resProdutos, resClientes, resFaturamento, resVendasERP] = await Promise.all([
           queryVendas,
           queryPerfis,
           fetch(`${API_PRODUTOS_URL}?path=produtos`).then(r => r.json()).catch(() => ({success: false, data: []})),
-          fetch(`${API_CLIENTES_URL}?path=clientes`).then(r => r.json()).catch(() => ({success: false, data: []}))
+          fetch(`${API_CLIENTES_URL}?path=clientes`).then(r => r.json()).catch(() => ({success: false, data: []})),
+          // Tenta ler a aba de Faturamento bruto do Google Sheets
+          fetch(`${API_CLIENTES_URL}?path=faturamento`).then(r => r.json()).catch(() => ({success: false, data: []})),
+          // Fallback caso a aba se chame 'vendas'
+          fetch(`${API_CLIENTES_URL}?path=vendas`).then(r => r.json()).catch(() => ({success: false, data: []}))
       ]);
 
       const vendasCRM = resCRM.data || [];
       const perfis = resPerfis.data || [];
       const listaAPIProdutos = (resProdutos.success && Array.isArray(resProdutos.data)) ? resProdutos.data : [];
       const listaAPIClientes = (resClientes.success && Array.isArray(resClientes.data)) ? resClientes.data : [];
+      
+      // Define a base de vendas do ERP (a que retornar os dados corretos da planilha)
+      let vendasDaPlanilha = [];
+      if (resFaturamento.success && Array.isArray(resFaturamento.data)) {
+          vendasDaPlanilha = resFaturamento.data;
+      } else if (resVendasERP.success && Array.isArray(resVendasERP.data)) {
+          vendasDaPlanilha = resVendasERP.data;
+      }
 
-      // --- A MÁGICA ACONTECE AQUI: DESEMPACOTAMENTO DO ERP ---
-      // Como o ERP guarda as vendas "dentro" do cliente, nós vamos varrer todos os clientes
-      // e extrair o histórico de compras de cada um para formar uma lista única de vendas do ERP.
-      const vendasERPExtraidas: any[] = [];
-
-      listaAPIClientes.forEach(cliente => {
-          // Procura pelo array de histórico (pode chamar historico, vendas, compras...)
-          const historicoDoCliente = cliente.historico || cliente.historico_compras || cliente.vendas || cliente.compras || [];
-          
-          if (Array.isArray(historicoDoCliente)) {
-              historicoDoCliente.forEach(compra => {
-                  vendasERPExtraidas.push({
-                      ...compra, // Pega os dados da compra (produto, data, valor, kg)
-                      // Salva os dados do cliente dono dessa compra como backup
-                      nome_cliente_pai: cliente.fantasia || cliente.nome_fantasia || cliente.razao_social || 'Cliente ERP',
-                      vendedor_pai: cliente.vendedor || cliente.consultor || 'Vendedor ERP'
-                  });
-              });
-          }
-      });
-
-      setMetricas({ crm: vendasCRM.length, erp: vendasERPExtraidas.length });
+      setMetricas({ crm: vendasCRM.length, erp: vendasDaPlanilha.length });
 
       const mapaVendedores: any = {};
       perfis.forEach(p => mapaVendedores[p.id] = p.nome);
 
-      construirInteligencia(vendasCRM, vendasERPExtraidas, listaAPIProdutos, listaAPIClientes, mapaVendedores);
+      construirInteligencia(vendasCRM, vendasDaPlanilha, listaAPIProdutos, listaAPIClientes, mapaVendedores);
     } catch (e) {
       console.error("Erro crítico ao carregar dados:", e);
     } finally {
@@ -92,24 +81,60 @@ export default function AnaliseVendasPage() {
     }
   };
 
-  // Normaliza o nome para cruzar o CRM com o ERP perfeitamente
+  // Limpeza profunda de texto para o CRM e ERP se conectarem perfeitamente
   const normalizeChave = (str: string) => {
       if (!str) return 'DESCONHECIDO';
       return String(str).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  };
+
+  // Funções Anti-Crash para Datas vindo do Google Sheets
+  const extractYYYYMM = (str: string) => {
+      const s = String(str || '').trim();
+      if (s.includes('T')) return s.substring(0, 7); 
+      if (s.match(/^\d{4}-\d{2}-\d{2}/)) return s.substring(0, 7); 
+      if (s.match(/^\d{2}\/\d{2}\/\d{4}/)) {
+          const parts = s.substring(0,10).split('/');
+          return `${parts[2]}-${parts[1]}`;
+      }
+      return '2000-01'; // Fallback seguro
+  };
+
+  const getTimestamp = (str: string) => {
+      const s = String(str || '').trim();
+      if (s.match(/^\d{2}\/\d{2}\/\d{4}/)) {
+          const parts = s.substring(0,10).split('/');
+          return new Date(`${parts[2]}-${parts[1]}-${parts[0]}T12:00:00Z`).getTime();
+      }
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? 0 : d.getTime();
+  };
+
+  const formatDataBRSegura = (str: string) => {
+      const s = String(str || '').trim();
+      if (!s) return '-';
+      if (s.match(/^\d{2}\/\d{2}\/\d{4}/)) return s.substring(0, 10); 
+      if (s.includes('T')) return s.split('T')[0].split('-').reverse().join('/');
+      if (s.match(/^\d{4}-\d{2}-\d{2}/)) return s.substring(0,10).split('-').reverse().join('/');
+      return s;
+  };
+
+  const formatCurrencySafe = (val: any) => {
+      const num = Number(val);
+      if (isNaN(num)) return 'R$ 0,00';
+      return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
 
   const construirInteligencia = (vendasCRM: any[], vendasERP: any[], listaAPIProdutos: any[], listaAPIClientes: any[], mapaVendedores: any) => {
     const mapaClientes: any = {};
     const mapaProdutos: any = {};
 
-    // Injeta Base de Produtos
+    // Injeta Base Oficial
     listaAPIProdutos.forEach(p => {
         if (!p.ativo) return;
         const key = normalizeChave(p.ativo);
         if (!mapaProdutos[key]) mapaProdutos[key] = { nome_original: p.ativo.trim(), totalVendido: 0, quantidadeVendas: 0, historico: [], clientes: new Set(), totalKg: 0 };
     });
 
-    // Injeta Base de Clientes
     listaAPIClientes.forEach(c => {
         const nomeOriginal = (c.fantasia || c.nome_fantasia || c.razao_social || '').trim();
         if (!nomeOriginal) return;
@@ -117,7 +142,7 @@ export default function AnaliseVendasPage() {
         if (!mapaClientes[key]) mapaClientes[key] = { nome_original: nomeOriginal, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set(), totalKg: 0, vendedor_erp: c.vendedor || '' };
     });
 
-    // Padroniza os formatos de CRM e ERP para que falem a mesma língua
+    // Padroniza CRM e ERP
     const formatarHistorico = (venda: any, origem: 'CRM' | 'ERP') => {
         if (origem === 'CRM') {
             return {
@@ -127,7 +152,7 @@ export default function AnaliseVendasPage() {
                 produto_chave: normalizeChave(venda.produto),
                 produto_nome: venda.produto || 'Produto Diverso',
                 valor: Number(venda.valor) || 0,
-                data: venda.data_entrada || venda.created_at,
+                data: venda.data_entrada || venda.created_at || '',
                 vendedor: mapaVendedores[venda.user_id] || 'Consultor',
                 kg: Number(venda.kg_proposto) || 0,
                 fonte: 'CRM'
@@ -135,28 +160,27 @@ export default function AnaliseVendasPage() {
         } else {
             return {
                 id: `erp-${Math.random()}`,
-                cliente_chave: normalizeChave(venda.cliente || venda.nome_cliente_pai),
-                cliente_nome: (venda.cliente || venda.nome_cliente_pai || 'Cliente ERP').trim(),
+                cliente_chave: normalizeChave(venda.cliente || venda.razao_social || venda.fantasia),
+                cliente_nome: String(venda.cliente || venda.razao_social || venda.fantasia || 'Cliente ERP').trim(),
                 produto_chave: normalizeChave(venda.produto || venda.ativo || venda.item),
-                produto_nome: (venda.produto || venda.ativo || venda.item || 'Produto ERP').trim(),
-                valor: Number(venda.valor || venda.total || venda.preco || 0),
-                data: venda.data || venda.data_venda || venda.criado_em || new Date().toISOString(),
-                vendedor: (venda.vendedor || venda.representante || venda.vendedor_pai || 'Vendedor ERP').trim(),
+                produto_nome: String(venda.produto || venda.ativo || venda.item || 'Produto ERP').trim(),
+                valor: Number(venda.valor || venda.total || venda.faturamento || venda.preco || 0),
+                data: String(venda.data || venda.data_venda || venda.criado_em || venda.data_faturamento || ''),
+                vendedor: String(venda.vendedor || venda.representante || 'Vendedor ERP').trim(),
                 kg: Number(venda.kg || venda.quantidade || venda.peso || 0),
                 fonte: 'ERP'
             };
         }
     };
 
-    // Une tudo numa linha do tempo global, da compra mais antiga para a mais nova
+    // Une tudo numa linha do tempo global, ordenando da data mais antiga para a mais nova
     const todasAsVendas = [
         ...vendasERP.map(v => formatarHistorico(v, 'ERP')),
         ...vendasCRM.map(v => formatarHistorico(v, 'CRM'))
-    ].sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime());
+    ].sort((a, b) => getTimestamp(a.data) - getTimestamp(b.data));
 
-    // Processa a Linha do Tempo Unificada e alimenta os gráficos
+    // Processa a Linha do Tempo
     todasAsVendas.forEach(venda => {
-        // Atualiza Cliente
         if (!mapaClientes[venda.cliente_chave]) {
             mapaClientes[venda.cliente_chave] = { nome_original: venda.cliente_nome, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set(), totalKg: 0, vendedor_erp: venda.vendedor };
         }
@@ -171,7 +195,6 @@ export default function AnaliseVendasPage() {
             id: venda.id, data: venda.data, produto: venda.produto_nome, valor: venda.valor, vendedor: venda.vendedor, tipo: isRecompra ? 'Recompra' : 'Nova Compra', kg: venda.kg, fonte: venda.fonte
         });
 
-        // Atualiza Produto
         if (!mapaProdutos[venda.produto_chave]) {
             mapaProdutos[venda.produto_chave] = { nome_original: venda.produto_nome, totalVendido: 0, quantidadeVendas: 0, historico: [], clientes: new Set(), totalKg: 0 };
         }
@@ -190,17 +213,14 @@ export default function AnaliseVendasPage() {
     setDadosProdutos(mapaProdutos);
   };
 
-  const formatCurrency = (val: number) => (Number(val)||0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
-
   const listaDados = visaoAtiva === 'clientes' ? Object.values(dadosClientes) : Object.values(dadosProdutos);
   const listaLateral = listaDados
-      .filter((item: any) => item.nome_original.toLowerCase().includes(busca.toLowerCase()))
+      .filter((item: any) => String(item.nome_original).toLowerCase().includes(busca.toLowerCase()))
       .sort((a: any, b: any) => {
           const valA = a.totalGasto || a.totalVendido || 0;
           const valB = b.totalGasto || b.totalVendido || 0;
           if (valB !== valA) return valB - valA; 
-          return a.nome_original.localeCompare(b.nome_original);
+          return String(a.nome_original).localeCompare(String(b.nome_original));
       })
       .slice(0, 150); 
 
@@ -211,15 +231,14 @@ export default function AnaliseVendasPage() {
   const montarDadosGrafico = (historico: any[]) => {
       const agregado: Record<string, number> = {};
       historico.forEach(h => {
-          if(!h.data) return;
-          const mesAno = String(h.data).substring(0, 7); 
+          const mesAno = extractYYYYMM(h.data); 
           if(!agregado[mesAno]) agregado[mesAno] = 0;
           agregado[mesAno] += h.valor;
       });
-      return Object.keys(agregado).sort().map(k => ({
-          name: k.split('-').reverse().join('/'), 
-          valor: agregado[k]
-      }));
+      return Object.keys(agregado).sort().map(k => {
+          const parts = k.split('-'); 
+          return { name: `${parts[1]}/${parts[0]}`, valor: agregado[k] };
+      });
   };
 
   return (
@@ -231,13 +250,13 @@ export default function AnaliseVendasPage() {
                 <h1 className="text-3xl font-black text-[#0f392b] tracking-tight flex items-center gap-3">
                     <TrendingUp className="text-[#82D14D]" size={32} /> Análise Profunda de Vendas
                 </h1>
-                <p className="text-slate-500 mt-1 font-medium">Unificação total do histórico: Propostas do CRM + Vendas do ERP.</p>
+                <p className="text-slate-500 mt-1 font-medium">Unificação de dados à prova de erros: CRM + Planilha Base Oficial.</p>
             </div>
             
             <div className="flex flex-wrap gap-3">
                 <div className="bg-white px-5 py-2.5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
                     <Database size={16} className="text-emerald-500"/>
-                    <span className="text-sm font-bold text-slate-600">Histórico ERP: <strong className="text-emerald-600 text-lg">{metricas.erp}</strong> linhas</span>
+                    <span className="text-sm font-bold text-slate-600">Planilha ERP: <strong className="text-emerald-600 text-lg">{metricas.erp}</strong> linhas</span>
                 </div>
                 <div className="bg-white px-5 py-2.5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
                     <Activity size={16} className="text-blue-500"/>
@@ -277,7 +296,7 @@ export default function AnaliseVendasPage() {
                         listaLateral.map((item: any) => {
                             const chave = normalizeChave(item.nome_original);
                             const isSelected = itemSelecionado === chave;
-                            const valorStr = formatCurrency(item.totalGasto || item.totalVendido);
+                            const valorStr = formatCurrencySafe(item.totalGasto || item.totalVendido);
                             const qtd = item.quantidadeCompras || item.quantidadeVendas;
                             const temVenda = qtd > 0;
 
@@ -310,7 +329,7 @@ export default function AnaliseVendasPage() {
                             {visaoAtiva === 'clientes' ? <Users size={40} className="text-slate-300"/> : <Package size={40} className="text-slate-300"/>}
                         </div>
                         <h2 className="text-2xl font-black text-slate-700 mb-2">Painel de Raio-X</h2>
-                        <p className="text-slate-500 font-medium max-w-md">Selecione um {visaoAtiva === 'clientes' ? 'cliente' : 'produto'} no menu à esquerda para visualizar a soma total do histórico do ERP com as vendas do CRM.</p>
+                        <p className="text-slate-500 font-medium max-w-md">Selecione um {visaoAtiva === 'clientes' ? 'cliente' : 'produto'} no menu à esquerda para visualizar a soma total do histórico da planilha com as vendas do CRM.</p>
                     </div>
                 ) : (
                     <div className="flex flex-col h-full animate-in fade-in duration-300">
@@ -337,11 +356,11 @@ export default function AnaliseVendasPage() {
                                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                                     <div className="bg-white/10 p-4 rounded-2xl border border-white/10 backdrop-blur-sm md:col-span-2">
                                         <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><DollarSign size={12}/> {visaoAtiva === 'clientes' ? 'LTV (Gasto Total)' : 'Receita Gerada'}</p>
-                                        <p className="text-2xl font-black text-white">{formatCurrency(detalhesItem.totalGasto || detalhesItem.totalVendido)}</p>
+                                        <p className="text-2xl font-black text-white">{formatCurrencySafe(detalhesItem.totalGasto || detalhesItem.totalVendido)}</p>
                                     </div>
                                     <div className="bg-white/10 p-4 rounded-2xl border border-white/10 backdrop-blur-sm">
                                         <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><Package size={12}/> Volume (KG)</p>
-                                        <p className="text-2xl font-black text-[#82D14D]">{detalhesItem.totalKg.toLocaleString('pt-BR')} <span className="text-sm text-white/50 font-medium">kg</span></p>
+                                        <p className="text-2xl font-black text-[#82D14D]">{Number(detalhesItem.totalKg || 0).toLocaleString('pt-BR')} <span className="text-sm text-white/50 font-medium">kg</span></p>
                                     </div>
                                     <div className="bg-white/10 p-4 rounded-2xl border border-white/10 backdrop-blur-sm">
                                         <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><ShoppingCart size={12}/> Transações</p>
@@ -351,7 +370,7 @@ export default function AnaliseVendasPage() {
                                         <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><Activity size={12}/> Ticket Médio</p>
                                         <p className="text-xl font-black text-white">
                                             {(detalhesItem.quantidadeCompras || detalhesItem.quantidadeVendas) > 0 
-                                                ? formatCurrency((detalhesItem.totalGasto || detalhesItem.totalVendido) / (detalhesItem.quantidadeCompras || detalhesItem.quantidadeVendas)) 
+                                                ? formatCurrencySafe((detalhesItem.totalGasto || detalhesItem.totalVendido) / (detalhesItem.quantidadeCompras || detalhesItem.quantidadeVendas)) 
                                                 : 'R$ 0'}
                                         </p>
                                     </div>
@@ -366,12 +385,11 @@ export default function AnaliseVendasPage() {
                                         <Clock size={24}/>
                                     </div>
                                     <h3 className="text-lg font-bold text-slate-700 mb-2">Sem histórico de vendas</h3>
-                                    <p className="text-slate-500 text-sm">Este {visaoAtiva === 'clientes' ? 'cliente' : 'produto'} não possui registros nem no ERP e nem no CRM.</p>
+                                    <p className="text-slate-500 text-sm">Este {visaoAtiva === 'clientes' ? 'cliente' : 'produto'} não possui registros na aba Faturamento da Planilha e nem no CRM.</p>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
                                     
-                                    {/* GRÁFICO */}
                                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                                         <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
                                             <BarChart3 className="text-blue-600"/> Evolução de Negócios (Mensal)
@@ -382,7 +400,7 @@ export default function AnaliseVendasPage() {
                                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                                     <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} dy={10} />
                                                     <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} tickFormatter={(v) => `R$${(v/1000).toFixed(0)}k`} />
-                                                    <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', fontSize: '12px', fontWeight: 'bold'}} formatter={(val: number) => [formatCurrency(val), "Volume"]} />
+                                                    <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)', fontSize: '12px', fontWeight: 'bold'}} formatter={(val: number) => [formatCurrencySafe(val), "Volume"]} />
                                                     <Bar dataKey="valor" fill="#3b82f6" radius={[4, 4, 0, 0]}>
                                                         {montarDadosGrafico(detalhesItem.historico).map((entry, index) => (
                                                             <Cell key={`cell-${index}`} fill={index === montarDadosGrafico(detalhesItem.historico).length - 1 ? '#82D14D' : '#3b82f6'} />
@@ -393,7 +411,6 @@ export default function AnaliseVendasPage() {
                                         </div>
                                     </div>
 
-                                    {/* TIMELINE */}
                                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col max-h-[400px]">
                                         <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2 shrink-0">
                                             <Clock className="text-blue-600"/> Histórico de {visaoAtiva === 'clientes' ? 'Compras' : 'Vendas'}
@@ -411,7 +428,7 @@ export default function AnaliseVendasPage() {
                                                                     {hist.fonte === 'ERP' ? <Database size={10}/> : <Activity size={10}/>} {hist.fonte}
                                                                 </span>
                                                                 <span className="text-[10px] font-black text-slate-500 flex items-center gap-1">
-                                                                    <Calendar size={12}/> {formatDate(hist.data)}
+                                                                    <Calendar size={12}/> {formatDataBRSegura(hist.data)}
                                                                 </span>
                                                             </div>
                                                             
@@ -430,7 +447,7 @@ export default function AnaliseVendasPage() {
                                                             </div>
                                                             <div className="text-right">
                                                                 {hist.kg > 0 && <span className="text-[10px] font-bold text-slate-400 mr-2">{hist.kg} kg</span>}
-                                                                <span className="font-black text-slate-700 text-sm">{formatCurrency(hist.valor)}</span>
+                                                                <span className="font-black text-slate-700 text-sm">{formatCurrencySafe(hist.valor)}</span>
                                                             </div>
                                                         </div>
                                                     </div>
