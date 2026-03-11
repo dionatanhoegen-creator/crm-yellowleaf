@@ -45,28 +45,46 @@ export default function AnaliseVendasPage() {
       // 2. Busca Usuários do CRM
       const queryPerfis = supabase.from('perfis').select('id, nome');
 
-      // 3. Executa todas as conexões com o Data Lake simultaneamente
-      const [resCRM, resPerfis, resProdutos, resClientes, resVendasERP] = await Promise.all([
+      // 3. Executa as conexões com o Data Lake
+      const [resCRM, resPerfis, resProdutos, resClientes] = await Promise.all([
           queryVendas,
           queryPerfis,
           fetch(`${API_PRODUTOS_URL}?path=produtos`).then(r => r.json()).catch(() => ({success: false, data: []})),
-          fetch(`${API_CLIENTES_URL}?path=clientes`).then(r => r.json()).catch(() => ({success: false, data: []})),
-          // ---> NOVA CONEXÃO: Busca o histórico maciço de vendas do ERP
-          fetch(`${API_CLIENTES_URL}?path=vendas`).then(r => r.json()).catch(() => ({success: false, data: []})) 
+          fetch(`${API_CLIENTES_URL}?path=clientes`).then(r => r.json()).catch(() => ({success: false, data: []}))
       ]);
 
       const vendasCRM = resCRM.data || [];
       const perfis = resPerfis.data || [];
       const listaAPIProdutos = (resProdutos.success && Array.isArray(resProdutos.data)) ? resProdutos.data : [];
       const listaAPIClientes = (resClientes.success && Array.isArray(resClientes.data)) ? resClientes.data : [];
-      const vendasERP = (resVendasERP.success && Array.isArray(resVendasERP.data)) ? resVendasERP.data : [];
 
-      setMetricas({ crm: vendasCRM.length, erp: vendasERP.length });
+      // --- A MÁGICA ACONTECE AQUI: DESEMPACOTAMENTO DO ERP ---
+      // Como o ERP guarda as vendas "dentro" do cliente, nós vamos varrer todos os clientes
+      // e extrair o histórico de compras de cada um para formar uma lista única de vendas do ERP.
+      const vendasERPExtraidas: any[] = [];
+
+      listaAPIClientes.forEach(cliente => {
+          // Procura pelo array de histórico (pode chamar historico, vendas, compras...)
+          const historicoDoCliente = cliente.historico || cliente.historico_compras || cliente.vendas || cliente.compras || [];
+          
+          if (Array.isArray(historicoDoCliente)) {
+              historicoDoCliente.forEach(compra => {
+                  vendasERPExtraidas.push({
+                      ...compra, // Pega os dados da compra (produto, data, valor, kg)
+                      // Salva os dados do cliente dono dessa compra como backup
+                      nome_cliente_pai: cliente.fantasia || cliente.nome_fantasia || cliente.razao_social || 'Cliente ERP',
+                      vendedor_pai: cliente.vendedor || cliente.consultor || 'Vendedor ERP'
+                  });
+              });
+          }
+      });
+
+      setMetricas({ crm: vendasCRM.length, erp: vendasERPExtraidas.length });
 
       const mapaVendedores: any = {};
       perfis.forEach(p => mapaVendedores[p.id] = p.nome);
 
-      construirInteligencia(vendasCRM, vendasERP, listaAPIProdutos, listaAPIClientes, mapaVendedores);
+      construirInteligencia(vendasCRM, vendasERPExtraidas, listaAPIProdutos, listaAPIClientes, mapaVendedores);
     } catch (e) {
       console.error("Erro crítico ao carregar dados:", e);
     } finally {
@@ -74,7 +92,7 @@ export default function AnaliseVendasPage() {
     }
   };
 
-  // Normaliza o nome para garantir que o CRM cruze com o ERP perfeitamente (Ignora acentos e espaços)
+  // Normaliza o nome para cruzar o CRM com o ERP perfeitamente
   const normalizeChave = (str: string) => {
       if (!str) return 'DESCONHECIDO';
       return String(str).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
@@ -96,10 +114,10 @@ export default function AnaliseVendasPage() {
         const nomeOriginal = (c.fantasia || c.nome_fantasia || c.razao_social || '').trim();
         if (!nomeOriginal) return;
         const key = normalizeChave(nomeOriginal);
-        if (!mapaClientes[key]) mapaClientes[key] = { nome_original: nomeOriginal, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set(), totalKg: 0 };
+        if (!mapaClientes[key]) mapaClientes[key] = { nome_original: nomeOriginal, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set(), totalKg: 0, vendedor_erp: c.vendedor || '' };
     });
 
-    // UNIFICAÇÃO DAS VENDAS: Transforma ERP e CRM no mesmo formato
+    // Padroniza os formatos de CRM e ERP para que falem a mesma língua
     const formatarHistorico = (venda: any, origem: 'CRM' | 'ERP') => {
         if (origem === 'CRM') {
             return {
@@ -117,29 +135,30 @@ export default function AnaliseVendasPage() {
         } else {
             return {
                 id: `erp-${Math.random()}`,
-                cliente_chave: normalizeChave(venda.cliente || venda.razao_social || venda.fantasia),
-                cliente_nome: (venda.cliente || venda.razao_social || venda.fantasia || 'Cliente ERP').trim(),
+                cliente_chave: normalizeChave(venda.cliente || venda.nome_cliente_pai),
+                cliente_nome: (venda.cliente || venda.nome_cliente_pai || 'Cliente ERP').trim(),
                 produto_chave: normalizeChave(venda.produto || venda.ativo || venda.item),
                 produto_nome: (venda.produto || venda.ativo || venda.item || 'Produto ERP').trim(),
-                valor: Number(venda.valor || venda.total || venda.faturamento || 0),
+                valor: Number(venda.valor || venda.total || venda.preco || 0),
                 data: venda.data || venda.data_venda || venda.criado_em || new Date().toISOString(),
-                vendedor: (venda.vendedor || venda.representante || 'Vendedor ERP').trim(),
+                vendedor: (venda.vendedor || venda.representante || venda.vendedor_pai || 'Vendedor ERP').trim(),
                 kg: Number(venda.kg || venda.quantidade || venda.peso || 0),
                 fonte: 'ERP'
             };
         }
     };
 
+    // Une tudo numa linha do tempo global, da compra mais antiga para a mais nova
     const todasAsVendas = [
         ...vendasERP.map(v => formatarHistorico(v, 'ERP')),
         ...vendasCRM.map(v => formatarHistorico(v, 'CRM'))
-    ].sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()); // Ordena da mais antiga para a mais nova para calcular recompra
+    ].sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime());
 
-    // Processa a Linha do Tempo Unificada
+    // Processa a Linha do Tempo Unificada e alimenta os gráficos
     todasAsVendas.forEach(venda => {
         // Atualiza Cliente
         if (!mapaClientes[venda.cliente_chave]) {
-            mapaClientes[venda.cliente_chave] = { nome_original: venda.cliente_nome, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set(), totalKg: 0 };
+            mapaClientes[venda.cliente_chave] = { nome_original: venda.cliente_nome, totalGasto: 0, quantidadeCompras: 0, historico: [], produtosComprados: new Set(), totalKg: 0, vendedor_erp: venda.vendedor };
         }
         
         const isRecompra = mapaClientes[venda.cliente_chave].quantidadeCompras > 0;
@@ -147,6 +166,7 @@ export default function AnaliseVendasPage() {
         mapaClientes[venda.cliente_chave].totalKg += venda.kg;
         mapaClientes[venda.cliente_chave].quantidadeCompras += 1;
         mapaClientes[venda.cliente_chave].produtosComprados.add(venda.produto_nome);
+        
         mapaClientes[venda.cliente_chave].historico.unshift({
             id: venda.id, data: venda.data, produto: venda.produto_nome, valor: venda.valor, vendedor: venda.vendedor, tipo: isRecompra ? 'Recompra' : 'Nova Compra', kg: venda.kg, fonte: venda.fonte
         });
@@ -160,6 +180,7 @@ export default function AnaliseVendasPage() {
         mapaProdutos[venda.produto_chave].totalKg += venda.kg;
         mapaProdutos[venda.produto_chave].quantidadeVendas += 1;
         mapaProdutos[venda.produto_chave].clientes.add(venda.cliente_nome);
+        
         mapaProdutos[venda.produto_chave].historico.unshift({
             id: venda.id, data: venda.data, cliente: venda.cliente_nome, valor: venda.valor, vendedor: venda.vendedor, kg: venda.kg, fonte: venda.fonte
         });
@@ -320,7 +341,7 @@ export default function AnaliseVendasPage() {
                                     </div>
                                     <div className="bg-white/10 p-4 rounded-2xl border border-white/10 backdrop-blur-sm">
                                         <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><Package size={12}/> Volume (KG)</p>
-                                        <p className="text-2xl font-black text-[#82D14D]">{detalhesItem.totalKg} <span className="text-sm text-white/50 font-medium">kg</span></p>
+                                        <p className="text-2xl font-black text-[#82D14D]">{detalhesItem.totalKg.toLocaleString('pt-BR')} <span className="text-sm text-white/50 font-medium">kg</span></p>
                                     </div>
                                     <div className="bg-white/10 p-4 rounded-2xl border border-white/10 backdrop-blur-sm">
                                         <p className="text-[10px] text-white/60 font-bold uppercase tracking-wider mb-1 flex items-center gap-1"><ShoppingCart size={12}/> Transações</p>
