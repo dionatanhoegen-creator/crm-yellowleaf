@@ -9,15 +9,14 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
   LayoutDashboard, Users, Trello, Package, Lock, 
   BarChart3, LogOut, Menu, X, ChevronRight,
-  FileText, Shield, ChevronDown, Stethoscope, Lightbulb, CalendarCheck, Target, TrendingUp
+  FileText, Shield, ChevronDown, Stethoscope, Lightbulb, CalendarCheck, Target, TrendingUp, Bell, CheckCircle2
 } from 'lucide-react';
 
 const outfit = Outfit({ subsets: ["latin"] });
 
-// Definição original dos itens com a sua "chave" de acesso correspondente
 const MENU_BASE = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard, key: 'faturamento' },
-  { name: 'Análise de Vendas', path: '/analise-vendas', icon: TrendingUp, key: 'faturamento' }, // Nova aba de Análise profunda
+  { name: 'Análise de Vendas', path: '/analise-vendas', icon: TrendingUp, key: 'faturamento' },
   { name: 'Prospecção', path: '/prospeccao', icon: Target, key: 'pipeline' },
   { name: 'Inteligência', path: '/inteligencia', icon: Lightbulb, key: 'inteligencia' },
   { name: 'Clientes', path: '/clientes', icon: Users, key: 'clientes' },
@@ -41,9 +40,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const [userEmail, setUserEmail] = useState("Carregando..."); 
   const [menuPermitido, setMenuPermitido] = useState<any[]>([]);
 
+  // --- ESTADOS DO SISTEMA DE NOTIFICAÇÕES ---
+  const [notificacoes, setNotificacoes] = useState<any[]>([]);
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+
   const isLoginPage = pathname === '/login';
 
+  // --- O BARULHINHO (SOM DE NOTIFICAÇÃO) ---
+  const tocarSom = () => {
+      try {
+          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+          audio.play();
+      } catch (e) { console.error("Sem permissão para tocar som.", e); }
+  };
+
   useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+
     const carregarAcessos = async () => {
       if (isLoginPage) return;
 
@@ -60,6 +73,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         } else {
             setMenuPermitido([]);
         }
+
+        // Busca notificações imediatas
+        buscarNotificacoes(user.id);
+        // Deixa o "Radar" ligado a cada 15 segundos
+        intervalId = setInterval(() => buscarNotificacoes(user.id), 15000);
+
       } else {
         setUserEmail("Visitante");
         setMenuPermitido([]);
@@ -67,8 +86,42 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     };
 
     carregarAcessos();
+
+    return () => {
+        if (intervalId) clearInterval(intervalId);
+    };
   }, [supabase, isLoginPage]);
 
+  // Função que busca as notificações no banco
+  const buscarNotificacoes = async (userId: string) => {
+      const { data } = await supabase
+          .from('notificacoes')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(20);
+
+      if (data) {
+          setNotificacoes(prev => {
+              const novasNaoLidas = data.filter(d => !d.lida).length;
+              const antigasNaoLidas = prev.filter(p => !p.lida).length;
+              
+              // Se o número de não lidas aumentou, toca o sino!
+              if (novasNaoLidas > antigasNaoLidas) {
+                  tocarSom();
+              }
+              return data;
+          });
+      }
+  };
+
+  // Marcar como lida
+  const marcarComoLida = async (id: string) => {
+      // Atualiza na tela na hora
+      setNotificacoes(prev => prev.map(n => n.id === id ? { ...n, lida: true } : n));
+      // Grava no banco
+      await supabase.from('notificacoes').update({ lida: true }).eq('id', id);
+  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -86,6 +139,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </html>
     );
   }
+
+  const notificacoesNaoLidas = notificacoes.filter(n => !n.lida).length;
 
   return (
     <html lang="pt-br">
@@ -110,7 +165,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
 
             {/* --- BARRA DE NAVEGAÇÃO RÁPIDA (DINÂMICA) --- */}
-            <div className="hidden md:flex items-center gap-2 pl-6 border-l border-slate-200 h-8 overflow-hidden max-w-2xl">
+            <div className="hidden lg:flex items-center gap-2 pl-6 border-l border-slate-200 h-8 overflow-hidden max-w-2xl">
                {menuPermitido.slice(0, 5).map((item) => {
                  const active = pathname === item.path;
                  return (
@@ -130,43 +185,99 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </div>
 
-          {/* --- PERFIL (DIREITA) COM DROPDOWN --- */}
-          <div className="relative shrink-0">
-             <button 
-                onClick={() => setIsProfileOpen(!isProfileOpen)}
-                className="flex items-center gap-3 hover:bg-slate-50 p-2 rounded-xl transition"
-             >
-                 <div className="text-right hidden sm:block">
-                    <p className="text-xs font-bold text-slate-700 max-w-[150px] truncate">{userEmail}</p>
-                    <p className="text-[10px] text-green-600 font-bold">Usuário Conectado</p>
-                 </div>
-                 <div className="w-9 h-9 rounded-full bg-[#0f392b] text-[#82D14D] flex items-center justify-center font-bold text-sm border-2 border-[#82D14D]">
-                    {userEmail.substring(0, 2).toUpperCase()}
-                 </div>
-                 <ChevronDown size={16} className={`text-slate-400 transition-transform ${isProfileOpen ? 'rotate-180' : ''}`}/>
-             </button>
+          <div className="flex items-center gap-3">
+             
+             {/* --- O SININHO DE NOTIFICAÇÕES --- */}
+             <div className="relative">
+                 <button 
+                     onClick={() => { setIsNotifOpen(!isNotifOpen); setIsProfileOpen(false); }}
+                     className={`p-2.5 rounded-xl transition relative ${isNotifOpen ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
+                 >
+                     <Bell size={20} className={notificacoesNaoLidas > 0 ? "animate-pulse" : ""} />
+                     {notificacoesNaoLidas > 0 && (
+                         <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black flex items-center justify-center rounded-full shadow-sm shadow-red-200 border-2 border-white">
+                             {notificacoesNaoLidas}
+                         </span>
+                     )}
+                 </button>
 
-             {isProfileOpen && (
-               <>
-                 <div className="fixed inset-0 z-[30]" onClick={() => setIsProfileOpen(false)}></div> 
-                 <div className="absolute right-0 top-14 w-48 bg-white rounded-xl shadow-xl border border-slate-100 p-2 z-[40] animate-in fade-in slide-in-from-top-2">
-                    <div className="px-3 py-2 border-b border-slate-100 mb-1">
-                       <p className="text-xs font-bold text-slate-400 uppercase">Minha Conta</p>
+                 {isNotifOpen && (
+                     <>
+                         <div className="fixed inset-0 z-[30]" onClick={() => setIsNotifOpen(false)}></div>
+                         <div className="absolute right-0 top-14 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 z-[40] overflow-hidden animate-in fade-in slide-in-from-top-4 flex flex-col max-h-[400px]">
+                             <div className="p-4 bg-slate-800 flex justify-between items-center text-white shrink-0">
+                                 <h3 className="font-bold text-sm flex items-center gap-2"><Bell size={16} className="text-yellow-400"/> Notificações</h3>
+                                 <span className="text-[10px] font-black uppercase tracking-widest bg-white/20 px-2 py-0.5 rounded">{notificacoesNaoLidas} Novas</span>
+                             </div>
+                             
+                             <div className="flex-1 overflow-y-auto custom-scrollbar p-2 bg-slate-50">
+                                 {notificacoes.length === 0 ? (
+                                     <p className="text-center text-slate-400 text-xs p-6 font-medium">Nenhuma notificação por enquanto.</p>
+                                 ) : (
+                                     notificacoes.map((n: any) => (
+                                         <div 
+                                             key={n.id} 
+                                             onClick={() => marcarComoLida(n.id)}
+                                             className={`p-3 mb-2 rounded-xl text-sm border transition cursor-pointer flex gap-3 ${n.lida ? 'bg-transparent border-transparent opacity-60 hover:bg-slate-100' : 'bg-white border-blue-200 shadow-sm hover:border-blue-300'}`}
+                                         >
+                                             <div className="mt-1">
+                                                 {n.lida ? <CheckCircle2 size={16} className="text-slate-300"/> : <div className="w-2.5 h-2.5 rounded-full bg-blue-500 mt-1 shadow-sm shadow-blue-200"></div>}
+                                             </div>
+                                             <div>
+                                                 <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-0.5">{n.remetente || 'Sistema'}</p>
+                                                 <p className={`text-xs ${n.lida ? 'text-slate-500' : 'text-slate-800 font-bold'}`}>{n.mensagem}</p>
+                                                 <span className="text-[9px] text-slate-400 font-medium block mt-1">{new Date(n.created_at).toLocaleString('pt-BR')}</span>
+                                             </div>
+                                         </div>
+                                     ))
+                                 )}
+                             </div>
+                         </div>
+                     </>
+                 )}
+             </div>
+
+             <div className="w-px h-6 bg-slate-200 hidden sm:block"></div>
+
+             {/* --- PERFIL COM DROPDOWN --- */}
+             <div className="relative shrink-0">
+                <button 
+                   onClick={() => { setIsProfileOpen(!isProfileOpen); setIsNotifOpen(false); }}
+                   className="flex items-center gap-3 hover:bg-slate-50 p-2 rounded-xl transition"
+                >
+                    <div className="text-right hidden sm:block">
+                       <p className="text-xs font-bold text-slate-700 max-w-[150px] truncate">{userEmail}</p>
+                       <p className="text-[10px] text-green-600 font-bold">Usuário Conectado</p>
                     </div>
-                    {menuPermitido.some(m => m.key === 'admin') && (
-                        <Link href="/equipe" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-lg transition font-medium">
-                           <Shield size={16}/> Gestão de Acessos
-                        </Link>
-                    )}
-                    <button 
-                       onClick={handleLogout}
-                       className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition font-bold mt-1"
-                    >
-                       <LogOut size={16}/> Sair do Sistema
-                    </button>
-                 </div>
-               </>
-             )}
+                    <div className="w-9 h-9 rounded-full bg-[#0f392b] text-[#82D14D] flex items-center justify-center font-bold text-sm border-2 border-[#82D14D]">
+                       {userEmail.substring(0, 2).toUpperCase()}
+                    </div>
+                    <ChevronDown size={16} className={`text-slate-400 transition-transform ${isProfileOpen ? 'rotate-180' : ''}`}/>
+                </button>
+
+                {isProfileOpen && (
+                  <>
+                    <div className="fixed inset-0 z-[30]" onClick={() => setIsProfileOpen(false)}></div> 
+                    <div className="absolute right-0 top-14 w-48 bg-white rounded-xl shadow-xl border border-slate-100 p-2 z-[40] animate-in fade-in slide-in-from-top-2">
+                       <div className="px-3 py-2 border-b border-slate-100 mb-1">
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Minha Conta</p>
+                       </div>
+                       {menuPermitido.some(m => m.key === 'admin') && (
+                           <Link href="/equipe" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-lg transition font-medium">
+                              <Shield size={16}/> Gestão de Acessos
+                           </Link>
+                       )}
+                       <button 
+                          onClick={handleLogout}
+                          className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition font-bold mt-1"
+                       >
+                          <LogOut size={16}/> Sair do Sistema
+                       </button>
+                    </div>
+                  </>
+                )}
+             </div>
+
           </div>
         </header>
 

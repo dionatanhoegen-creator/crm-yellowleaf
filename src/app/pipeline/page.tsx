@@ -6,7 +6,7 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -47,6 +47,7 @@ export default function PipelinePage() {
   const [produtosApi, setProdutosApi] = useState<any[]>([]); 
   const [exclusividades, setExclusividades] = useState<any[]>([]); 
   const [baseClientesExterna, setBaseClientesExterna] = useState<any[]>([]); 
+  const [equipe, setEquipe] = useState<any[]>([]); // Lista de vendedores para o Hand-off
   
   const [loading, setLoading] = useState(true);
   const [loadingProdutos, setLoadingProdutos] = useState(true);
@@ -59,18 +60,15 @@ export default function PipelinePage() {
   const [editingOp, setEditingOp] = useState<any>(null);
   const [blockModal, setBlockModal] = useState({ open: false, title: '', message: '', motivo: '' });
   
-  const [confirmModal, setConfirmModal] = useState<{open: boolean, message: string, onConfirm: () => void, onCancel: () => void}>({
-      open: false, message: '', onConfirm: () => {}, onCancel: () => {}
+  const [confirmModal, setConfirmModal] = useState<{open: boolean, title?: string, message: string, onConfirm: () => void, onCancel: () => void}>({
+      open: false, title: 'AVISO IMPORTANTE', message: '', onConfirm: () => {}, onCancel: () => {}
   });
 
   const [reportConfigOpen, setReportConfigOpen] = useState(false);
-  const [reportSort, setReportSort] = useState('numero'); 
   const [novaNotaInput, setNovaNotaInput] = useState("");
 
-  const [reportColumns, setReportColumns] = useState({
-      numero: true, cliente: true, produto: true, estagio: true,
-      valor: true, entrada: true, canal: true, cidade: false, uf: false, contato: false
-  });
+  // CONTROLES DE SDR (Hand-off)
+  const [isRepLocked, setIsRepLocked] = useState(false); // Trava o dropdown se o ERP já ditar o dono
 
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -87,7 +85,8 @@ export default function PipelinePage() {
     canal_contato: 'WhatsApp', observacoes: '', observacoes_proposta: '', 
     status: 'prospeccao', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45',
     peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', 
-    cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0
+    cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0,
+    user_id: '' // O Vendedor Responsável Final
   });
 
   useEffect(() => { 
@@ -97,6 +96,7 @@ export default function PipelinePage() {
 
   const inicializarDados = async () => {
     setLoading(true);
+    
     const { data: { user } } = await supabase.auth.getUser();
     let perfilUsuario = null;
     
@@ -106,6 +106,9 @@ export default function PipelinePage() {
         setUsuarioLogado(perfil);
     }
     
+    const { data: listaEquipe } = await supabase.from('perfis').select('id, nome, cargo').order('nome');
+    if (listaEquipe) setEquipe(listaEquipe);
+
     await Promise.all([
         carregarOportunidades(perfilUsuario), 
         carregarProdutosDaAPI(), 
@@ -136,7 +139,7 @@ export default function PipelinePage() {
         const res = await fetch(`${API_CLIENTES_URL}?path=clientes`);
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) setBaseClientesExterna(json.data);
-    } catch (e) { console.error("Erro base externa:", e); }
+    } catch (e) {}
   };
 
   const carregarProdutosDaAPI = async () => {
@@ -157,9 +160,16 @@ export default function PipelinePage() {
   };
 
   const carregarOportunidades = async (perfil: any) => {
-    let query = supabase.from('pipeline').select('*').order('created_at', { ascending: false });
-    if (perfil && perfil.cargo !== 'admin') query = query.eq('user_id', perfil.id);
-    const { data } = await query;
+    // Busca oportunidades. Se não for admin, busca as que ele é o dono (user_id) OU as que ele repassou (sdr_id)
+    let query = supabase.from('pipeline').select('*, responsavel:perfis!pipeline_user_id_fkey(nome)').order('created_at', { ascending: false });
+    
+    if (perfil && perfil.cargo !== 'admin') {
+        // Usa o OR para Co-Propriedade
+        query = query.or(`user_id.eq.${perfil.id},sdr_id.eq.${perfil.id}`);
+    }
+    
+    const { data, error } = await query;
+    if (error) console.error(error);
     setOportunidades(data || []);
   };
 
@@ -229,7 +239,6 @@ export default function PipelinePage() {
 
   const continuarBuscaCNPJ = async (cnpjLimpo: string) => {
     
-    // --- BUSCA PROFUNDA (DEEP SEARCH) NO ERP ---
     const clienteNaBase = baseClientesExterna.find(c => {
         const cnpjDireto = String(c.cnpj || c.CNPJ || c.documento || c.Documento || '').replace(/\D/g, '');
         if (cnpjDireto === cnpjLimpo) return true;
@@ -252,9 +261,7 @@ export default function PipelinePage() {
         const motivoBloqueio = chavesERP.motivobloqueio || chavesERP.motivo || 'Verifique com o financeiro.';
         const vendedorERP = String(chavesERP.vendedor || chavesERP.consultor || chavesERP.representante || '').trim();
         const nomeFantasiaOuRazao = String(chavesERP.fantasia || chavesERP['nome fantasia'] || chavesERP.razaosocial || chavesERP['razão social'] || 'Cliente do ERP').toUpperCase();
-        const meuNome = String(usuarioLogado?.nome || '').trim();
 
-        // Bloqueio 1: Cliente Inadimplente/Bloqueado
         if (isBloqueado) {
             setBlockModal({
                 open: true,
@@ -267,37 +274,55 @@ export default function PipelinePage() {
             return; 
         }
 
-        // Bloqueio 2: Carteira Fechada - REGRA IRREDUTÍVEL PARA TODOS (SEM BYPASS DE ADMIN)
+        // --- INTELIGÊNCIA DE REPASSE (SDR) ---
         if (vendedorERP !== "") {
-            // Se o nome do vendedor no ERP for diferente do nome do usuário logado, BLOQUEIA NA HORA.
-            if (vendedorERP.toLowerCase() !== meuNome.toLowerCase()) {
-                setBlockModal({
+            // Procura quem é esse vendedorERP na nossa base de usuários
+            const repEncontrado = equipe.find(u => 
+                vendedorERP.toLowerCase().includes(u.nome.toLowerCase()) || 
+                u.nome.toLowerCase().includes(vendedorERP.toLowerCase())
+            );
+
+            if (repEncontrado) {
+                // Achei o dono! Trava o dropdown nele.
+                setIsRepLocked(true);
+                
+                setConfirmModal({
                     open: true,
-                    title: 'ACESSO NEGADO',
-                    message: `A farmácia "${nomeFantasiaOuRazao}" JÁ ESTÁ CADASTRADA.`,
-                    motivo: `Pertence ao vendedor: ${vendedorERP.toUpperCase()}.\n\nNão é possível avançar pois você não é o vendedor desta carteira.`
+                    title: 'DIRECIONAMENTO AUTOMÁTICO',
+                    message: `A farmácia "${nomeFantasiaOuRazao}" já pertence à carteira de ${repEncontrado.nome.toUpperCase()}.\n\nAo continuar, esta oportunidade será criada e repassada automaticamente para o Pipeline dele(a).`,
+                    onConfirm: () => {
+                        setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
+                        setFormData(prev => ({ ...prev, user_id: repEncontrado.id }));
+                        preencherDadosAPI(cnpjLimpo, chavesERP);
+                    },
+                    onCancel: () => {
+                        setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
+                        setFormData(prev => ({ ...prev, cnpj: '', user_id: usuarioLogado.id })); 
+                        setIsRepLocked(false);
+                        setLoadingCNPJ(false);
+                    }
                 });
-                setFormData(prev => ({ ...prev, cnpj: '' }));
-                setLoadingCNPJ(false);
-                return; 
+                return;
+            } else {
+                 // Vendedor existe no ERP mas não tem conta no CRM
+                 setBlockModal({
+                     open: true,
+                     title: 'ACESSO NEGADO',
+                     message: `A farmácia "${nomeFantasiaOuRazao}" JÁ ESTÁ CADASTRADA.`,
+                     motivo: `Pertence ao vendedor: ${vendedorERP.toUpperCase()}.\n\nEste vendedor não possui conta ativa no CRM para receber o repasse.`
+                 });
+                 setFormData(prev => ({ ...prev, cnpj: '' }));
+                 setLoadingCNPJ(false);
+                 return; 
             }
-        } else {
-             // Se estiver no ERP mas sem vendedor definido
-             setBlockModal({
-                 open: true,
-                 title: 'ACESSO NEGADO',
-                 message: `A farmácia "${nomeFantasiaOuRazao}" JÁ ESTÁ CADASTRADA.`,
-                 motivo: `Não é possível avançar pois a carteira deste cliente não possui um vendedor vinculado a você. Verifique o ERP Oficial.`
-             });
-             setFormData(prev => ({ ...prev, cnpj: '' }));
-             setLoadingCNPJ(false);
-             return; 
         }
 
-        // ALERTA 3: É cliente ativo DA PRÓPRIA PESSOA (Upsell)
+        // Se for cliente ativo mas sem vendedor definido no ERP (Avulso)
+        setIsRepLocked(false);
         setConfirmModal({
             open: true,
-            message: `A farmácia "${nomeFantasiaOuRazao}" já é sua cliente oficial. Deseja criar uma nova proposta (Upsell) para ela?`,
+            title: 'FARMÁCIA SEM CARTEIRA',
+            message: `A farmácia "${nomeFantasiaOuRazao}" é cliente ativo mas não tem um representante fixo no ERP.\n\nDeseja criar uma nova oportunidade e escolher o representante manualmente?`,
             onConfirm: () => {
                 setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
                 preencherDadosAPI(cnpjLimpo, chavesERP);
@@ -311,7 +336,8 @@ export default function PipelinePage() {
         return;
     }
 
-    // Se não encontrou no ERP, busca direto da Receita Federal
+    // Cliente 100% novo na base da Receita
+    setIsRepLocked(false);
     preencherDadosAPI(cnpjLimpo, null);
   };
 
@@ -355,61 +381,49 @@ export default function PipelinePage() {
   const gerarRelatorioGeral = () => {
     const doc = new jsPDF({ orientation: "landscape" });
     
-    doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(30, 41, 59);
-    doc.text("RELATÓRIO GERAL DE PIPELINE", 14, 15);
+    try { doc.addImage("/logo.png", "PNG", 14, 10, 40, 15); } 
+    catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 14, 10, 40, 15); } catch (err) {} }
+
+    doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(20, 83, 45);
+    doc.text("RELATÓRIO DE PIPELINE E OPORTUNIDADES", 14, 35);
     
     doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(100);
-    doc.text(`Gerado em: ${new Date().toLocaleDateString()} às ${new Date().toLocaleTimeString()} por ${usuarioLogado?.nome || 'Sistema'}`, 14, 21);
+    doc.text(`Extraído em: ${new Date().toLocaleString('pt-BR')} por ${usuarioLogado?.nome || 'Sistema'}`, 14, 41);
 
     let dadosOrdenados = [...oportunidades];
-    if (reportSort === 'cliente') {
-        dadosOrdenados.sort((a, b) => a.nome_cliente.localeCompare(b.nome_cliente));
-    } else if (reportSort === 'estagio') {
-        const ordemEstagios = ESTAGIOS.map(e => e.id);
-        dadosOrdenados.sort((a, b) => ordemEstagios.indexOf(a.status) - ordemEstagios.indexOf(b.status));
-    } else {
-        dadosOrdenados.sort((a, b) => (b.numero_proposta || 0) - (a.numero_proposta || 0));
-    }
+    dadosOrdenados.sort((a, b) => (b.numero_proposta || 0) - (a.numero_proposta || 0));
 
-    let headers = []; let dataKeys: any[] = [];
-
-    if (reportColumns.numero) { headers.push('Nº'); dataKeys.push('numero'); }
-    if (reportColumns.cliente) { headers.push('Cliente'); dataKeys.push('cliente'); }
-    if (reportColumns.cidade) { headers.push('Cidade'); dataKeys.push('cidade'); }
-    if (reportColumns.uf) { headers.push('UF'); dataKeys.push('uf'); }
-    if (reportColumns.contato) { headers.push('Contato'); dataKeys.push('contato'); }
-    if (reportColumns.produto) { headers.push('Produto'); dataKeys.push('produto'); }
-    if (reportColumns.estagio) { headers.push('Estágio'); dataKeys.push('estagio'); }
-    if (reportColumns.valor) { headers.push('Valor'); dataKeys.push('valor'); }
-    if (reportColumns.entrada) { headers.push('Entrada'); dataKeys.push('entrada'); }
-    if (reportColumns.canal) { headers.push('Canal'); dataKeys.push('canal'); }
-
+    const headers = ['Nº', 'DATA', 'FARMÁCIA', 'PRODUTO', 'REPRESENTANTE', 'ESTÁGIO', 'VALOR (R$)'];
+    
     const tableBody = dadosOrdenados.map(op => {
-        let row: any[] = [];
-        if (reportColumns.numero) row.push(formatPropostaId(op.numero_proposta));
-        if (reportColumns.cliente) row.push(op.nome_cliente);
-        if (reportColumns.cidade) row.push(op.cidade_exclusividade || '-');
-        if (reportColumns.uf) row.push(op.uf_exclusividade || '-');
-        if (reportColumns.contato) row.push(op.contato || '-');
-        if (reportColumns.produto) row.push(op.produto || '-');
-        if (reportColumns.estagio) row.push(ESTAGIOS.find(e => e.id === op.status)?.label || op.status);
-        if (reportColumns.valor) row.push(formatCurrency(op.valor));
-        if (reportColumns.entrada) row.push(op.data_entrada ? op.data_entrada.split('-').reverse().join('/') : '-');
-        if (reportColumns.canal) row.push(op.canal_contato);
+        const responsavelNome = equipe.find(u => u.id === op.user_id)?.nome || 'N/A';
+        const dataFormatada = op.data_entrada ? op.data_entrada.split('-').reverse().join('/') : '-';
+        const estagioNome = ESTAGIOS.find(e => e.id === op.status)?.label || op.status;
+
+        const row = [
+            formatPropostaId(op.numero_proposta),
+            dataFormatada,
+            op.nome_cliente,
+            op.produto || '-',
+            responsavelNome,
+            estagioNome,
+            formatCurrency(op.valor)
+        ];
         
         (row as any)._statusId = op.status;
         return row;
     });
 
-    const stageColIndex = headers.indexOf('Estágio');
-
     autoTable(doc, {
-        startY: 30, head: [headers], body: tableBody, theme: 'grid',
-        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
-        styles: { fontSize: 8, cellPadding: 2, textColor: 60 },
+        startY: 48,
+        head: [headers],
+        body: tableBody,
+        theme: 'grid',
+        headStyles: { fillColor: [20, 83, 45], textColor: 255, fontStyle: 'bold' },
+        styles: { fontSize: 8, cellPadding: 3, textColor: 60 },
         alternateRowStyles: { fillColor: [248, 250, 252] },
         didParseCell: (data) => {
-            if (data.section === 'body' && data.column.index === stageColIndex) {
+            if (data.section === 'body' && data.column.index === 5) {
                 const statusId = (data.row.raw as any)._statusId;
                 data.cell.styles.textColor = STAGE_COLORS[statusId] || [60, 60, 60];
                 data.cell.styles.fontStyle = 'bold';
@@ -417,152 +431,12 @@ export default function PipelinePage() {
         }
     });
 
-    doc.save(`Relatorio_Pipeline_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`);
-    setReportConfigOpen(false); 
-  };
-
-  const cleanHtmlForPdf = (html: string) => {
-    if (!html) return "";
-    let text = html.replace(/<p><br><\/p>/gi, "\n\n").replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n\n").replace(/<p>/gi, "").replace(/<ul>/gi, "").replace(/<\/ul>/gi, "\n").replace(/<ol>/gi, "").replace(/<\/ol>/gi, "\n").replace(/<li>/gi, "   • ").replace(/<\/li>/gi, "\n");
-    text = text.replace(/<strong[^>]*>(.*?)<\/strong>/gi, (match, p1) => p1.toUpperCase()).replace(/<b[^>]*>(.*?)<\/b>/gi, (match, p1) => p1.toUpperCase()).replace(/<u[^>]*>(.*?)<\/u>/gi, (match, p1) => `_${p1}_`);
-    text = text.replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/\n{3,}/g, "\n\n").trim();
-    return text;
-  };
-
-  const gerarPDFPremium = (item: any) => {
-    const doc = new jsPDF();
-    const verdeEscuro: [number, number, number] = [20, 83, 45];
-    const cinzaSuave: [number, number, number] = [243, 244, 246];
-    const textoCinza: [number, number, number] = [60, 60, 60];
-
-    try { doc.addImage("/logo.png", "PNG", 20, 12, 50, 20); } 
-    catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 20, 12, 50, 20); } catch (err) {} }
-
-    doc.setFont("helvetica", "bold"); doc.setFontSize(24);
-    doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
-    doc.text("PROPOSTA COMERCIAL", 190, 20, { align: 'right' });
-    
-    doc.setFontSize(10); doc.setTextColor(150);
-    if(item.numero_proposta) doc.text(`Nº ${formatPropostaId(item.numero_proposta)}`, 190, 26, { align: 'right' });
-
-    doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(120);
-    doc.text("YellowLeaf – Nutraceuticals Company", 190, 32, { align: 'right' });
-    
-    doc.setFillColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]);
-    doc.rect(0, 40, 210, 2, 'F');
-
-    doc.setFillColor(cinzaSuave[0], cinzaSuave[1], cinzaSuave[2]);
-    doc.rect(20, 50, 170, 25, 'F');
-    doc.setFont("helvetica", "bold"); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); 
-    doc.text("DADOS DO CLIENTE", 25, 57);
-    
-    doc.setFontSize(10); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-    doc.text(`Razão Social: ${item.nome_cliente || 'N/A'}`, 25, 63);
-    doc.text(`Contato: ${item.contato || 'N/A'}  |  Tel: ${item.telefone || 'N/A'}`, 25, 68);
-    doc.text(`Cidade/UF: ${item.cidade_exclusividade || 'N/A'} / ${item.uf_exclusividade || ''}`, 25, 73);
-
-    doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
-    doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 20, 88);
-    const totalKG = Number(item.kg_proposto) + Number(item.kg_bonificado);
-    const vGramaReal = (Number(item.valor) / (totalKG * 1000)) || 0;
-    const vParc = (Number(item.valor) / Number(item.parcelas)) || 0;
-    const valorGExibicao = parseMoney(item.valor_g_tabela);
-
-    autoTable(doc, {
-      startY: 93, margin: { left: 20, right: 20 },
-      head: [['DESCRIÇÃO', 'VALORES']],
-      body: [
-        ['Ativo/Insumo', item.produto || 'Insumo'],
-        ['Preço por grama (g)', formatCurrency(valorGExibicao)], 
-        ['Quantidade da proposta (kg)', `${item.kg_proposto} kg`],
-        ['Quantidade bonificada (kg)', `${item.kg_bonificado} kg`],
-        ['Investimento Total (R$)', { content: formatCurrency(item.valor), styles: { fontStyle: 'bold' } }],
-        ['Preço do grama c/ bonificação (g)', { content: formatCurrency(vGramaReal), styles: { fontStyle: 'bold', textColor: textoCinza } }],
-        ['Condição de Pagamento ', `${item.parcelas} parcelas de ${formatCurrency(vParc)}`],
-        ['Vencimento 1ª Parcela', `${item.dias_primeira_parcela} dias`]
-      ],
-      theme: 'grid',
-      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
-      styles: { fontSize: 10, cellPadding: 2, textColor: textoCinza },
-      columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right', fontStyle: 'bold' } }
-    });
-
-    const paybackY = (doc as any).lastAutoTable.finalY + 8;
-    
-    const doseSugerida = Number(item.peso_formula_g) || 13.2; 
-    const custoMatPrimaFormula = vGramaReal * doseSugerida;
-    const custoFixoOp = parseMoney(item.custo_fixo_operacional);
-    
-    const custoTotalFarmacia = custoMatPrimaFormula + custoFixoOp;
-    const precoVendaSugestao = (custoMatPrimaFormula * (Number(item.fator_lucro) || 5)) + custoFixoOp;
-    const formulasDia = vParc > 0 ? ((vParc / precoVendaSugestao) / 22) : 0;
-
-    const paybackBody: any[] = [
-        [`Custo Matéria-Prima (Dose ${doseSugerida}g)`, formatCurrency(custoMatPrimaFormula)],
-    ];
-
-    if (custoFixoOp > 0) paybackBody.push([`Custo Fixo Operacional (Embalagem, etc)`, formatCurrency(custoFixoOp)]);
-    paybackBody.push([`Custo Total por Fórmula (Manipulado)`, { content: formatCurrency(custoTotalFarmacia), styles: { fontStyle: 'bold' } }]);
-    paybackBody.push([`Sugestão de Venda (Fator ${item.fator_lucro || 5} no Ativo)`, formatCurrency(precoVendaSugestao)]);
-    paybackBody.push([{ content: 'META DE VIABILIDADE', styles: { fontStyle: 'bold', fontSize: 11 } }, { content: `${formulasDia.toFixed(2)} fórmulas/dia`, styles: { fontStyle: 'bold', textColor: [0, 128, 0], fontSize: 12, halign: 'right' } }]);
-
-    autoTable(doc, {
-      startY: paybackY, margin: { left: 20, right: 20 },
-      head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
-      body: paybackBody,
-      theme: 'grid',
-      headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'center' },
-      styles: { fontSize: 10, cellPadding: 2, textColor: textoCinza },
-      columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right' } }
-    });
-
-    let currentY = (doc as any).lastAutoTable.finalY + 8; 
-    if (item.observacoes_proposta) {
-        const notasTexto = cleanHtmlForPdf(item.observacoes_proposta);
-        autoTable(doc, {
-            startY: currentY, margin: { left: 20, right: 20 },
-            head: [['CONDIÇÕES GERAIS DA PROPOSTA']],
-            body: [[notasTexto]],
-            theme: 'grid',
-            headStyles: { fillColor: verdeEscuro, textColor: 255, fontStyle: 'bold', halign: 'left' },
-            styles: { fontSize: 9, cellPadding: 3, textColor: textoCinza, valign: 'middle', overflow: 'linebreak' },
-            columnStyles: { 0: { cellWidth: 'auto' } }
-        });
-        currentY = (doc as any).lastAutoTable.finalY + 8;
-    } else { currentY += 8; }
-
-    const certY = currentY; 
-    doc.setFontSize(12); doc.setTextColor(verdeEscuro[0], verdeEscuro[1], verdeEscuro[2]); doc.setFont("helvetica", "bold");
-    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, certY, { align: 'center' });
-
-    const textY = certY + 5;
-    doc.setFontSize(9); doc.setTextColor(textoCinza[0], textoCinza[1], textoCinza[2]); doc.setFont("helvetica", "normal");
-    const certText = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e promovemos sua comercialização com responsabilidade e ética.";
-    const splitCertText = doc.splitTextToSize(certText, 170);
-    doc.text(splitCertText, 105, textY, { align: 'center' });
-
-    const imgY = textY + (splitCertText.length * 4) + 3; 
-    try {
-      const imgW = 90; const imgH = 15; const xPos = (210 - imgW) / 2;
-      if (imgY + imgH < 280) { doc.addImage("/selo.jpg", "JPEG", xPos, imgY, imgW, imgH); } 
-      else { doc.addPage(); doc.addImage("/selo.jpg", "JPEG", xPos, 20, imgW, imgH); }
-    } catch (e) {}
-
-    const nomeAssinatura = usuarioLogado?.nome || 'Consultor Comercial';
-    const telAssinatura = usuarioLogado?.telefone || '';
-    
-    const fY = 285; doc.setFontSize(7); doc.setTextColor(150);
-    doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 20, fY);
-    doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 20, fY + 4);
-    
-    doc.text(`${nomeAssinatura} - Comercial YellowLeaf`, 190, fY, { align: 'right' });
-    if(telAssinatura) doc.text(`WhatsApp: ${telAssinatura}`, 190, fY + 4, { align: 'right' });
-
-    doc.save(`Proposta Comercial - ${item.nome_cliente}.pdf`);
+    doc.save(`Relatorio_Oportunidades_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`);
   };
 
   const handleSave = async () => {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
+    if (!formData.user_id) return alert("Selecione um Representante Responsável para assumir esta oportunidade.");
     
     if ((!formData.observacoes || formData.observacoes.trim() === "") && !novaNotaInput.trim()) {
         return alert("O campo 'Anotações Internas' é obrigatório. Registre o andamento da negociação.");
@@ -578,41 +452,26 @@ export default function PipelinePage() {
         obsFinal = `📅 ${dataHora} | 💬 ${novaNotaInput}\n────────────────────────────────────────\n${obsFinal}`;
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-
-    let valorFinal = 0;
-    if (String(formData.valor).includes('.')) {
-        valorFinal = parseFloat(String(formData.valor));
-    } else {
-        valorFinal = parseFloat(String(formData.valor).replace('R$', '').replace(/\./g, '').replace(',', '.')) || 0;
-    }
+    let valorFinal = parseFloat(String(formData.valor).replace('R$', '').replace(/\./g, '').replace(',', '.')) || 0;
 
     let numeroFinal = formData.numero_proposta;
-    
     if (!editingOp) {
-        const { data: maxOp } = await supabase
-            .from('pipeline')
-            .select('numero_proposta')
-            .order('numero_proposta', { ascending: false })
-            .limit(1);
-            
-        let maiorNumeroGeral = 467; 
-        if (maxOp && maxOp.length > 0 && maxOp[0].numero_proposta) {
-            maiorNumeroGeral = Number(maxOp[0].numero_proposta);
-        }
-        
-        numeroFinal = maiorNumeroGeral + 1;
+        const { data: maxOp } = await supabase.from('pipeline').select('numero_proposta').order('numero_proposta', { ascending: false }).limit(1);
+        numeroFinal = (maxOp && maxOp[0]?.numero_proposta ? Number(maxOp[0].numero_proposta) : 467) + 1;
     }
+
+    // --- LÓGICA DE HAND-OFF (SDR -> Vendedor) ---
+    const isRepasse = formData.user_id !== usuarioLogado?.id;
 
     const payload = {
       ...formData,
-      user_id: user?.id, 
+      user_id: formData.user_id, // O Dono final do card
+      sdr_id: isRepasse && !editingOp ? usuarioLogado?.id : (editingOp?.sdr_id || null), // Mantém a rastreabilidade da P&D
       numero_proposta: numeroFinal,
       nome_cliente: formData.nome_cliente.toUpperCase(),
       contato: formData.contato ? formData.contato.toUpperCase() : '',
       cidade_exclusividade: formData.cidade_exclusividade ? formData.cidade_exclusividade.toUpperCase() : '',
       uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '',
-      
       valor: valorFinal,
       valor_g_tabela: parseFloat(String(formData.valor_g_tabela).replace(',', '.')) || 0,
       kg_proposto: parseFloat(String(formData.kg_proposto)) || 0,
@@ -632,11 +491,19 @@ export default function PipelinePage() {
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
     
     if (!error) { 
+      // Se foi um repasse novo, dispara a notificação para o sino do vendedor!
+      if (isRepasse && !editingOp) {
+          await supabase.from('notificacoes').insert({
+              user_id: formData.user_id,
+              remetente: usuarioLogado.nome,
+              mensagem: `Oportunidade Repassada: ${payload.nome_cliente} foi enviada para o seu Pipeline.`
+          });
+      }
+
       setModalOpen(false); 
       setNovaNotaInput(""); 
       carregarOportunidades(usuarioLogado); 
     } else { 
-      console.error("Erro banco:", error); 
       alert(`Erro ao salvar: ${error.message}`); 
     }
   };
@@ -652,107 +519,79 @@ export default function PipelinePage() {
     const hoje = getLocalData(); 
     const dataLembrete = op.data_lembrete; 
     const isPerdido = op.status === 'perdido';
-    
     const isAtrasado = dataLembrete && dataLembrete < hoje;
     const isHoje = dataLembrete === hoje; 
     
-    let borderClass = 'border-slate-100 hover:border-blue-300';
+    let borderClass = 'border-slate-200 hover:border-blue-400';
     let bgClass = 'bg-white';
     let textClass = 'text-slate-400';
     let label = 'Ligar: ';
-    let dateStyle = {};
 
     if (isAtrasado && !isPerdido) {
-        bgClass = 'bg-red-50 animate-pulse';
-        borderClass = 'border-red-300';
-        textClass = 'text-red-600 font-bold';
-        label = 'Atrasado: ';
+        bgClass = 'bg-red-50/50'; borderClass = 'border-red-300'; textClass = 'text-red-600 font-bold'; label = 'Atrasado: ';
     } else if (isHoje && !isPerdido) {
-        borderClass = 'border-orange-400';
-        bgClass = 'bg-orange-50';
-        textClass = 'text-orange-600 font-bold';
-        label = 'HOJE: ';
+        borderClass = 'border-orange-400'; bgClass = 'bg-orange-50/50'; textClass = 'text-orange-600 font-bold'; label = 'HOJE: ';
     } else if (isPerdido) {
-        borderClass = 'border-slate-200';
-        bgClass = 'bg-gray-50 opacity-75';
-        textClass = 'text-slate-400';
-        if (dataLembrete) dateStyle = { textDecoration: 'line-through' };
+        borderClass = 'border-slate-200'; bgClass = 'bg-slate-50 opacity-60'; textClass = 'text-slate-400';
     }
+
+    const nomeResponsavel = op.responsavel?.nome || 'N/A';
     
     return (
-        <div key={op.id} onClick={() => { setEditingOp(op); setFormData({...formData, ...op, custo_fixo_operacional: op.custo_fixo_operacional || '0'}); setNovaNotaInput(""); setModalOpen(true); }} className={`p-4 rounded-xl border cursor-pointer shadow-sm transition hover:-translate-y-1 ${bgClass} ${borderClass}`}>
-            <div className="flex justify-between items-start">
+        <div key={op.id} onClick={() => { setEditingOp(op); setFormData({...formData, ...op, custo_fixo_operacional: op.custo_fixo_operacional || '0'}); setIsRepLocked(false); setNovaNotaInput(""); setModalOpen(true); }} className={`p-4 rounded-2xl border-2 cursor-pointer shadow-sm transition hover:shadow-md ${bgClass} ${borderClass}`}>
+            <div className="flex justify-between items-start mb-2">
                 <div className="max-w-[80%]">
-                    <span className="text-[10px] font-mono text-slate-400 block">#{formatPropostaId(op.numero_proposta)}</span>
-                    <h4 className="font-bold text-slate-700 text-sm uppercase truncate" title={op.nome_cliente}>{op.nome_cliente}</h4>
+                    <span className="text-[10px] font-black tracking-widest text-slate-400 block mb-0.5">#{formatPropostaId(op.numero_proposta)}</span>
+                    <h4 className="font-black text-slate-800 text-sm leading-tight truncate" title={op.nome_cliente}>{op.nome_cliente}</h4>
                 </div>
                 {op.telefone && (
-                    <a 
-                        href={`https://wa.me/55${op.telefone.replace(/\D/g, '')}`} 
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()} 
-                        className="text-green-500 hover:text-green-600 transition-colors p-1 relative z-10"
-                        title="Abrir WhatsApp"
-                    >
-                        <MessageCircle size={18} />
+                    <a href={`https://wa.me/55${op.telefone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-green-500 hover:text-green-600 transition-colors p-1.5 bg-green-50 rounded-lg">
+                        <MessageCircle size={16} />
                     </a>
                 )}
             </div>
             
-            <div className="flex flex-col gap-1 mt-2 mb-2">
+            <div className="flex flex-col gap-1.5 mb-3">
                 {(op.cidade_exclusividade || op.uf_exclusividade) && (
-                    <div className="flex items-center gap-1 text-[10px] text-slate-500 font-medium">
-                        <MapPin size={10} /> {op.cidade_exclusividade} - {op.uf_exclusividade}
+                    <div className="flex items-center gap-1 text-[10px] text-slate-500 font-bold">
+                        <MapPin size={10} className="text-slate-400"/> {op.cidade_exclusividade} - {op.uf_exclusividade}
                     </div>
-                )}
-                {op.observacoes && (
-                    <p className="text-[10px] text-slate-400 italic truncate" title={op.observacoes}>
-                        "{op.observacoes.split('\n')[0]}"
-                    </p>
                 )}
             </div>
 
-            <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-100/50">
-                <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg font-bold truncate max-w-[50%]">{op.produto}</span>
-                <span className="text-xs font-black text-slate-600">{formatCurrency(op.valor)}</span>
+            <div className="flex justify-between items-center py-3 border-y border-slate-100 mb-3">
+                <span className="text-[10px] bg-blue-50 border border-blue-100 text-blue-700 px-2 py-0.5 rounded uppercase tracking-wider font-black truncate max-w-[50%]">{op.produto}</span>
+                <span className="text-sm font-black text-slate-700">{formatCurrency(op.valor)}</span>
             </div>
             
-            {op.data_lembrete && (
-                <div className={`mt-2 flex items-center gap-1 text-[10px] font-bold ${textClass}`} style={dateStyle}>
-                    <Clock size={10} /> {label} {op.data_lembrete.split('-').reverse().join('/')} 
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1 text-[10px] font-bold text-slate-500" title="Vendedor Responsável">
+                    <Briefcase size={12} className="text-blue-500"/> {nomeResponsavel.split(' ')[0]}
                 </div>
-            )}
+                {op.data_lembrete && (
+                    <div className={`flex items-center gap-1 text-[10px] font-bold ${textClass}`}>
+                        <Clock size={10} /> {label} {op.data_lembrete.split('-').reverse().join('/')} 
+                    </div>
+                )}
+            </div>
         </div>
     );
   }
 
   const getSortedOpportunities = (estagioId: string) => {
     const ops = oportunidades.filter(o => {
-        const matchesStatus = o.status === estagioId;
-        if (!matchesStatus) return false;
-        
+        if (o.status !== estagioId) return false;
         if (!buscaTermo) return true;
-
         const term = buscaTermo.toLowerCase();
         const termClean = term.replace(/\D/g, ''); 
-
-        const matchNome = o.nome_cliente?.toLowerCase().includes(term);
-        const matchNumero = String(o.numero_proposta || '').includes(term);
-        const matchCNPJ = termClean.length > 0 && (o.cnpj || '').replace(/\D/g, '').includes(termClean); 
-        const matchTelefone = termClean.length > 0 && (o.telefone || '').replace(/\D/g, '').includes(termClean);
-        const matchContato = o.contato?.toLowerCase().includes(term); 
-
-        return matchNome || matchNumero || matchCNPJ || matchTelefone || matchContato;
+        return o.nome_cliente?.toLowerCase().includes(term) || String(o.numero_proposta || '').includes(term) || (termClean.length > 0 && (o.cnpj || '').replace(/\D/g, '').includes(termClean));
     });
     
     if (estagioId === 'prospeccao') {
         const hoje = getLocalData();
         return ops.sort((a, b) => {
-            const dataA = a.data_lembrete || '9999-99-99';
-            const dataB = b.data_lembrete || '9999-99-99';
-            const isAtrasadoOuHojeA = dataA <= hoje;
-            const isAtrasadoOuHojeB = dataB <= hoje;
+            const dataA = a.data_lembrete || '9999-99-99'; const dataB = b.data_lembrete || '9999-99-99';
+            const isAtrasadoOuHojeA = dataA <= hoje; const isAtrasadoOuHojeB = dataB <= hoje;
             if (isAtrasadoOuHojeA && !isAtrasadoOuHojeB) return -1;
             if (!isAtrasadoOuHojeA && isAtrasadoOuHojeB) return 1;
             return dataA.localeCompare(dataB);
@@ -762,235 +601,204 @@ export default function PipelinePage() {
   };
 
   return (
-    <div className="w-full p-4">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-        <h1 className="text-2xl font-black text-[#1e293b] italic uppercase tracking-tighter">Pipeline YellowLeaf</h1>
-        <div className="flex items-center gap-4 w-full md:w-auto">
+    <div className="w-full p-4 h-[calc(100vh-64px)] flex flex-col">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 shrink-0">
+        <div>
+            <h1 className="text-2xl font-black text-[#0f392b] tracking-tight flex items-center gap-2">
+                <Trello className="text-[#82D14D]"/> Pipeline Comercial
+            </h1>
+            <p className="text-sm text-slate-500 font-medium mt-1">Gestão de propostas, aprovações e Hand-off de SDR.</p>
+        </div>
+
+        <div className="flex items-center gap-3 w-full md:w-auto">
             <div className="relative flex-1 md:w-64">
-                <input 
-                    type="text" 
-                    placeholder="Buscar (Nome, CNPJ, Contato, Nº...)" 
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 outline-none text-sm font-bold uppercase text-slate-600"
-                    value={buscaTermo}
-                    onChange={(e) => setBuscaTermo(e.target.value)}
-                />
+                <input type="text" placeholder="Buscar (Nome, CNPJ, Nº...)" className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 outline-none text-sm font-bold uppercase text-slate-600 shadow-sm" value={buscaTermo} onChange={(e) => setBuscaTermo(e.target.value)} />
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             </div>
-            
-            <button onClick={() => setReportConfigOpen(true)} className="bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 flex items-center gap-2 whitespace-nowrap text-sm hover:bg-slate-900">
+            <button onClick={gerarRelatorioGeral} className="bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 flex items-center gap-2 whitespace-nowrap text-sm hover:bg-slate-900">
                 <Printer size={16} /> Relatório
             </button>
-
-            <button onClick={() => { setEditingOp(null); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0}); setNovaNotaInput(""); setModalOpen(true); }} className="bg-[#2563eb] text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-sm flex items-center gap-2">
-                <Plus size={16} /> Novo
+            <button onClick={() => { setEditingOp(null); setIsRepLocked(false); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); setNovaNotaInput(""); setModalOpen(true); }} className="bg-blue-600 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-sm flex items-center gap-2 hover:bg-blue-700">
+                <Plus size={16} /> Nova Oportunidade
             </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 h-[calc(100vh-180px)] overflow-x-auto pb-4">
-        {ESTAGIOS.map(est => (
-          <div key={est.id} className="bg-slate-50/50 rounded-2xl border flex flex-col min-w-[250px] overflow-hidden">
-            <div className={`p-4 border-b-2 ${est.color} bg-white flex justify-between items-center`}><h3 className={`font-black text-xs uppercase ${est.text}`}>{est.label}</h3></div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
-              {getSortedOpportunities(est.id).map(op => renderCard(op))}
-            </div>
+      <div className="flex-1 overflow-x-auto pb-4">
+          <div className="flex gap-4 h-full min-w-max">
+            {ESTAGIOS.map(est => (
+              <div key={est.id} className="w-[300px] bg-slate-100/50 rounded-2xl border border-slate-200 flex flex-col h-full overflow-hidden">
+                <div className={`p-4 border-b-4 ${est.color} bg-white flex justify-between items-center shadow-sm shrink-0`}>
+                    <h3 className={`font-black text-xs uppercase tracking-widest ${est.text}`}>{est.label}</h3>
+                    <span className="bg-slate-100 text-slate-600 text-xs font-bold px-2 py-1 rounded-lg">{getSortedOpportunities(est.id).length}</span>
+                </div>
+                <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+                  {getSortedOpportunities(est.id).map(op => renderCard(op))}
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
       </div>
 
+      {/* MODAL DE CRIAÇÃO E EDIÇÃO (COM HAND-OFF DE REPRESENTANTE) */}
       {modalOpen && mounted && createPortal(
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-5xl rounded-[2.5rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95">
-            <div className="bg-[#242f3e] p-6 flex justify-between items-center text-white shrink-0">
-              <h2 className="text-lg font-bold flex items-center gap-2">
-                 ✨ {editingOp ? `Editar Proposta #${formatPropostaId(editingOp.numero_proposta)}` : 'Nova Oportunidade'}
-              </h2>
-              <div className="flex gap-2">
-                {editingOp && <button onClick={() => gerarPDFPremium(formData)} className="bg-green-600 px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:scale-105 transition uppercase shadow-lg"><Download size={14}/> PDF Premium</button>}
-                <button onClick={() => setModalOpen(false)} className="hover:bg-white/10 p-1 rounded-full"><X/></button>
+          <div className="bg-white w-full max-w-5xl rounded-[2rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-[#1e293b] p-6 flex justify-between items-center text-white shrink-0 border-b-4 border-blue-500">
+              <div>
+                  <h2 className="text-xl font-black flex items-center gap-2">
+                     {editingOp ? `Editar Proposta #${formatPropostaId(editingOp.numero_proposta)}` : 'Nova Oportunidade Comercial'}
+                  </h2>
+                  <p className="text-sm font-medium text-slate-300 mt-1">{editingOp ? editingOp.nome_cliente : 'Preencha o CNPJ para validar o cliente e a carteira.'}</p>
               </div>
+              <button onClick={() => setModalOpen(false)} className="hover:bg-white/20 p-2 rounded-full transition bg-white/10 text-white"><X size={20}/></button>
             </div>
 
-            <div className="p-8 grid grid-cols-1 md:grid-cols-4 gap-5 overflow-y-auto bg-white flex-1 custom-scrollbar">
-              <div className="md:col-span-4 border-b pb-2 flex justify-between items-center">
-                  <h3 className="text-[10px] font-black text-blue-600 uppercase">1. Identificação e Status</h3>
-                  <select className="bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold px-3 py-1 rounded-lg outline-none" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
+            <div className="p-6 md:p-8 grid grid-cols-1 md:grid-cols-4 gap-6 overflow-y-auto bg-slate-50 flex-1 custom-scrollbar">
+              
+              <div className="md:col-span-4 flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black">1</div>
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Identificação e Atribuição</h3>
+              </div>
+              
+              <div className="md:col-span-2">
+                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">CNPJ (Com Validação)</label>
+                  <div className="flex gap-2">
+                      <input className="w-full bg-white border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none rounded-xl p-3 text-sm font-medium transition shadow-sm" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} onBlur={buscarDadosCNPJ} placeholder="Digite para buscar..."/>
+                      <button type="button" onClick={buscarDadosCNPJ} className="bg-blue-600 text-white p-3 rounded-xl shadow-sm hover:bg-blue-700 transition">
+                          {loadingCNPJ ? <Loader2 size={20} className="animate-spin"/> : <Search size={20}/>}
+                      </button>
+                  </div>
+              </div>
+              <div className="md:col-span-2">
+                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Razão Social da Farmácia</label>
+                  <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})}/>
+              </div>
+              
+              {/* O NOVO CAMPO DE HAND-OFF (REPASSE) */}
+              <div className="md:col-span-2 bg-blue-50 border border-blue-200 p-4 rounded-xl shadow-sm relative overflow-hidden">
+                  <div className="absolute right-0 top-0 w-16 h-16 bg-blue-500 rounded-bl-full opacity-10"></div>
+                  <label className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-2 flex items-center gap-1"><Briefcase size={12}/> Vendedor Responsável (Hand-off)</label>
+                  <select 
+                      value={formData.user_id} 
+                      onChange={e => setFormData({...formData, user_id: e.target.value})} 
+                      disabled={isRepLocked}
+                      className="w-full bg-white border border-blue-200 rounded-lg p-2.5 text-sm font-bold text-slate-800 outline-none shadow-sm cursor-pointer disabled:bg-slate-100 disabled:text-slate-500"
+                  >
+                      <option value="">Selecione o Representante...</option>
+                      {equipe.map(u => <option key={u.id} value={u.id}>{u.nome} ({u.cargo})</option>)}
+                  </select>
+                  {isRepLocked && <p className="text-[9px] font-bold text-red-500 mt-1 uppercase">Bloqueado pela regra de carteira ERP</p>}
+              </div>
+
+              <div className="md:col-span-2">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Status no Funil</label>
+                  <select className="w-full bg-white border border-slate-300 text-blue-700 text-sm font-bold p-3 rounded-xl outline-none shadow-sm cursor-pointer" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
                       {ESTAGIOS.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
                   </select>
               </div>
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">CNPJ</label><div className="flex gap-2"><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} onBlur={buscarDadosCNPJ} placeholder="Digite para validar..."/><button onClick={buscarDadosCNPJ} className="bg-blue-50 text-blue-600 p-3 rounded-xl border">{loadingCNPJ ? <Loader2 size={20} className="animate-spin"/> : <Search size={20}/>}</button></div></div>
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Razão Social</label><input className="w-full bg-slate-50 border rounded-xl p-3 font-bold uppercase" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Cidade</label><input className="w-full bg-slate-100 border rounded-xl p-3" value={formData.cidade_exclusividade} readOnly/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">UF</label><input className="w-full bg-slate-100 border rounded-xl p-3" value={formData.uf_exclusividade} readOnly/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Contato</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value.toUpperCase()})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">WhatsApp</label><input className="w-full bg-slate-50 border rounded-xl p-3" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})}/></div>
 
-              <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-green-600 uppercase">2. Proposta e Payback</h3></div>
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase flex justify-between">Ativo {loadingProdutos ? '(Carregando...)' : ''}</label><select className="w-full bg-slate-50 border rounded-xl p-3 font-bold disabled:opacity-50" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})} disabled={loadingProdutos}><option value="">Selecione...</option>{produtosDisponiveis.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}</select></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Valor G (Tabela)</label><input type="text" className="w-full bg-slate-50 border rounded-xl p-3 font-bold text-blue-700" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} /></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Proposto</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Total R$</label><input className="w-full bg-slate-100 border text-slate-600 rounded-xl p-3 font-bold" value={formData.valor} readOnly /></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">KG Bônus</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Parcelas</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Venc. 1ª Parc</label><input type="number" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
-
-              <div className="bg-slate-100 p-4 rounded-xl border border-slate-200">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1" title="Dose diária recomendada em gramas">Dose Sugerida (g) <AlertCircle size={12}/></label>
-                  <input type="text" className="w-full bg-white border rounded-lg p-2 text-sm mt-1 focus:border-green-400 outline-none" value={formData.peso_formula_g} onChange={e => setFormData({...formData, peso_formula_g: e.target.value})}/>
-              </div>
-              <div className="bg-slate-100 p-4 rounded-xl border border-slate-200">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1" title="Custo extra da farmácia: Pote, Cápsula, Excipiente, Mão de Obra">Custo Fixo (R$) <AlertCircle size={12}/></label>
-                  <input type="number" step="0.01" className="w-full bg-white border rounded-lg p-2 text-sm mt-1 focus:border-green-400 outline-none" value={formData.custo_fixo_operacional} onChange={e => setFormData({...formData, custo_fixo_operacional: e.target.value})}/>
-              </div>
-              <div className="md:col-span-2 bg-slate-100 p-4 rounded-xl border border-slate-200">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1" title="Multiplicador para Sugestão de Preço de Venda">Fator de Lucro (Ex: 5) <AlertCircle size={12}/></label>
-                  <input type="number" step="0.1" className="w-full bg-white border rounded-lg p-2 text-sm mt-1 focus:border-green-400 outline-none" value={formData.fator_lucro} onChange={e => setFormData({...formData, fator_lucro: e.target.value})}/>
+              <div className="md:col-span-4 flex items-center gap-2 mb-2 mt-6">
+                  <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-black">2</div>
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Produto e Precificação</h3>
               </div>
 
-              <div className="md:col-span-4 bg-blue-50/20 p-4 rounded-2xl border border-blue-100"><label className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-2 mb-2"><FileText size={14}/> Notas e Condições (Para o PDF)</label><div className="bg-white rounded-xl overflow-hidden border border-blue-100 text-slate-700"><ReactQuill theme="snow" value={formData.observacoes_proposta} onChange={(val) => setFormData({...formData, observacoes_proposta: val})} modules={{ toolbar: [['bold', 'italic', 'underline'], [{'list': 'ordered'}, {'list': 'bullet'}], ['clean']] }} /></div></div>
-
-              <div className="md:col-span-4 border-b pb-2 mt-4"><h3 className="text-[10px] font-black text-orange-600 uppercase">3. Gestão e Acompanhamento (Interno)</h3></div>
-              <div><label className="text-[10px] font-bold text-slate-400 uppercase">Data Entrada</label><input type="date" className="w-full bg-slate-50 border rounded-xl p-3" value={formData.data_entrada} onChange={e => setFormData({...formData, data_entrada: e.target.value})} /></div>
+              <div className="md:col-span-2">
+                  <label className="text-xs font-bold text-slate-700 mb-1.5 flex justify-between">Ativo a Negociar {loadingProdutos && <Loader2 size={12} className="animate-spin text-blue-500"/>}</label>
+                  <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold disabled:opacity-50 outline-none shadow-sm cursor-pointer" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})} disabled={loadingProdutos}>
+                      <option value="">Selecione...</option>
+                      {produtosDisponiveis.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}
+                  </select>
+              </div>
+              <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Preço/Grama (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-black text-emerald-700 outline-none shadow-sm" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} /></div>
+              <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Proposto</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
               
-              <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">Próximo Contato <span className="text-red-500">*</span></label>
-                  <input type="date" className="w-full bg-slate-50 border rounded-xl p-3 focus:ring-2 focus:ring-orange-200 outline-none" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} />
+              <div className="md:col-span-4 bg-slate-800 p-4 rounded-2xl flex items-center justify-between text-white mt-2 shadow-lg">
+                  <span className="text-xs font-black uppercase tracking-widest text-slate-300">Valor Total da Proposta</span>
+                  <span className="text-2xl font-black text-[#82D14D]">{formatCurrency(formData.valor)}</span>
+              </div>
+
+              <div className="md:col-span-4 flex items-center gap-2 mb-2 mt-6">
+                  <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-black">3</div>
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Follow-up e Histórico</h3>
               </div>
               
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase">Canal de Contato</label><select className="w-full bg-slate-50 border rounded-xl p-3" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+              <div className="md:col-span-2">
+                  <label className="text-xs font-black text-red-600 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Clock size={14}/> Próximo Contato (Obrigatório)</label>
+                  <input type="date" className="w-full bg-white border border-red-200 focus:border-red-500 rounded-xl p-3 text-sm font-bold text-red-900 outline-none shadow-sm cursor-pointer" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} />
+              </div>
+              <div className="md:col-span-2">
+                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Canal de Contato</label>
+                  <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>
+                      {CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+              </div>
               
               <div className="md:col-span-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase flex gap-2"><MessageSquare size={14}/> Histórico de Interações</label>
-                  </div>
-                  
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2"><MessageSquare size={14}/> Diário de Bordo</label>
                   <div className="flex gap-2">
-                      <input 
-                          className="flex-1 bg-white border-2 border-blue-100 rounded-xl p-3 focus:border-blue-500 outline-none text-sm"
-                          placeholder="Digite uma nova anotação aqui..."
-                          value={novaNotaInput}
-                          onChange={(e) => setNovaNotaInput(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && adicionarNotaAoHistorico()}
-                      />
-                      <button type="button" onClick={adicionarNotaAoHistorico} className="bg-blue-100 text-blue-600 p-3 rounded-xl hover:bg-blue-200 transition font-bold" title="Adicionar Nota">
-                          <Send size={18}/>
-                      </button>
+                      <input className="flex-1 bg-white border-2 border-blue-100 focus:border-blue-500 rounded-xl p-3 outline-none text-sm font-medium shadow-sm transition" placeholder="Escreva um resumo do contato aqui..." value={novaNotaInput} onChange={(e) => setNovaNotaInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && adicionarNotaAoHistorico()}/>
+                      <button type="button" onClick={adicionarNotaAoHistorico} className="bg-blue-600 text-white px-5 rounded-xl hover:bg-blue-700 transition font-bold shadow-md active:scale-95"><Send size={18}/></button>
                   </div>
-
-                  <div className="relative">
-                      <textarea 
-                          className="w-full bg-slate-50 border rounded-xl p-3 h-32 resize-none text-xs text-slate-600 font-mono leading-relaxed" 
-                          value={formData.observacoes} 
-                          readOnly
-                          placeholder="O histórico aparecerá aqui..."
-                      />
-                      <div className="absolute top-3 right-3 text-slate-300"><History size={16}/></div>
-                  </div>
+                  <textarea className="w-full bg-slate-100 border border-slate-200 rounded-xl p-4 h-32 resize-none text-xs text-slate-700 font-mono leading-relaxed shadow-inner outline-none" value={formData.observacoes} readOnly placeholder="O histórico será salvo aqui, mais novos no topo..."/>
               </div>
             </div>
 
-            <div className="p-6 bg-slate-50 border-t flex justify-end items-center shrink-0 gap-2">
-              {editingOp && <button onClick={handleDelete} className="text-red-500 font-bold text-xs uppercase px-4 py-2 hover:bg-red-50 rounded-lg">Excluir</button>}
-              <button onClick={() => setModalOpen(false)} className="px-6 font-bold text-slate-400 hover:text-slate-600">CANCELAR</button>
-              <button onClick={handleSave} className="bg-[#2563eb] text-white px-12 py-3 rounded-xl font-bold uppercase active:scale-95 transition hover:bg-blue-700">Salvar Dados</button>
+            <div className="p-6 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
+              {editingOp ? (
+                  <button onClick={handleDelete} className="text-red-500 font-bold text-xs uppercase px-4 py-2 hover:bg-red-50 rounded-lg transition flex items-center gap-1"><Trash2 size={14}/> Excluir</button>
+              ) : <div></div>}
+              <div className="flex gap-3">
+                  <button onClick={() => setModalOpen(false)} className="px-6 py-3 font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition text-sm">Cancelar</button>
+                  <button onClick={handleSave} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-black shadow-lg shadow-blue-200 transition transform active:scale-95 hover:bg-blue-700 text-sm flex items-center gap-2">
+                      <Save size={16}/> Salvar Oportunidade
+                  </button>
+              </div>
             </div>
           </div>
         </div>, document.body
       )}
 
-      {/* MODAL CONFIGURAÇÃO RELATÓRIO */}
-      {reportConfigOpen && mounted && createPortal(
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
-           <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
-              <div className="bg-slate-800 p-5 flex justify-between items-center text-white">
-                 <h2 className="text-lg font-bold flex items-center gap-2"><Filter size={20}/> Configurar Relatório</h2>
-                 <button onClick={() => setReportConfigOpen(false)} className="hover:bg-white/10 p-1 rounded-full"><X size={20}/></button>
-              </div>
-              <div className="p-6">
-                 <div className="mb-6">
-                    <p className="text-sm text-slate-500 mb-2 font-bold flex items-center gap-2"><ArrowUpDown size={14}/> Ordenar por:</p>
-                    <select 
-                        value={reportSort} 
-                        onChange={(e) => setReportSort(e.target.value)}
-                        className="w-full p-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 bg-slate-50 outline-none focus:ring-2 focus:ring-blue-500 transition"
-                    >
-                        <option value="numero">Número da Proposta (Mais recentes)</option>
-                        <option value="cliente">Cliente (A-Z)</option>
-                        <option value="estagio">Estágio do Pipeline</option>
-                    </select>
-                 </div>
-
-                 <p className="text-sm text-slate-500 mb-4 font-bold">Colunas visíveis:</p>
-                 <div className="grid grid-cols-2 gap-3">
-                    {Object.keys(reportColumns).map((key) => (
-                        <label key={key} className="flex items-center gap-3 p-3 border rounded-xl cursor-pointer hover:bg-slate-50 transition">
-                            <input 
-                                type="checkbox" 
-                                checked={(reportColumns as any)[key]} 
-                                onChange={(e) => setReportColumns({...reportColumns, [key]: e.target.checked})}
-                                className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
-                            />
-                            <span className="text-sm font-bold text-slate-700 capitalize">{key.replace('numero', 'Nº').replace('estagio', 'Estágio')}</span>
-                        </label>
-                    ))}
-                 </div>
-              </div>
-              <div className="p-5 bg-slate-50 border-t flex justify-end gap-3">
-                 <button onClick={() => setReportConfigOpen(false)} className="px-4 py-2 font-bold text-slate-500 hover:bg-slate-100 rounded-lg">Cancelar</button>
-                 <button onClick={gerarRelatorioGeral} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700 flex items-center gap-2">
-                    <Printer size={18}/> Gerar PDF
-                 </button>
-              </div>
-           </div>
-        </div>, document.body
-      )}
-
-      {/* MODAL ALERTA DE CLIENTE DA BASE (AMARELO - UPSELL) */}
+      {/* MODAIS DE AVISOS AMARELOS (REPASSE E SEM CARTEIRA) E VERMELHO */}
       {confirmModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
-           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
+           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
               <div className="p-8 text-center">
                  <div className="mx-auto w-16 h-16 bg-yellow-50 text-yellow-600 rounded-full flex items-center justify-center mb-6">
                     <AlertTriangle size={32} />
                  </div>
-                 <h2 className="text-xl font-black text-slate-800 mb-3">AVISO DE UPSELL</h2>
-                 <p className="text-slate-500 font-medium leading-relaxed">{confirmModal.message}</p>
+                 <h2 className="text-xl font-black text-slate-800 mb-3">{confirmModal.title}</h2>
+                 <p className="text-slate-600 font-medium leading-relaxed whitespace-pre-wrap">{confirmModal.message}</p>
               </div>
               <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
-                 <button onClick={confirmModal.onCancel} className="flex-1 bg-white border border-slate-200 text-slate-600 font-bold py-3 rounded-xl hover:bg-slate-100 transition">
-                    Não, Cancelar
-                 </button>
-                 <button onClick={confirmModal.onConfirm} className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-yellow-200 transition transform active:scale-95">
-                    Sim, Continuar
-                 </button>
+                 <button onClick={confirmModal.onCancel} className="flex-1 bg-white border border-slate-200 text-slate-600 font-bold py-3 rounded-xl hover:bg-slate-100 transition">Cancelar</button>
+                 <button onClick={confirmModal.onConfirm} className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-xl shadow-lg transition active:scale-95">Sim, Continuar</button>
               </div>
            </div>
         </div>, document.body
       )}
 
-      {/* MODAL BLOQUEIO TOTAL E IRREVERSÍVEL (VERMELHO) */}
       {blockModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-              <div className="bg-red-600 p-6 flex flex-col items-center justify-center text-white">
+           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
+              <div className="bg-red-600 p-8 flex flex-col items-center justify-center text-white">
                  <ShieldAlert size={64} className="mb-4 opacity-90"/>
                  <h2 className="text-2xl font-black uppercase tracking-tight text-center">{blockModal.title}</h2>
               </div>
-              <div className="p-8 text-center">
+              <div className="p-8 text-center bg-white">
                  <p className="text-slate-800 font-bold text-lg mb-2">{blockModal.message}</p>
                  <div className="bg-red-50 border border-red-100 rounded-xl p-4 mt-4 text-left">
-                    <p className="text-xs text-red-500 font-bold uppercase tracking-wider mb-1">Motivo do Bloqueio</p>
-                    <p className="text-red-800 font-bold text-sm whitespace-pre-wrap leading-relaxed">{blockModal.motivo}</p>
+                    <p className="text-xs text-red-500 font-bold uppercase tracking-wider mb-1">Motivo</p>
+                    <p className="text-red-800 font-bold text-sm whitespace-pre-wrap">{blockModal.motivo}</p>
                  </div>
               </div>
-              <div className="p-4 bg-slate-50 border-t border-slate-100">
-                 <button onClick={() => setBlockModal({ ...blockModal, open: false })} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-xl transition transform active:scale-[0.98]">
-                    ENTENDIDO, FECHAR
-                 </button>
+              <div className="p-6 bg-slate-50 border-t border-slate-100">
+                 <button onClick={() => setBlockModal({ ...blockModal, open: false })} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-xl transition active:scale-95">FECHAR</button>
               </div>
            </div>
         </div>, document.body
       )}
+
     </div>
   );
 }
