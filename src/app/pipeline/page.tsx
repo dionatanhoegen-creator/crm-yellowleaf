@@ -106,8 +106,14 @@ export default function PipelinePage() {
         setUsuarioLogado(perfil);
     }
     
-    const { data: listaEquipe } = await supabase.from('perfis').select('id, nome, cargo').order('nome');
-    if (listaEquipe) setEquipe(listaEquipe);
+    // --- INTELIGÊNCIA APLICADA AQUI ---
+    // Puxamos a lista de perfis incluindo o campo "acessos". 
+    // Só vai para a lista suspensa quem tiver acesso ativo ao "pipeline".
+    const { data: listaEquipe } = await supabase.from('perfis').select('id, nome, cargo, acessos').order('nome');
+    if (listaEquipe) {
+        const vendedoresAtivos = listaEquipe.filter(u => u.acessos && u.acessos.pipeline === true);
+        setEquipe(vendedoresAtivos);
+    }
 
     await Promise.all([
         carregarOportunidades(perfilUsuario), 
