@@ -85,8 +85,6 @@ export default function PipelinePage() {
     inicializarDados();
   }, []);
 
-  // NOVO: Leitor de Link Inteligente
-  // Se a URL vier com um ID (ex: clicou na notificação), abre o card automaticamente.
   useEffect(() => {
       if (oportunidades.length > 0) {
           const searchParams = new URLSearchParams(window.location.search);
@@ -99,7 +97,6 @@ export default function PipelinePage() {
                   setIsRepLocked(false);
                   setNovaNotaInput("");
                   setModalOpen(true);
-                  // Limpa a URL para não reabrir o modal se atualizar a página
                   window.history.replaceState({}, '', '/pipeline');
               }
           }
@@ -329,12 +326,20 @@ export default function PipelinePage() {
             nome_cliente: (data.nome_fantasia || data.razao_social || chavesERP?.razaosocial || '').toUpperCase(),
             cidade_exclusividade: (data.municipio || chavesERP?.cidade || '').toUpperCase(),
             uf_exclusividade: (data.uf || chavesERP?.uf || '').toUpperCase(),
-            telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : (chavesERP?.telefone || prev.telefone)
+            telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : (chavesERP?.telefone || prev.telefone),
+            email: data.email || chavesERP?.email || prev.email || ''
           }));
       }
     } catch (e) {
        if (chavesERP) {
-          setFormData(prev => ({ ...prev, nome_cliente: (chavesERP.razaosocial || chavesERP.fantasia || '').toUpperCase(), cidade_exclusividade: (chavesERP.cidade || '').toUpperCase(), uf_exclusividade: (chavesERP.uf || '').toUpperCase(), telefone: chavesERP.telefone || prev.telefone }));
+          setFormData(prev => ({ 
+              ...prev, 
+              nome_cliente: (chavesERP.razaosocial || chavesERP.fantasia || '').toUpperCase(), 
+              cidade_exclusividade: (chavesERP.cidade || '').toUpperCase(), 
+              uf_exclusividade: (chavesERP.uf || '').toUpperCase(), 
+              telefone: chavesERP.telefone || prev.telefone,
+              email: chavesERP.email || prev.email || ''
+          }));
        }
     }
     setLoadingCNPJ(false);
@@ -550,13 +555,12 @@ export default function PipelinePage() {
 
     const isRepasse = formData.user_id !== usuarioLogado?.id;
 
-    // NOVO: O insert() ou update() agora devolve o card salvo para pegarmos o ID e colocarmos no Link
     const { data: savedOpData, error } = editingOp 
         ? await supabase.from('pipeline').update({
-              ...formData, user_id: formData.user_id, sdr_id: isRepasse && !editingOp ? usuarioLogado?.id : (editingOp?.sdr_id || null), numero_proposta: numeroFinal, nome_cliente: formData.nome_cliente.toUpperCase(), contato: formData.contato ? formData.contato.toUpperCase() : '', cidade_exclusividade: formData.cidade_exclusividade ? formData.cidade_exclusividade.toUpperCase() : '', uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '', valor: valorFinal, valor_g_tabela: parseMoney(formData.valor_g_tabela), validade_produto: formData.validade_produto || null, kg_proposto: parseMoney(formData.kg_proposto), kg_bonificado: parseMoney(formData.kg_bonificado), parcelas: parseInt(String(formData.parcelas)) || 1, dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45, peso_formula_g: String(parseMoney(formData.peso_formula_g)), fator_lucro: String(parseMoney(formData.fator_lucro)), custo_fixo_operacional: parseMoney(formData.custo_fixo_operacional), data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null, data_entrada: formData.data_entrada || getLocalData(), canal_contato: formData.canal_contato, observacoes: obsFinal, observacoes_proposta: formData.observacoes_proposta 
+              ...formData, user_id: formData.user_id, sdr_id: isRepasse && !editingOp ? usuarioLogado?.id : (editingOp?.sdr_id || null), numero_proposta: numeroFinal, nome_cliente: formData.nome_cliente.toUpperCase(), contato: formData.contato ? formData.contato.toUpperCase() : '', email: formData.email ? formData.email.toLowerCase() : '', cidade_exclusividade: formData.cidade_exclusividade ? formData.cidade_exclusividade.toUpperCase() : '', uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '', valor: valorFinal, valor_g_tabela: parseMoney(formData.valor_g_tabela), validade_produto: formData.validade_produto || null, kg_proposto: parseMoney(formData.kg_proposto), kg_bonificado: parseMoney(formData.kg_bonificado), parcelas: parseInt(String(formData.parcelas)) || 1, dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45, peso_formula_g: String(parseMoney(formData.peso_formula_g)), fator_lucro: String(parseMoney(formData.fator_lucro)), custo_fixo_operacional: parseMoney(formData.custo_fixo_operacional), data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null, data_entrada: formData.data_entrada || getLocalData(), canal_contato: formData.canal_contato, observacoes: obsFinal, observacoes_proposta: formData.observacoes_proposta 
           }).eq('id', editingOp.id).select() 
         : await supabase.from('pipeline').insert({
-              ...formData, user_id: formData.user_id, sdr_id: isRepasse && !editingOp ? usuarioLogado?.id : (editingOp?.sdr_id || null), numero_proposta: numeroFinal, nome_cliente: formData.nome_cliente.toUpperCase(), contato: formData.contato ? formData.contato.toUpperCase() : '', cidade_exclusividade: formData.cidade_exclusividade ? formData.cidade_exclusividade.toUpperCase() : '', uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '', valor: valorFinal, valor_g_tabela: parseMoney(formData.valor_g_tabela), validade_produto: formData.validade_produto || null, kg_proposto: parseMoney(formData.kg_proposto), kg_bonificado: parseMoney(formData.kg_bonificado), parcelas: parseInt(String(formData.parcelas)) || 1, dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45, peso_formula_g: String(parseMoney(formData.peso_formula_g)), fator_lucro: String(parseMoney(formData.fator_lucro)), custo_fixo_operacional: parseMoney(formData.custo_fixo_operacional), data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null, data_entrada: formData.data_entrada || getLocalData(), canal_contato: formData.canal_contato, observacoes: obsFinal, observacoes_proposta: formData.observacoes_proposta 
+              ...formData, user_id: formData.user_id, sdr_id: isRepasse && !editingOp ? usuarioLogado?.id : (editingOp?.sdr_id || null), numero_proposta: numeroFinal, nome_cliente: formData.nome_cliente.toUpperCase(), contato: formData.contato ? formData.contato.toUpperCase() : '', email: formData.email ? formData.email.toLowerCase() : '', cidade_exclusividade: formData.cidade_exclusividade ? formData.cidade_exclusividade.toUpperCase() : '', uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '', valor: valorFinal, valor_g_tabela: parseMoney(formData.valor_g_tabela), validade_produto: formData.validade_produto || null, kg_proposto: parseMoney(formData.kg_proposto), kg_bonificado: parseMoney(formData.kg_bonificado), parcelas: parseInt(String(formData.parcelas)) || 1, dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45, peso_formula_g: String(parseMoney(formData.peso_formula_g)), fator_lucro: String(parseMoney(formData.fator_lucro)), custo_fixo_operacional: parseMoney(formData.custo_fixo_operacional), data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null, data_entrada: formData.data_entrada || getLocalData(), canal_contato: formData.canal_contato, observacoes: obsFinal, observacoes_proposta: formData.observacoes_proposta 
           }).select();
     
     if (!error) { 
@@ -565,7 +569,7 @@ export default function PipelinePage() {
               user_id: formData.user_id,
               remetente: usuarioLogado.nome,
               mensagem: `Oportunidade Repassada: ${formData.nome_cliente.toUpperCase()} foi enviada para o seu Pipeline.`,
-              link: `/pipeline?op_id=${savedOpData[0].id}` // Aqui o link magico é gravado!
+              link: `/pipeline?op_id=${savedOpData[0].id}` 
           });
       }
       setModalOpen(false); setNovaNotaInput(""); carregarOportunidades(usuarioLogado); 
@@ -760,8 +764,21 @@ export default function PipelinePage() {
               </div>
               <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Razão Social da Farmácia</label><input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})}/></div>
               
+              {/* === NOVOS CAMPOS RESTAURADOS AQUI === */}
+              <div className="md:col-span-2">
+                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Nome do Contato</label>
+                  <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value.toUpperCase()})} placeholder="EX: DRA. JULIA"/>
+              </div>
+              <div className="md:col-span-1">
+                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">WhatsApp / Tel</label>
+                  <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})} placeholder="(11) 99999-9999"/>
+              </div>
+              <div className="md:col-span-1">
+                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">E-mail</label>
+                  <input type="email" className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-medium outline-none shadow-sm" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value.toLowerCase()})} placeholder="email@farmacia.com"/>
+              </div>
+
               <div className="md:col-span-2 bg-blue-50 border border-blue-200 p-4 rounded-xl shadow-sm relative">
-                  {/* CORREÇÃO DO CORTE DO VENDEDOR: Removido o 'overflow-hidden' que cortava a caixa */}
                   <div className="absolute right-0 top-0 w-16 h-16 bg-blue-500 rounded-bl-full opacity-10 pointer-events-none"></div>
                   <label className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-2 flex items-center gap-1 relative z-10"><Briefcase size={12}/> Vendedor Responsável (Hand-off)</label>
                   <select value={formData.user_id} onChange={e => setFormData({...formData, user_id: e.target.value})} disabled={isRepLocked} className="w-full relative z-10 bg-white border border-blue-200 rounded-lg p-2.5 text-sm font-bold text-slate-800 outline-none shadow-sm cursor-pointer disabled:bg-slate-100 disabled:text-slate-500">
@@ -770,7 +787,6 @@ export default function PipelinePage() {
                   </select>
                   {isRepLocked && <p className="text-[9px] font-bold text-red-500 mt-1 uppercase relative z-10">Bloqueado pela regra de carteira ERP</p>}
               </div>
-              
               <div className="md:col-span-2">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Status no Funil</label>
                   <select className="w-full bg-white border border-slate-300 text-blue-700 text-sm font-bold p-3 rounded-xl outline-none shadow-sm cursor-pointer" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
