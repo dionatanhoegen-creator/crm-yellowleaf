@@ -6,7 +6,7 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -16,6 +16,7 @@ import dynamic from 'next/dynamic';
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 import 'react-quill-new/dist/quill.snow.css';
 
+// URLs DAS APIs
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 const API_CLIENTES_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
@@ -29,12 +30,8 @@ const ESTAGIOS = [
 ];
 
 const STAGE_COLORS: any = {
-    prospeccao: [37, 99, 235],   
-    qualificacao: [147, 51, 234], 
-    apresentacao: [219, 39, 119], 
-    negociacao: [234, 179, 8],    
-    fechado: [22, 163, 74],        
-    perdido: [220, 38, 38]        
+    prospeccao: [37, 99, 235], qualificacao: [147, 51, 234], apresentacao: [219, 39, 119], 
+    negociacao: [234, 179, 8], fechado: [22, 163, 74], perdido: [220, 38, 38]        
 };
 
 const CANAIS_CONTATO = ['WhatsApp', 'Ligação', 'E-mail', 'Visita Presencial', 'Instagram'];
@@ -53,6 +50,7 @@ export default function PipelinePage() {
   const [buscaTermo, setBuscaTermo] = useState(""); 
   
   const [usuarioLogado, setUsuarioLogado] = useState<any>(null);
+  const [visaoAdmin, setVisaoAdmin] = useState<'meus' | 'todos'>('meus'); // NOVO: Controle de visão do Admin
   
   const [modalOpen, setModalOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<any>(null);
@@ -158,29 +156,18 @@ export default function PipelinePage() {
   };
 
   const carregarOportunidades = async (perfil: any) => {
-    let query = supabase.from('pipeline').select('*, responsavel:perfis!pipeline_user_id_fkey(nome)').order('created_at', { ascending: false });
+    // CORREÇÃO DO BUG ZERO: Removemos o JOIN complexo e buscamos apenas os dados da tabela.
+    let query = supabase.from('pipeline').select('*').order('created_at', { ascending: false });
     
-    // CORREÇÃO MESTRA: Se o cargo for Admin, Diretor ou Dionatan, não filtra nada, traz tudo!
     const isAdmin = perfil && ['admin', 'Admin', 'diretor', 'Diretor'].includes(perfil.cargo);
     
-    if (perfil && !isAdmin) {
-        // Fallback seguro caso a coluna sdr_id dê erro
-        try {
-            const { data, error } = await query.or(`user_id.eq.${perfil.id},sdr_id.eq.${perfil.id}`);
-            if (error) throw error;
-            setOportunidades(data || []);
-            return;
-        } catch (err) {
-            // Se der erro (ex: coluna sdr_id não existir), cai de volta para a busca segura
-            const fallbackQuery = supabase.from('pipeline').select('*, responsavel:perfis!pipeline_user_id_fkey(nome)').eq('user_id', perfil.id).order('created_at', { ascending: false });
-            const fallbackResult = await fallbackQuery;
-            setOportunidades(fallbackResult.data || []);
-            return;
-        }
+    // Se não for admin, filtra direto no banco por segurança.
+    if (!isAdmin) {
+        query = query.or(`user_id.eq.${perfil.id},sdr_id.eq.${perfil.id}`);
     }
     
-    // Se for Admin/Diretor, carrega tudo sem restrições
-    const { data } = await query;
+    const { data, error } = await query;
+    if (error) console.error("Erro ao buscar:", error);
     setOportunidades(data || []);
   };
 
@@ -266,14 +253,29 @@ export default function PipelinePage() {
         if (vendedorERP !== "") {
             const repEncontrado = equipe.find(u => vendedorERP.toLowerCase().includes(u.nome.toLowerCase()) || u.nome.toLowerCase().includes(vendedorERP.toLowerCase()));
             if (repEncontrado) {
-                setIsRepLocked(true);
-                setConfirmModal({
-                    open: true,
-                    title: 'DIRECIONAMENTO AUTOMÁTICO',
-                    message: `A farmácia "${nomeFantasiaOuRazao}" já pertence à carteira de ${repEncontrado.nome.toUpperCase()}.\n\nAo continuar, esta oportunidade será criada e repassada automaticamente para o Pipeline dele(a).`,
-                    onConfirm: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, user_id: repEncontrado.id })); preencherDadosAPI(cnpjLimpo, chavesERP); },
-                    onCancel: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, cnpj: '', user_id: usuarioLogado.id })); setIsRepLocked(false); setLoadingCNPJ(false); }
-                });
+                
+                // REGRA DA JAQUE (P&D) vs DIONATAN
+                const isSDR = usuarioLogado?.cargo?.toLowerCase().includes('p&d') || usuarioLogado?.cargo?.toLowerCase().includes('sdr') || usuarioLogado?.nome?.toLowerCase().includes('jaque');
+                
+                if (isSDR) {
+                    setIsRepLocked(false); // Jaque pode furar o bloqueio
+                    setConfirmModal({
+                        open: true,
+                        title: 'CLIENTE COM CARTEIRA NO ERP',
+                        message: `A farmácia "${nomeFantasiaOuRazao}" já pertence a ${repEncontrado.nome.toUpperCase()}.\n\nComo você é do setor de P&D/SDR, o sistema pré-selecionou este vendedor, mas você está liberada para repassar a oportunidade para outro representante manualmente se precisar.`,
+                        onConfirm: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, user_id: repEncontrado.id })); preencherDadosAPI(cnpjLimpo, chavesERP); },
+                        onCancel: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, cnpj: '', user_id: usuarioLogado.id })); setLoadingCNPJ(false); }
+                    });
+                } else {
+                    setIsRepLocked(true); // Dionatan/Outros são bloqueados
+                    setConfirmModal({
+                        open: true,
+                        title: 'DIRECIONAMENTO AUTOMÁTICO',
+                        message: `A farmácia "${nomeFantasiaOuRazao}" já pertence à carteira de ${repEncontrado.nome.toUpperCase()}.\n\nAo continuar, esta oportunidade será criada e repassada automaticamente para o Pipeline dele(a).`,
+                        onConfirm: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, user_id: repEncontrado.id })); preencherDadosAPI(cnpjLimpo, chavesERP); },
+                        onCancel: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, cnpj: '', user_id: usuarioLogado.id })); setIsRepLocked(false); setLoadingCNPJ(false); }
+                    });
+                }
                 return;
             } else {
                  setBlockModal({ open: true, title: 'ACESSO NEGADO', message: `A farmácia "${nomeFantasiaOuRazao}" JÁ ESTÁ CADASTRADA.`, motivo: `Pertence ao vendedor: ${vendedorERP.toUpperCase()}.\n\nEste vendedor não possui conta ativa no CRM para receber o repasse.` });
@@ -328,54 +330,36 @@ export default function PipelinePage() {
       setNovaNotaInput(""); 
   };
 
-  // --- RELATÓRIO PDF DA PROPOSTA INDIVIDUAL (RESTAURADO) ---
+  // --- O BOTÃO DA PROPOSTA INDIVIDUAL ---
   const gerarPropostaIndividualPDF = () => {
-    if (!editingOp) return alert("Salve a proposta antes de gerar o PDF.");
+    if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
 
     const doc = new jsPDF();
-    
     try { doc.addImage("/logo.png", "PNG", 14, 10, 45, 18); } 
     catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 14, 10, 45, 18); } catch (err) {} }
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(22);
-    doc.setTextColor(20, 83, 45); // Verde YellowLeaf
+    doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(20, 83, 45); 
     doc.text("PROPOSTA COMERCIAL", 14, 40);
 
-    doc.setFontSize(12);
-    doc.setTextColor(100);
+    doc.setFontSize(12); doc.setTextColor(100);
     doc.text(`Proposta Nº: ${formatPropostaId(formData.numero_proposta)}`, 14, 48);
     doc.text(`Data: ${new Date().toLocaleDateString('pt-BR')}`, 14, 54);
+    doc.setDrawColor(200); doc.line(14, 60, 196, 60);
 
-    doc.setDrawColor(200);
-    doc.line(14, 60, 196, 60);
-
-    doc.setFontSize(14);
-    doc.setTextColor(20, 83, 45);
-    doc.text("DADOS DO CLIENTE", 14, 70);
-    doc.setFontSize(11);
-    doc.setTextColor(50);
-    doc.setFont("helvetica", "normal");
+    doc.setFontSize(14); doc.setTextColor(20, 83, 45); doc.text("DADOS DO CLIENTE", 14, 70);
+    doc.setFontSize(11); doc.setTextColor(50); doc.setFont("helvetica", "normal");
     doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 14, 78);
     doc.text(`CNPJ: ${formData.cnpj || 'N/D'}`, 14, 84);
     doc.text(`Telefone: ${formData.telefone || 'N/D'}`, 14, 90);
     doc.text(`Localidade: ${formData.cidade_exclusividade || '-'} / ${formData.uf_exclusividade || '-'}`, 14, 96);
 
-    doc.setFontSize(14);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(20, 83, 45);
+    doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.setTextColor(20, 83, 45);
     doc.text("DETALHES DO PRODUTO", 14, 110);
     
     autoTable(doc, {
         startY: 115,
         head: [['Produto / Ativo', 'Quantidade (KG)', 'Valor Total']],
-        body: [
-            [
-                formData.produto || 'N/D', 
-                `${formData.kg_proposto} kg`, 
-                formatCurrency(formData.valor)
-            ]
-        ],
+        body: [[formData.produto || 'N/D', `${formData.kg_proposto} kg`, formatCurrency(formData.valor)]],
         theme: 'grid',
         headStyles: { fillColor: [20, 83, 45], textColor: 255, fontStyle: 'bold' },
         styles: { fontSize: 11, cellPadding: 4 },
@@ -383,13 +367,9 @@ export default function PipelinePage() {
 
     const finalY = (doc as any).lastAutoTable.finalY || 135;
 
-    doc.setFontSize(14);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(20, 83, 45);
+    doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.setTextColor(20, 83, 45);
     doc.text("CONDIÇÕES DE PAGAMENTO", 14, finalY + 15);
-    doc.setFontSize(11);
-    doc.setTextColor(50);
-    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11); doc.setTextColor(50); doc.setFont("helvetica", "normal");
     doc.text(`Parcelamento: ${formData.parcelas}x`, 14, finalY + 23);
     doc.text(`Dias para a primeira parcela: ${formData.dias_primeira_parcela} dias`, 14, finalY + 29);
 
@@ -399,15 +379,12 @@ export default function PipelinePage() {
         doc.text(formData.observacoes_proposta, 14, finalY + 46, { maxWidth: 180 });
     }
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(150);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(150);
     doc.text("YellowLeaf Indústria e Comércio - Validade da proposta: 5 dias úteis.", 14, 280);
 
     doc.save(`Proposta_${formData.nome_cliente.replace(/\s+/g, '_')}_${formatPropostaId(formData.numero_proposta)}.pdf`);
   };
 
-  // --- RELATÓRIO GERAL DO PAINEL ---
   const gerarRelatorioGeral = () => {
     const doc = new jsPDF({ orientation: "landscape" });
     try { doc.addImage("/logo.png", "PNG", 14, 10, 40, 15); } 
@@ -454,14 +431,8 @@ export default function PipelinePage() {
   const handleSave = async () => {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     if (!formData.user_id) return alert("Selecione um Representante Responsável para assumir esta oportunidade.");
-    
-    if ((!formData.observacoes || formData.observacoes.trim() === "") && !novaNotaInput.trim()) {
-        return alert("O campo 'Anotações Internas' é obrigatório. Registre o andamento da negociação.");
-    }
-
-    if (!formData.data_lembrete || formData.data_lembrete.trim() === "") {
-        return alert("Por favor, selecione uma data para 'Próximo Contato'. É obrigatório definir um retorno.");
-    }
+    if ((!formData.observacoes || formData.observacoes.trim() === "") && !novaNotaInput.trim()) return alert("O campo 'Anotações Internas' é obrigatório. Registre o andamento da negociação.");
+    if (!formData.data_lembrete || formData.data_lembrete.trim() === "") return alert("Por favor, selecione uma data para 'Próximo Contato'. É obrigatório definir um retorno.");
     
     let obsFinal = formData.observacoes || "";
     if (novaNotaInput.trim()) {
@@ -470,7 +441,6 @@ export default function PipelinePage() {
     }
 
     let valorFinal = parseFloat(String(formData.valor).replace('R$', '').replace(/\./g, '').replace(',', '.')) || 0;
-
     let numeroFinal = formData.numero_proposta;
     if (!editingOp) {
         const { data: maxOp } = await supabase.from('pipeline').select('numero_proposta').order('numero_proposta', { ascending: false }).limit(1);
@@ -514,10 +484,7 @@ export default function PipelinePage() {
               mensagem: `Oportunidade Repassada: ${payload.nome_cliente} foi enviada para o seu Pipeline.`
           });
       }
-
-      setModalOpen(false); 
-      setNovaNotaInput(""); 
-      carregarOportunidades(usuarioLogado); 
+      setModalOpen(false); setNovaNotaInput(""); carregarOportunidades(usuarioLogado); 
     } else { 
       alert(`Erro ao salvar: ${error.message}`); 
     }
@@ -550,7 +517,7 @@ export default function PipelinePage() {
         borderClass = 'border-slate-200'; bgClass = 'bg-slate-50 opacity-60'; textClass = 'text-slate-400';
     }
 
-    const nomeResponsavel = op.responsavel?.nome || 'N/A';
+    const nomeResponsavel = equipe.find(u => u.id === op.user_id)?.nome || 'N/A';
     
     return (
         <div key={op.id} onClick={() => { setEditingOp(op); setFormData({...formData, ...op, custo_fixo_operacional: op.custo_fixo_operacional || '0'}); setIsRepLocked(false); setNovaNotaInput(""); setModalOpen(true); }} className={`p-4 rounded-2xl border-2 cursor-pointer shadow-sm transition hover:shadow-md ${bgClass} ${borderClass}`}>
@@ -593,9 +560,17 @@ export default function PipelinePage() {
     );
   }
 
+  const isAdminUser = usuarioLogado && ['admin', 'Admin', 'diretor', 'Diretor'].includes(usuarioLogado.cargo);
+
   const getSortedOpportunities = (estagioId: string) => {
     const ops = oportunidades.filter(o => {
         if (o.status !== estagioId) return false;
+        
+        // Filtro de Visão do Admin
+        if (isAdminUser && visaoAdmin === 'meus') {
+            if (o.user_id !== usuarioLogado?.id && o.sdr_id !== usuarioLogado?.id) return false;
+        }
+
         if (!buscaTermo) return true;
         const term = buscaTermo.toLowerCase();
         const termClean = term.replace(/\D/g, ''); 
@@ -626,16 +601,26 @@ export default function PipelinePage() {
         </div>
 
         <div className="flex items-center gap-3 w-full md:w-auto">
+            
+            {/* NOVO: Toggle de Visão do Administrador */}
+            {isAdminUser && (
+                <div className="flex bg-slate-200/70 p-1 rounded-xl shrink-0 mr-2">
+                    <button onClick={() => setVisaoAdmin('meus')} className={`px-4 py-2 text-[10px] font-black tracking-widest uppercase rounded-lg transition ${visaoAdmin === 'meus' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                        Meus Cards
+                    </button>
+                    <button onClick={() => setVisaoAdmin('todos')} className={`px-4 py-2 text-[10px] font-black tracking-widest uppercase rounded-lg transition flex items-center gap-1 ${visaoAdmin === 'todos' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                        <Users size={12}/> Toda a Empresa
+                    </button>
+                </div>
+            )}
+
             <div className="relative flex-1 md:w-64">
                 <input type="text" placeholder="Buscar (Nome, CNPJ, Nº...)" className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 outline-none text-sm font-bold uppercase text-slate-600 shadow-sm" value={buscaTermo} onChange={(e) => setBuscaTermo(e.target.value)} />
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             </div>
-            
-            {/* Relatório Geral do Painel */}
             <button onClick={gerarRelatorioGeral} className="bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 flex items-center gap-2 whitespace-nowrap text-sm hover:bg-slate-900">
                 <Printer size={16} /> Relatório Pipeline
             </button>
-            
             <button onClick={() => { setEditingOp(null); setIsRepLocked(false); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); setNovaNotaInput(""); setModalOpen(true); }} className="bg-blue-600 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-sm flex items-center gap-2 hover:bg-blue-700">
                 <Plus size={16} /> Nova Oportunidade
             </button>
@@ -658,7 +643,6 @@ export default function PipelinePage() {
           </div>
       </div>
 
-      {/* MODAL DE CRIAÇÃO E EDIÇÃO */}
       {modalOpen && mounted && createPortal(
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-5xl rounded-[2rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95 duration-200">
@@ -670,11 +654,11 @@ export default function PipelinePage() {
                   <p className="text-sm font-medium text-slate-300 mt-1">{editingOp ? editingOp.nome_cliente : 'Preencha o CNPJ para validar o cliente e a carteira.'}</p>
               </div>
               <div className="flex items-center gap-3">
-                {/* BOTÃO INDIVIDUAL RESTAURADO AQUI NO TOPO DA EDIÇÃO */}
+                {/* BOTÃO DA PROPOSTA INDIVIDUAL (RESTABELECIDO AQUI) */}
                 {editingOp && (
-                  <button onClick={gerarPropostaIndividualPDF} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition border border-white/20">
-                    <FileText size={16}/> Gerar Proposta PDF
-                  </button>
+                    <button onClick={gerarPropostaIndividualPDF} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition border border-white/20">
+                        <FileText size={16}/> Gerar Proposta PDF
+                    </button>
                 )}
                 <button onClick={() => setModalOpen(false)} className="hover:bg-white/20 p-2 rounded-full transition bg-white/10 text-white"><X size={20}/></button>
               </div>
