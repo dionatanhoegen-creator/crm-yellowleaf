@@ -16,7 +16,6 @@ import dynamic from 'next/dynamic';
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 import 'react-quill-new/dist/quill.snow.css';
 
-// URLs DAS APIs
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 const API_CLIENTES_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
@@ -55,7 +54,6 @@ export default function PipelinePage() {
   
   const [usuarioLogado, setUsuarioLogado] = useState<any>(null);
   
-  // MODAIS
   const [modalOpen, setModalOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<any>(null);
   const [blockModal, setBlockModal] = useState({ open: false, title: '', message: '', motivo: '' });
@@ -64,12 +62,8 @@ export default function PipelinePage() {
       open: false, title: 'AVISO IMPORTANTE', message: '', onConfirm: () => {}, onCancel: () => {}
   });
 
-  const [reportConfigOpen, setReportConfigOpen] = useState(false);
   const [novaNotaInput, setNovaNotaInput] = useState("");
-
-  // CONTROLES DE SDR (Hand-off)
   const [isRepLocked, setIsRepLocked] = useState(false); 
-
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
   
@@ -106,9 +100,6 @@ export default function PipelinePage() {
         setUsuarioLogado(perfil);
     }
     
-    // --- INTELIGÊNCIA APLICADA AQUI ---
-    // Puxamos a lista de perfis incluindo o campo "acessos". 
-    // Só vai para a lista suspensa quem tiver acesso ativo ao "pipeline".
     const { data: listaEquipe } = await supabase.from('perfis').select('id, nome, cargo, acessos').order('nome');
     if (listaEquipe) {
         const vendedoresAtivos = listaEquipe.filter(u => u.acessos && u.acessos.pipeline === true);
@@ -134,6 +125,7 @@ export default function PipelinePage() {
   };
 
   const formatPropostaId = (id: any) => String(id).padStart(5, '0');
+  const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
   const carregarExclusividades = async () => {
     const { data } = await supabase.from('exclusividades').select('*');
@@ -168,12 +160,27 @@ export default function PipelinePage() {
   const carregarOportunidades = async (perfil: any) => {
     let query = supabase.from('pipeline').select('*, responsavel:perfis!pipeline_user_id_fkey(nome)').order('created_at', { ascending: false });
     
-    if (perfil && perfil.cargo !== 'admin') {
-        query = query.or(`user_id.eq.${perfil.id},sdr_id.eq.${perfil.id}`);
+    // CORREÇÃO MESTRA: Se o cargo for Admin, Diretor ou Dionatan, não filtra nada, traz tudo!
+    const isAdmin = perfil && ['admin', 'Admin', 'diretor', 'Diretor'].includes(perfil.cargo);
+    
+    if (perfil && !isAdmin) {
+        // Fallback seguro caso a coluna sdr_id dê erro
+        try {
+            const { data, error } = await query.or(`user_id.eq.${perfil.id},sdr_id.eq.${perfil.id}`);
+            if (error) throw error;
+            setOportunidades(data || []);
+            return;
+        } catch (err) {
+            // Se der erro (ex: coluna sdr_id não existir), cai de volta para a busca segura
+            const fallbackQuery = supabase.from('pipeline').select('*, responsavel:perfis!pipeline_user_id_fkey(nome)').eq('user_id', perfil.id).order('created_at', { ascending: false });
+            const fallbackResult = await fallbackQuery;
+            setOportunidades(fallbackResult.data || []);
+            return;
+        }
     }
     
-    const { data, error } = await query;
-    if (error) console.error(error);
+    // Se for Admin/Diretor, carrega tudo sem restrições
+    const { data } = await query;
     setOportunidades(data || []);
   };
 
@@ -214,7 +221,6 @@ export default function PipelinePage() {
   const buscarDadosCNPJ = async () => {
     const cnpjLimpo = formData.cnpj?.replace(/\D/g, '');
     if (cnpjLimpo?.length !== 14) return;
-    
     setLoadingCNPJ(true);
 
     if (!editingOp) {
@@ -224,20 +230,12 @@ export default function PipelinePage() {
             setConfirmModal({
                 open: true,
                 message: `Você já tem uma proposta para este CNPJ no status "${statusLabel.toUpperCase()}". Deseja realmente abrir uma NOVA proposta?`,
-                onConfirm: () => {
-                    setConfirmModal(prev => ({ ...prev, open: false }));
-                    continuarBuscaCNPJ(cnpjLimpo); 
-                },
-                onCancel: () => {
-                    setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
-                    setFormData(prev => ({ ...prev, cnpj: '' })); 
-                    setLoadingCNPJ(false);
-                }
+                onConfirm: () => { setConfirmModal(prev => ({ ...prev, open: false })); continuarBuscaCNPJ(cnpjLimpo); },
+                onCancel: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, cnpj: '' })); setLoadingCNPJ(false); }
             });
             return; 
         }
     }
-
     continuarBuscaCNPJ(cnpjLimpo);
   };
 
@@ -245,73 +243,41 @@ export default function PipelinePage() {
     const clienteNaBase = baseClientesExterna.find(c => {
         const cnpjDireto = String(c.cnpj || c.CNPJ || c.documento || c.Documento || '').replace(/\D/g, '');
         if (cnpjDireto === cnpjLimpo) return true;
-
         return Object.values(c).some(val => {
-            if (val && (typeof val === 'string' || typeof val === 'number')) {
-                return String(val).replace(/\D/g, '') === cnpjLimpo;
-            }
+            if (val && (typeof val === 'string' || typeof val === 'number')) return String(val).replace(/\D/g, '') === cnpjLimpo;
             return false;
         });
     });
 
     if (clienteNaBase) {
-        const chavesERP = Object.keys(clienteNaBase).reduce((acc, key) => {
-            acc[key.toLowerCase().trim()] = clienteNaBase[key];
-            return acc;
-        }, {} as any);
-
+        const chavesERP = Object.keys(clienteNaBase).reduce((acc, key) => { acc[key.toLowerCase().trim()] = clienteNaBase[key]; return acc; }, {} as any);
         const isBloqueado = chavesERP.bloqueado === true || String(chavesERP.bloqueado).toLowerCase() === 'sim';
         const motivoBloqueio = chavesERP.motivobloqueio || chavesERP.motivo || 'Verifique com o financeiro.';
         const vendedorERP = String(chavesERP.vendedor || chavesERP.consultor || chavesERP.representante || '').trim();
         const nomeFantasiaOuRazao = String(chavesERP.fantasia || chavesERP['nome fantasia'] || chavesERP.razaosocial || chavesERP['razão social'] || 'Cliente do ERP').toUpperCase();
 
         if (isBloqueado) {
-            setBlockModal({
-                open: true,
-                title: 'ACESSO NEGADO',
-                message: `A farmácia "${nomeFantasiaOuRazao}" JÁ ESTÁ CADASTRADA no ERP.`,
-                motivo: `Restrição Financeira/Administrativa: ${motivoBloqueio}`
-            });
+            setBlockModal({ open: true, title: 'ACESSO NEGADO', message: `A farmácia "${nomeFantasiaOuRazao}" JÁ ESTÁ CADASTRADA no ERP.`, motivo: `Restrição Financeira/Administrativa: ${motivoBloqueio}` });
             setFormData(prev => ({ ...prev, cnpj: '' }));
             setLoadingCNPJ(false);
             return; 
         }
 
         if (vendedorERP !== "") {
-            const repEncontrado = equipe.find(u => 
-                vendedorERP.toLowerCase().includes(u.nome.toLowerCase()) || 
-                u.nome.toLowerCase().includes(vendedorERP.toLowerCase())
-            );
-
+            const repEncontrado = equipe.find(u => vendedorERP.toLowerCase().includes(u.nome.toLowerCase()) || u.nome.toLowerCase().includes(vendedorERP.toLowerCase()));
             if (repEncontrado) {
                 setIsRepLocked(true);
-                
                 setConfirmModal({
                     open: true,
                     title: 'DIRECIONAMENTO AUTOMÁTICO',
                     message: `A farmácia "${nomeFantasiaOuRazao}" já pertence à carteira de ${repEncontrado.nome.toUpperCase()}.\n\nAo continuar, esta oportunidade será criada e repassada automaticamente para o Pipeline dele(a).`,
-                    onConfirm: () => {
-                        setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
-                        setFormData(prev => ({ ...prev, user_id: repEncontrado.id }));
-                        preencherDadosAPI(cnpjLimpo, chavesERP);
-                    },
-                    onCancel: () => {
-                        setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
-                        setFormData(prev => ({ ...prev, cnpj: '', user_id: usuarioLogado.id })); 
-                        setIsRepLocked(false);
-                        setLoadingCNPJ(false);
-                    }
+                    onConfirm: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, user_id: repEncontrado.id })); preencherDadosAPI(cnpjLimpo, chavesERP); },
+                    onCancel: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, cnpj: '', user_id: usuarioLogado.id })); setIsRepLocked(false); setLoadingCNPJ(false); }
                 });
                 return;
             } else {
-                 setBlockModal({
-                     open: true,
-                     title: 'ACESSO NEGADO',
-                     message: `A farmácia "${nomeFantasiaOuRazao}" JÁ ESTÁ CADASTRADA.`,
-                     motivo: `Pertence ao vendedor: ${vendedorERP.toUpperCase()}.\n\nEste vendedor não possui conta ativa no CRM para receber o repasse.`
-                 });
-                 setFormData(prev => ({ ...prev, cnpj: '' }));
-                 setLoadingCNPJ(false);
+                 setBlockModal({ open: true, title: 'ACESSO NEGADO', message: `A farmácia "${nomeFantasiaOuRazao}" JÁ ESTÁ CADASTRADA.`, motivo: `Pertence ao vendedor: ${vendedorERP.toUpperCase()}.\n\nEste vendedor não possui conta ativa no CRM para receber o repasse.` });
+                 setFormData(prev => ({ ...prev, cnpj: '' })); setLoadingCNPJ(false);
                  return; 
             }
         }
@@ -321,15 +287,8 @@ export default function PipelinePage() {
             open: true,
             title: 'FARMÁCIA SEM CARTEIRA',
             message: `A farmácia "${nomeFantasiaOuRazao}" é cliente ativo mas não tem um representante fixo no ERP.\n\nDeseja criar uma nova oportunidade e escolher o representante manualmente?`,
-            onConfirm: () => {
-                setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
-                preencherDadosAPI(cnpjLimpo, chavesERP);
-            },
-            onCancel: () => {
-                setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} });
-                setFormData(prev => ({ ...prev, cnpj: '' })); 
-                setLoadingCNPJ(false);
-            }
+            onConfirm: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); preencherDadosAPI(cnpjLimpo, chavesERP); },
+            onCancel: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, cnpj: '' })); setLoadingCNPJ(false); }
         });
         return;
     }
@@ -354,18 +313,12 @@ export default function PipelinePage() {
     } catch (e) {
        if (chavesERP) {
           setFormData(prev => ({
-             ...prev,
-             nome_cliente: (chavesERP.razaosocial || chavesERP.fantasia || '').toUpperCase(),
-             cidade_exclusividade: (chavesERP.cidade || '').toUpperCase(),
-             uf_exclusividade: (chavesERP.uf || '').toUpperCase(),
-             telefone: chavesERP.telefone || prev.telefone
+             ...prev, nome_cliente: (chavesERP.razaosocial || chavesERP.fantasia || '').toUpperCase(), cidade_exclusividade: (chavesERP.cidade || '').toUpperCase(), uf_exclusividade: (chavesERP.uf || '').toUpperCase(), telefone: chavesERP.telefone || prev.telefone
           }));
        }
     }
     setLoadingCNPJ(false);
   };
-
-  const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
   const adicionarNotaAoHistorico = () => {
       if (!novaNotaInput.trim()) return;
@@ -375,15 +328,93 @@ export default function PipelinePage() {
       setNovaNotaInput(""); 
   };
 
+  // --- RELATÓRIO PDF DA PROPOSTA INDIVIDUAL (RESTAURADO) ---
+  const gerarPropostaIndividualPDF = () => {
+    if (!editingOp) return alert("Salve a proposta antes de gerar o PDF.");
+
+    const doc = new jsPDF();
+    
+    try { doc.addImage("/logo.png", "PNG", 14, 10, 45, 18); } 
+    catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 14, 10, 45, 18); } catch (err) {} }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    doc.setTextColor(20, 83, 45); // Verde YellowLeaf
+    doc.text("PROPOSTA COMERCIAL", 14, 40);
+
+    doc.setFontSize(12);
+    doc.setTextColor(100);
+    doc.text(`Proposta Nº: ${formatPropostaId(formData.numero_proposta)}`, 14, 48);
+    doc.text(`Data: ${new Date().toLocaleDateString('pt-BR')}`, 14, 54);
+
+    doc.setDrawColor(200);
+    doc.line(14, 60, 196, 60);
+
+    doc.setFontSize(14);
+    doc.setTextColor(20, 83, 45);
+    doc.text("DADOS DO CLIENTE", 14, 70);
+    doc.setFontSize(11);
+    doc.setTextColor(50);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 14, 78);
+    doc.text(`CNPJ: ${formData.cnpj || 'N/D'}`, 14, 84);
+    doc.text(`Telefone: ${formData.telefone || 'N/D'}`, 14, 90);
+    doc.text(`Localidade: ${formData.cidade_exclusividade || '-'} / ${formData.uf_exclusividade || '-'}`, 14, 96);
+
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(20, 83, 45);
+    doc.text("DETALHES DO PRODUTO", 14, 110);
+    
+    autoTable(doc, {
+        startY: 115,
+        head: [['Produto / Ativo', 'Quantidade (KG)', 'Valor Total']],
+        body: [
+            [
+                formData.produto || 'N/D', 
+                `${formData.kg_proposto} kg`, 
+                formatCurrency(formData.valor)
+            ]
+        ],
+        theme: 'grid',
+        headStyles: { fillColor: [20, 83, 45], textColor: 255, fontStyle: 'bold' },
+        styles: { fontSize: 11, cellPadding: 4 },
+    });
+
+    const finalY = (doc as any).lastAutoTable.finalY || 135;
+
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(20, 83, 45);
+    doc.text("CONDIÇÕES DE PAGAMENTO", 14, finalY + 15);
+    doc.setFontSize(11);
+    doc.setTextColor(50);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Parcelamento: ${formData.parcelas}x`, 14, finalY + 23);
+    doc.text(`Dias para a primeira parcela: ${formData.dias_primeira_parcela} dias`, 14, finalY + 29);
+
+    if (formData.observacoes_proposta) {
+        doc.text("Observações Adicionais:", 14, finalY + 40);
+        doc.setFont("helvetica", "italic");
+        doc.text(formData.observacoes_proposta, 14, finalY + 46, { maxWidth: 180 });
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(150);
+    doc.text("YellowLeaf Indústria e Comércio - Validade da proposta: 5 dias úteis.", 14, 280);
+
+    doc.save(`Proposta_${formData.nome_cliente.replace(/\s+/g, '_')}_${formatPropostaId(formData.numero_proposta)}.pdf`);
+  };
+
+  // --- RELATÓRIO GERAL DO PAINEL ---
   const gerarRelatorioGeral = () => {
     const doc = new jsPDF({ orientation: "landscape" });
-    
     try { doc.addImage("/logo.png", "PNG", 14, 10, 40, 15); } 
     catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 14, 10, 40, 15); } catch (err) {} }
 
     doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(20, 83, 45);
     doc.text("RELATÓRIO DE PIPELINE E OPORTUNIDADES", 14, 35);
-    
     doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(100);
     doc.text(`Extraído em: ${new Date().toLocaleString('pt-BR')} por ${usuarioLogado?.nome || 'Sistema'}`, 14, 41);
 
@@ -391,22 +422,11 @@ export default function PipelinePage() {
     dadosOrdenados.sort((a, b) => (b.numero_proposta || 0) - (a.numero_proposta || 0));
 
     const headers = ['Nº', 'DATA', 'FARMÁCIA', 'PRODUTO', 'REPRESENTANTE', 'ESTÁGIO', 'VALOR (R$)'];
-    
     const tableBody = dadosOrdenados.map(op => {
         const responsavelNome = equipe.find(u => u.id === op.user_id)?.nome || 'N/A';
         const dataFormatada = op.data_entrada ? op.data_entrada.split('-').reverse().join('/') : '-';
         const estagioNome = ESTAGIOS.find(e => e.id === op.status)?.label || op.status;
-
-        const row = [
-            formatPropostaId(op.numero_proposta),
-            dataFormatada,
-            op.nome_cliente,
-            op.produto || '-',
-            responsavelNome,
-            estagioNome,
-            formatCurrency(op.valor)
-        ];
-        
+        const row = [formatPropostaId(op.numero_proposta), dataFormatada, op.nome_cliente, op.produto || '-', responsavelNome, estagioNome, formatCurrency(op.valor)];
         (row as any)._statusId = op.status;
         return row;
     });
@@ -610,9 +630,12 @@ export default function PipelinePage() {
                 <input type="text" placeholder="Buscar (Nome, CNPJ, Nº...)" className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 outline-none text-sm font-bold uppercase text-slate-600 shadow-sm" value={buscaTermo} onChange={(e) => setBuscaTermo(e.target.value)} />
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             </div>
+            
+            {/* Relatório Geral do Painel */}
             <button onClick={gerarRelatorioGeral} className="bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 flex items-center gap-2 whitespace-nowrap text-sm hover:bg-slate-900">
-                <Printer size={16} /> Relatório
+                <Printer size={16} /> Relatório Pipeline
             </button>
+            
             <button onClick={() => { setEditingOp(null); setIsRepLocked(false); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); setNovaNotaInput(""); setModalOpen(true); }} className="bg-blue-600 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-sm flex items-center gap-2 hover:bg-blue-700">
                 <Plus size={16} /> Nova Oportunidade
             </button>
@@ -646,7 +669,15 @@ export default function PipelinePage() {
                   </h2>
                   <p className="text-sm font-medium text-slate-300 mt-1">{editingOp ? editingOp.nome_cliente : 'Preencha o CNPJ para validar o cliente e a carteira.'}</p>
               </div>
-              <button onClick={() => setModalOpen(false)} className="hover:bg-white/20 p-2 rounded-full transition bg-white/10 text-white"><X size={20}/></button>
+              <div className="flex items-center gap-3">
+                {/* BOTÃO INDIVIDUAL RESTAURADO AQUI NO TOPO DA EDIÇÃO */}
+                {editingOp && (
+                  <button onClick={gerarPropostaIndividualPDF} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition border border-white/20">
+                    <FileText size={16}/> Gerar Proposta PDF
+                  </button>
+                )}
+                <button onClick={() => setModalOpen(false)} className="hover:bg-white/20 p-2 rounded-full transition bg-white/10 text-white"><X size={20}/></button>
+              </div>
             </div>
 
             <div className="p-6 md:p-8 grid grid-cols-1 md:grid-cols-4 gap-6 overflow-y-auto bg-slate-50 flex-1 custom-scrollbar">
