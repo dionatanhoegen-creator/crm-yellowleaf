@@ -98,7 +98,7 @@ export default function PipelinePage() {
         setUsuarioLogado(perfil);
     }
     
-    const { data: listaEquipe } = await supabase.from('perfis').select('id, nome, cargo, acessos').order('nome');
+    const { data: listaEquipe } = await supabase.from('perfis').select('id, nome, cargo, acessos, telefone').order('nome');
     if (listaEquipe) {
         const vendedoresAtivos = listaEquipe.filter(u => u.acessos && u.acessos.pipeline === true);
         setEquipe(vendedoresAtivos);
@@ -148,7 +148,7 @@ export default function PipelinePage() {
                 ativo: p.ativo ? p.ativo.trim() : 'Sem Nome',
                 preco_grama: parseMoney(p.preco_grama), 
                 peso_formula: parseMoney(p.peso_formula) || 13.2,
-                validade: p.validade || p.data_validade || p.vencimento || '' // Extrai a validade da API
+                validade: p.validade || p.data_validade || p.vencimento || '' 
             }));
             setProdutosApi(produtosLimpos.sort((a: any, b: any) => a.ativo.localeCompare(b.ativo)));
         }
@@ -187,7 +187,7 @@ export default function PipelinePage() {
     if (produtoSelecionado) {
         setFormData(prev => ({
             ...prev,
-            validade_produto: produtoSelecionado.validade || prev.validade_produto, // Atualiza validade
+            validade_produto: produtoSelecionado.validade || prev.validade_produto, 
             valor_g_tabela: (parseMoney(prev.valor_g_tabela) === 0 || !prev.valor_g_tabela) 
                 ? produtoSelecionado.preco_grama.toFixed(2).replace('.', ',') 
                 : prev.valor_g_tabela,
@@ -328,33 +328,42 @@ export default function PipelinePage() {
       setNovaNotaInput(""); 
   };
 
-  // --- RELATÓRIO PDF: PROPOSTA COMERCIAL (COM VALIDADE DO ATIVO) ---
+  // --- RELATÓRIO PDF (RECONSTRUÍDO IDENTICO AO MODELO ORIGINAL) ---
   const gerarPropostaIndividualPDF = () => {
     if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
 
     const doc = new jsPDF();
+    const darkGreen = [18, 85, 48]; // Verde Escuro da YellowLeaf
     
-    // Header
+    // LOGO E CABEÇALHO
     try { doc.addImage("/logo.png", "PNG", 14, 10, 45, 18); } 
     catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 14, 10, 45, 18); } catch (err) {} }
 
-    doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(20, 83, 45); 
-    doc.text("PROPOSTA COMERCIAL", 14, 40);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]); 
+    doc.text("PROPOSTA COMERCIAL", 196, 18, { align: "right" });
 
-    doc.setFontSize(12); doc.setTextColor(100);
-    doc.text(`Nº ${formatPropostaId(formData.numero_proposta)}`, 175, 40);
-    doc.text("YellowLeaf - Nutraceuticals Company", 14, 46);
+    doc.setFontSize(10); doc.setTextColor(150, 150, 150);
+    doc.text(`Nº ${formatPropostaId(formData.numero_proposta)}`, 196, 24, { align: "right" });
+    doc.text("YellowLeaf – Nutraceuticals Company", 196, 29, { align: "right" });
 
-    doc.setDrawColor(200); doc.line(14, 52, 196, 52);
+    // LINHA SEPARADORA
+    doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+    doc.setLineWidth(1.5);
+    doc.line(14, 34, 196, 34);
 
-    // Dados do Cliente
-    doc.setFontSize(14); doc.setTextColor(20, 83, 45); doc.text("DADOS DO CLIENTE", 14, 62);
-    doc.setFontSize(10); doc.setTextColor(50); doc.setFont("helvetica", "normal");
-    doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 14, 70);
-    doc.text(`Contato: ${formData.contato || 'N/D'} | Tel: ${formData.telefone || 'N/D'}`, 14, 76);
-    doc.text(`Cidade/UF: ${formData.cidade_exclusividade || '-'} / ${formData.uf_exclusividade || '-'}`, 14, 82);
+    // CAIXA CINZA (DADOS DO CLIENTE)
+    doc.setFillColor(245, 245, 245);
+    doc.rect(14, 40, 182, 30, 'F');
 
-    // Variáveis Matemáticas do Payback
+    doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+    doc.text("DADOS DO CLIENTE", 18, 48);
+
+    doc.setFontSize(10); doc.setTextColor(80, 80, 80); doc.setFont("helvetica", "normal");
+    doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 18, 55);
+    doc.text(`Contato: ${formData.contato || 'N/D'}   |   Tel: ${formData.telefone || 'N/D'}`, 18, 60);
+    doc.text(`Cidade/UF: ${formData.cidade_exclusividade || '-'} / ${formData.uf_exclusividade || '-'}`, 18, 65);
+
+    // VARIÁVEIS MATEMÁTICAS DO PAYBACK
     const precoGrama = parseFloat(String(formData.valor_g_tabela).replace(',', '.')) || 0;
     const kgProposto = parseFloat(String(formData.kg_proposto)) || 0;
     const kgBonificado = parseFloat(String(formData.kg_bonificado)) || 0;
@@ -372,20 +381,19 @@ export default function PipelinePage() {
     const custoMP = precoGramaBonificado * pesoFormula;
     const custoTotalFormula = custoMP + custoFixo;
     const sugestaoVenda = (custoMP * fatorLucro) + custoFixo;
-    
     const qtdFormulasParaPagarParcela = sugestaoVenda > 0 ? (valorParcela / sugestaoVenda) : 0;
     const viabilidadeDiaria = parseInt(String(diasPrimeiraParcela)) > 0 ? (qtdFormulasParaPagarParcela / parseInt(String(diasPrimeiraParcela))) : 0;
 
-    // Tabela 1: Especificação com VALIDADE DO LOTE
-    doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.setTextColor(20, 83, 45);
-    doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 14, 98);
+    // TABELA 1: ESPECIFICAÇÃO
+    doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+    doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 14, 82);
     
     autoTable(doc, {
-        startY: 103,
+        startY: 86,
         head: [['DESCRIÇÃO', 'VALORES']],
         body: [
             ['Ativo/Insumo', formData.produto || 'N/D'],
-            ['Validade do Lote/Ativo', formData.validade_produto || 'Consulte Lote Atual'], // NOVO
+            ['Validade do Lote/Ativo', formData.validade_produto || 'Consulte Lote Atual'],
             ['Preço por grama (g)', formatCurrency(precoGrama)],
             ['Quantidade da proposta (kg)', `${kgProposto} kg`],
             ['Quantidade bonificada (kg)', `${kgBonificado} kg`],
@@ -395,14 +403,17 @@ export default function PipelinePage() {
             ['Vencimento 1ª Parcela', `${diasPrimeiraParcela} dias`]
         ],
         theme: 'grid',
-        headStyles: { fillColor: [20, 83, 45], textColor: 255, fontStyle: 'bold' },
-        styles: { fontSize: 10, cellPadding: 4 },
-        columnStyles: { 1: { fontStyle: 'bold' } }
+        headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
+        styles: { fontSize: 10, cellPadding: 5, textColor: [60, 60, 60] },
+        columnStyles: {
+            0: { fontStyle: 'normal' },
+            1: { fontStyle: 'bold', halign: 'right' }
+        }
     });
 
-    let finalY = (doc as any).lastAutoTable.finalY || 165;
+    let finalY = (doc as any).lastAutoTable.finalY || 160;
 
-    // Tabela 2: Payback
+    // TABELA 2: PAYBACK
     autoTable(doc, {
         startY: finalY + 10,
         head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
@@ -410,34 +421,51 @@ export default function PipelinePage() {
             [`Custo Matéria-Prima (Dose ${pesoFormula}g)`, formatCurrency(custoMP)],
             ['Custo Total por Fórmula (Manipulado)', formatCurrency(custoTotalFormula)],
             [`Sugestão de Venda (Fator ${fatorLucro} no Ativo)`, formatCurrency(sugestaoVenda)],
-            ['META DE VIABILIDADE', `${viabilidadeDiaria.toFixed(2)} fórmulas/dia`]
+            ['META DE VIABILIDADE', `${viabilidadeDiaria.toFixed(2).replace('.', ',')} fórmulas/dia`]
         ],
         theme: 'grid',
-        headStyles: { fillColor: [240, 240, 240], textColor: [20, 83, 45], fontStyle: 'bold' },
-        styles: { fontSize: 10, cellPadding: 4 },
-        columnStyles: { 1: { fontStyle: 'bold' } }
+        headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
+        styles: { fontSize: 10, cellPadding: 5, textColor: [60, 60, 60] },
+        columnStyles: {
+            0: { fontStyle: 'normal' },
+            1: { fontStyle: 'bold', halign: 'right' }
+        },
+        didParseCell: (data) => {
+            if (data.section === 'body' && data.row.index === 3) {
+                data.cell.styles.fontStyle = 'bold';
+                if (data.column.index === 1) data.cell.styles.textColor = [0, 150, 0];
+            }
+        }
     });
 
     finalY = (doc as any).lastAutoTable.finalY || 205;
 
-    // Rodapé de Certificações
-    doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(20, 83, 45);
-    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 14, finalY + 15);
-    doc.setFontSize(9); doc.setTextColor(100); doc.setFont("helvetica", "normal");
-    const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e promovemos sua comercialização com responsabilidade e ética.";
-    doc.text(textQualidade, 14, finalY + 22, { maxWidth: 180 });
-    doc.setFont("helvetica", "bold");
-    doc.text("HACCP  |  ISO FSSC 22000  |  GMP  |  CENTHIRD", 14, finalY + 32);
+    // RODAPÉ (CERTIFICAÇÕES E CONTATOS)
+    doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, finalY + 20, { align: "center" });
 
-    // Contatos e Vendedor
-    doc.setDrawColor(200); doc.line(14, 270, 196, 270);
-    doc.setFontSize(8); doc.setTextColor(100); doc.setFont("helvetica", "normal");
-    doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, 275);
-    doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 14, 280);
+    doc.setFontSize(9); doc.setTextColor(100, 100, 100); doc.setFont("helvetica", "normal");
+    const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e\npromovemos sua comercialização com responsabilidade e ética.";
+    doc.text(textQualidade, 105, finalY + 27, { align: "center", lineHeightFactor: 1.5 });
 
-    const responsavelNome = equipe.find(u => u.id === formData.user_id)?.nome || usuarioLogado?.nome || 'Comercial YellowLeaf';
-    doc.setFont("helvetica", "bold"); doc.setTextColor(20, 83, 45);
-    doc.text(`${responsavelNome} Comercial YellowLeaf`, 140, 275);
+    doc.setFontSize(14); doc.setFont("helvetica", "bold");
+    doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", 105, finalY + 42, { align: "center" });
+
+    // Linha final
+    doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+    doc.setLineWidth(1); doc.line(14, 275, 196, 275);
+
+    // Info Empresa e Vendedor
+    doc.setFontSize(8); doc.setTextColor(150, 150, 150); doc.setFont("helvetica", "normal");
+    doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, 282);
+    doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 14, 286);
+
+    const representante = equipe.find(u => u.id === formData.user_id);
+    const responsavelNome = representante?.nome || usuarioLogado?.nome || 'Comercial YellowLeaf';
+    const responsavelTel = representante?.telefone || '(44) 99102-7642'; // Puxa do perfil ou usa o padrao
+    
+    doc.text(`${responsavelNome} - Comercial YellowLeaf`, 196, 282, { align: "right" });
+    doc.text(`WhatsApp: ${responsavelTel}`, 196, 286, { align: "right" });
 
     doc.save(`Proposta_${formData.nome_cliente.replace(/\s+/g, '_')}_${formatPropostaId(formData.numero_proposta)}.pdf`);
   };
@@ -517,7 +545,7 @@ export default function PipelinePage() {
       uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '',
       valor: valorFinal,
       valor_g_tabela: parseFloat(String(formData.valor_g_tabela).replace(',', '.')) || 0,
-      validade_produto: formData.validade_produto || null, // NOVO CAMPO NO PAYLOAD
+      validade_produto: formData.validade_produto || null, 
       kg_proposto: parseFloat(String(formData.kg_proposto)) || 0,
       kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
       parcelas: parseInt(String(formData.parcelas)) || 1,
@@ -699,7 +727,6 @@ export default function PipelinePage() {
           </div>
       </div>
 
-      {/* MODAL DE CRIAÇÃO E EDIÇÃO */}
       {modalOpen && mounted && createPortal(
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-5xl rounded-[2rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95 duration-200">
@@ -776,7 +803,6 @@ export default function PipelinePage() {
                   </select>
               </div>
 
-              {/* CAMPO DE VALIDADE */}
               <div className="md:col-span-2">
                   <label className="text-xs font-bold text-slate-700 mb-1.5 block">Validade do Ativo</label>
                   <input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm text-slate-500" value={formData.validade_produto} onChange={e => setFormData({...formData, validade_produto: e.target.value})} placeholder="Mês/Ano ou Lote" />
