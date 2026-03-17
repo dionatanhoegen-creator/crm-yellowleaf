@@ -6,7 +6,7 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -47,7 +47,7 @@ export default function PipelinePage() {
   const [produtosApi, setProdutosApi] = useState<any[]>([]); 
   const [exclusividades, setExclusividades] = useState<any[]>([]); 
   const [baseClientesExterna, setBaseClientesExterna] = useState<any[]>([]); 
-  const [equipe, setEquipe] = useState<any[]>([]); // Lista de vendedores para o Hand-off
+  const [equipe, setEquipe] = useState<any[]>([]); 
   
   const [loading, setLoading] = useState(true);
   const [loadingProdutos, setLoadingProdutos] = useState(true);
@@ -68,7 +68,7 @@ export default function PipelinePage() {
   const [novaNotaInput, setNovaNotaInput] = useState("");
 
   // CONTROLES DE SDR (Hand-off)
-  const [isRepLocked, setIsRepLocked] = useState(false); // Trava o dropdown se o ERP já ditar o dono
+  const [isRepLocked, setIsRepLocked] = useState(false); 
 
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -86,7 +86,7 @@ export default function PipelinePage() {
     status: 'prospeccao', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45',
     peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', 
     cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0,
-    user_id: '' // O Vendedor Responsável Final
+    user_id: '' 
   });
 
   useEffect(() => { 
@@ -160,11 +160,9 @@ export default function PipelinePage() {
   };
 
   const carregarOportunidades = async (perfil: any) => {
-    // Busca oportunidades. Se não for admin, busca as que ele é o dono (user_id) OU as que ele repassou (sdr_id)
     let query = supabase.from('pipeline').select('*, responsavel:perfis!pipeline_user_id_fkey(nome)').order('created_at', { ascending: false });
     
     if (perfil && perfil.cargo !== 'admin') {
-        // Usa o OR para Co-Propriedade
         query = query.or(`user_id.eq.${perfil.id},sdr_id.eq.${perfil.id}`);
     }
     
@@ -238,7 +236,6 @@ export default function PipelinePage() {
   };
 
   const continuarBuscaCNPJ = async (cnpjLimpo: string) => {
-    
     const clienteNaBase = baseClientesExterna.find(c => {
         const cnpjDireto = String(c.cnpj || c.CNPJ || c.documento || c.Documento || '').replace(/\D/g, '');
         if (cnpjDireto === cnpjLimpo) return true;
@@ -274,16 +271,13 @@ export default function PipelinePage() {
             return; 
         }
 
-        // --- INTELIGÊNCIA DE REPASSE (SDR) ---
         if (vendedorERP !== "") {
-            // Procura quem é esse vendedorERP na nossa base de usuários
             const repEncontrado = equipe.find(u => 
                 vendedorERP.toLowerCase().includes(u.nome.toLowerCase()) || 
                 u.nome.toLowerCase().includes(vendedorERP.toLowerCase())
             );
 
             if (repEncontrado) {
-                // Achei o dono! Trava o dropdown nele.
                 setIsRepLocked(true);
                 
                 setConfirmModal({
@@ -304,7 +298,6 @@ export default function PipelinePage() {
                 });
                 return;
             } else {
-                 // Vendedor existe no ERP mas não tem conta no CRM
                  setBlockModal({
                      open: true,
                      title: 'ACESSO NEGADO',
@@ -317,7 +310,6 @@ export default function PipelinePage() {
             }
         }
 
-        // Se for cliente ativo mas sem vendedor definido no ERP (Avulso)
         setIsRepLocked(false);
         setConfirmModal({
             open: true,
@@ -336,7 +328,6 @@ export default function PipelinePage() {
         return;
     }
 
-    // Cliente 100% novo na base da Receita
     setIsRepLocked(false);
     preencherDadosAPI(cnpjLimpo, null);
   };
@@ -460,13 +451,12 @@ export default function PipelinePage() {
         numeroFinal = (maxOp && maxOp[0]?.numero_proposta ? Number(maxOp[0].numero_proposta) : 467) + 1;
     }
 
-    // --- LÓGICA DE HAND-OFF (SDR -> Vendedor) ---
     const isRepasse = formData.user_id !== usuarioLogado?.id;
 
     const payload = {
       ...formData,
-      user_id: formData.user_id, // O Dono final do card
-      sdr_id: isRepasse && !editingOp ? usuarioLogado?.id : (editingOp?.sdr_id || null), // Mantém a rastreabilidade da P&D
+      user_id: formData.user_id, 
+      sdr_id: isRepasse && !editingOp ? usuarioLogado?.id : (editingOp?.sdr_id || null), 
       numero_proposta: numeroFinal,
       nome_cliente: formData.nome_cliente.toUpperCase(),
       contato: formData.contato ? formData.contato.toUpperCase() : '',
@@ -491,7 +481,6 @@ export default function PipelinePage() {
     const { error } = editingOp ? await supabase.from('pipeline').update(payload).eq('id', editingOp.id) : await supabase.from('pipeline').insert(payload);
     
     if (!error) { 
-      // Se foi um repasse novo, dispara a notificação para o sino do vendedor!
       if (isRepasse && !editingOp) {
           await supabase.from('notificacoes').insert({
               user_id: formData.user_id,
@@ -640,7 +629,7 @@ export default function PipelinePage() {
           </div>
       </div>
 
-      {/* MODAL DE CRIAÇÃO E EDIÇÃO (COM HAND-OFF DE REPRESENTANTE) */}
+      {/* MODAL DE CRIAÇÃO E EDIÇÃO */}
       {modalOpen && mounted && createPortal(
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-5xl rounded-[2rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95 duration-200">
@@ -675,7 +664,6 @@ export default function PipelinePage() {
                   <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})}/>
               </div>
               
-              {/* O NOVO CAMPO DE HAND-OFF (REPASSE) */}
               <div className="md:col-span-2 bg-blue-50 border border-blue-200 p-4 rounded-xl shadow-sm relative overflow-hidden">
                   <div className="absolute right-0 top-0 w-16 h-16 bg-blue-500 rounded-bl-full opacity-10"></div>
                   <label className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-2 flex items-center gap-1"><Briefcase size={12}/> Vendedor Responsável (Hand-off)</label>
@@ -759,7 +747,6 @@ export default function PipelinePage() {
         </div>, document.body
       )}
 
-      {/* MODAIS DE AVISOS AMARELOS (REPASSE E SEM CARTEIRA) E VERMELHO */}
       {confirmModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
