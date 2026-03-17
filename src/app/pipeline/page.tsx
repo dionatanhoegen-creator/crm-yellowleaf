@@ -118,24 +118,16 @@ export default function PipelinePage() {
   const formatPropostaId = (id: any) => String(id).padStart(5, '0');
   const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-  // NOVO: Função para formatar a data que vem do Google Sheets para DD/MM/YYYY
   const formatarDataPlanilha = (val: any) => {
       if (!val) return '';
-      // Verifica se é uma data ISO ou string de data que pode ser convertida
       if (typeof val === 'string' && val.includes('T') && val.includes('-')) {
           try {
               const d = new Date(val);
-              // Corrige fuso horário para evitar que caia um dia antes
               d.setMinutes(d.getMinutes() + d.getTimezoneOffset());
               return d.toLocaleDateString('pt-BR');
-          } catch (e) {
-              return String(val);
-          }
+          } catch (e) { return String(val); }
       }
-      // Se for uma data direta do JS
-      if (val instanceof Date) {
-          return val.toLocaleDateString('pt-BR');
-      }
+      if (val instanceof Date) return val.toLocaleDateString('pt-BR');
       return String(val);
   };
 
@@ -159,7 +151,6 @@ export default function PipelinePage() {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
             const produtosLimpos = json.data.map((p: any) => {
-                // Captura variações comuns de nome de coluna e formata a data
                 let validadeBruta = p.validade || p.data_validade || p.vencimento || p['validade do ativo'] || p['Validade'] || '';
                 return {
                     ativo: p.ativo ? p.ativo.trim() : 'Sem Nome',
@@ -337,7 +328,6 @@ export default function PipelinePage() {
       setNovaNotaInput(""); 
   };
 
-  // --- RELATÓRIO PDF: PROPOSTA COMERCIAL ---
   const gerarPropostaIndividualPDF = () => {
     if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
 
@@ -345,7 +335,6 @@ export default function PipelinePage() {
     const darkGreen = [18, 85, 48]; 
     const lightGreen = [0, 150, 0]; 
     
-    // CABEÇALHO
     try { doc.addImage("/logo.png", "PNG", 14, 10, 40, 16); } 
     catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 14, 10, 40, 16); } catch (err) {} }
 
@@ -356,12 +345,10 @@ export default function PipelinePage() {
     doc.text(`Nº ${formatPropostaId(formData.numero_proposta)}`, 196, 22, { align: "right" });
     doc.text("YellowLeaf – Nutraceuticals Company", 196, 26, { align: "right" });
 
-    // LINHA SEPARADORA
     doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
     doc.setLineWidth(1.2);
     doc.line(14, 31, 196, 31);
 
-    // CAIXA CINZA (DADOS DO CLIENTE)
     doc.setFillColor(248, 249, 250); 
     doc.rect(14, 35, 182, 23, 'F');
 
@@ -373,10 +360,10 @@ export default function PipelinePage() {
     doc.text(`Contato: ${formData.contato || 'N/D'}   |   Tel: ${formData.telefone || 'N/D'}`, 18, 52);
     doc.text(`Cidade/UF: ${formData.cidade_exclusividade || '-'} / ${formData.uf_exclusividade || '-'}`, 18, 57);
 
-    // MATEMÁTICA
-    const precoGrama = parseFloat(String(formData.valor_g_tabela).replace(',', '.')) || 0;
-    const kgProposto = parseFloat(String(formData.kg_proposto)) || 0;
-    const kgBonificado = parseFloat(String(formData.kg_bonificado)) || 0;
+    // CORREÇÃO: MATEMÁTICA PROTEGIDA PELO PARSEMONEY GLOBAL
+    const precoGrama = parseMoney(formData.valor_g_tabela);
+    const kgProposto = parseMoney(formData.kg_proposto);
+    const kgBonificado = parseMoney(formData.kg_bonificado);
     const totalKg = kgProposto + kgBonificado;
     const investimentoTotal = precoGrama * 1000 * kgProposto;
     const precoGramaBonificado = totalKg > 0 ? investimentoTotal / (totalKg * 1000) : precoGrama;
@@ -384,9 +371,9 @@ export default function PipelinePage() {
     const valorParcela = parcelas > 0 ? investimentoTotal / parcelas : investimentoTotal;
     const diasPrimeiraParcela = formData.dias_primeira_parcela || '30';
     
-    const pesoFormula = parseFloat(String(formData.peso_formula_g).replace(',', '.')) || 13.2;
-    const custoFixo = parseFloat(String(formData.custo_fixo_operacional).replace('R$', '').replace(',', '.')) || 0;
-    const fatorLucro = parseFloat(String(formData.fator_lucro).replace(',', '.')) || 5;
+    const pesoFormula = parseMoney(formData.peso_formula_g) || 13.2;
+    const custoFixo = parseMoney(formData.custo_fixo_operacional) || 0;
+    const fatorLucro = parseMoney(formData.fator_lucro) || 5;
     
     const custoMP = precoGramaBonificado * pesoFormula;
     const custoTotalFormula = custoMP + custoFixo;
@@ -394,7 +381,6 @@ export default function PipelinePage() {
     const qtdFormulasParaPagarParcela = sugestaoVenda > 0 ? (valorParcela / sugestaoVenda) : 0;
     const viabilidadeDiaria = parseInt(String(diasPrimeiraParcela)) > 0 ? (qtdFormulasParaPagarParcela / parseInt(String(diasPrimeiraParcela))) : 0;
 
-    // TABELA 1: ESPECIFICAÇÃO
     doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
     doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 14, 66); 
 
@@ -420,7 +406,6 @@ export default function PipelinePage() {
 
     let finalY = (doc as any).lastAutoTable.finalY || 130;
 
-    // TABELA 2: PAYBACK
     autoTable(doc, {
         startY: finalY + 6,
         head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
@@ -444,7 +429,6 @@ export default function PipelinePage() {
 
     finalY = (doc as any).lastAutoTable.finalY || 165;
 
-    // CERTIFICAÇÕES
     doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
     doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, finalY + 12, { align: "center" });
 
@@ -452,7 +436,6 @@ export default function PipelinePage() {
     const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e\npromovemos sua comercialização com responsabilidade e ética.";
     doc.text(textQualidade, 105, finalY + 17, { align: "center", lineHeightFactor: 1.5 });
 
-    // IMAGEM DOS SELOS
     let imagemAdicionada = false;
     const logoY = finalY + 23;
     try { 
@@ -467,7 +450,6 @@ export default function PipelinePage() {
         doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", 105, logoY + 8, { align: "center" });
     }
 
-    // INFORMAÇÕES DO VENDEDOR E RODAPÉ
     doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
     doc.setLineWidth(1); doc.line(14, 275, 196, 275);
 
@@ -540,7 +522,9 @@ export default function PipelinePage() {
         obsFinal = `📅 ${dataHora} | 💬 ${novaNotaInput}\n────────────────────────────────────────\n${obsFinal}`;
     }
 
-    let valorFinal = parseFloat(String(formData.valor).replace('R$', '').replace(/\./g, '').replace(',', '.')) || 0;
+    // CORREÇÃO: Lê o valor calculado corretamente do estado
+    let valorFinal = parseFloat(String(formData.valor)) || 0;
+    
     let numeroFinal = formData.numero_proposta;
     if (!editingOp) {
         const { data: maxOp } = await supabase.from('pipeline').select('numero_proposta').order('numero_proposta', { ascending: false }).limit(1);
@@ -549,6 +533,7 @@ export default function PipelinePage() {
 
     const isRepasse = formData.user_id !== usuarioLogado?.id;
 
+    // CORREÇÃO: Aplica ParseMoney global para envio ao Supabase
     const payload = {
       ...formData,
       user_id: formData.user_id, 
@@ -559,15 +544,15 @@ export default function PipelinePage() {
       cidade_exclusividade: formData.cidade_exclusividade ? formData.cidade_exclusividade.toUpperCase() : '',
       uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '',
       valor: valorFinal,
-      valor_g_tabela: parseFloat(String(formData.valor_g_tabela).replace(',', '.')) || 0,
+      valor_g_tabela: parseMoney(formData.valor_g_tabela),
       validade_produto: formData.validade_produto || null, 
-      kg_proposto: parseFloat(String(formData.kg_proposto)) || 0,
-      kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
+      kg_proposto: parseMoney(formData.kg_proposto),
+      kg_bonificado: parseMoney(formData.kg_bonificado),
       parcelas: parseInt(String(formData.parcelas)) || 1,
       dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45,
-      peso_formula_g: String(formData.peso_formula_g).replace(',', '.'), 
-      fator_lucro: String(formData.fator_lucro).replace(',', '.'),       
-      custo_fixo_operacional: parseFloat(String(formData.custo_fixo_operacional).replace('R$', '').replace(',', '.')) || 0, 
+      peso_formula_g: String(parseMoney(formData.peso_formula_g)), 
+      fator_lucro: String(parseMoney(formData.fator_lucro)),       
+      custo_fixo_operacional: parseMoney(formData.custo_fixo_operacional), 
       data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null,
       data_entrada: formData.data_entrada || getLocalData(),
       canal_contato: formData.canal_contato,
