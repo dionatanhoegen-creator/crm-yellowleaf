@@ -6,7 +6,7 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users, ChevronRight, ChevronLeft
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -672,7 +672,6 @@ export default function PipelinePage() {
   return (
     <div className="w-full p-3 md:p-4 h-[calc(100vh-64px)] flex flex-col overflow-hidden">
       
-      {/* CABEÇALHO MOBILE-FRIENDLY */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-4 md:mb-6 gap-4 shrink-0">
         <div>
             <h1 className="text-xl md:text-2xl font-black text-[#0f392b] tracking-tight flex items-center gap-2">
@@ -708,7 +707,6 @@ export default function PipelinePage() {
         </div>
       </div>
 
-      {/* KANBAN SCROLL MOBILE (SNAP) */}
       <div className="flex-1 overflow-x-auto pb-4 snap-x snap-mandatory scroll-smooth custom-scrollbar -mx-3 px-3 md:mx-0 md:px-0">
           <div className="flex gap-3 md:gap-4 h-full min-w-max">
             {ESTAGIOS.map(est => (
@@ -725,7 +723,6 @@ export default function PipelinePage() {
           </div>
       </div>
 
-      {/* MODAL RESPONSIVO (FULL SCREEN NO MOBILE) */}
       {modalOpen && mounted && createPortal(
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-end md:items-center justify-center md:p-4">
           <div className="bg-white w-full h-[95vh] md:h-auto md:max-h-[95vh] md:max-w-5xl rounded-t-3xl md:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-200">
@@ -760,15 +757,17 @@ export default function PipelinePage() {
                   </div>
               </div>
               <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Razão Social da Farmácia</label><input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})}/></div>
-              <div className="md:col-span-2 bg-blue-50 border border-blue-200 p-4 rounded-xl shadow-sm relative overflow-hidden">
-                  <div className="absolute right-0 top-0 w-16 h-16 bg-blue-500 rounded-bl-full opacity-10"></div>
-                  <label className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-2 flex items-center gap-1"><Briefcase size={12}/> Vendedor Responsável (Hand-off)</label>
-                  <select value={formData.user_id} onChange={e => setFormData({...formData, user_id: e.target.value})} disabled={isRepLocked} className="w-full bg-white border border-blue-200 rounded-lg p-2.5 text-sm font-bold text-slate-800 outline-none shadow-sm cursor-pointer disabled:bg-slate-100 disabled:text-slate-500">
+              
+              <div className="md:col-span-2 bg-blue-50 border border-blue-200 p-4 rounded-xl shadow-sm relative">
+                  <div className="absolute right-0 top-0 w-16 h-16 bg-blue-500 rounded-bl-full opacity-10 pointer-events-none"></div>
+                  <label className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-2 flex items-center gap-1 relative z-10"><Briefcase size={12}/> Vendedor Responsável (Hand-off)</label>
+                  <select value={formData.user_id} onChange={e => setFormData({...formData, user_id: e.target.value})} disabled={isRepLocked} className="w-full relative z-10 bg-white border border-blue-200 rounded-lg p-2.5 text-sm font-bold text-slate-800 outline-none shadow-sm cursor-pointer disabled:bg-slate-100 disabled:text-slate-500">
                       <option value="">Selecione o Representante...</option>
                       {equipe.map(u => <option key={u.id} value={u.id}>{u.nome} ({u.cargo})</option>)}
                   </select>
-                  {isRepLocked && <p className="text-[9px] font-bold text-red-500 mt-1 uppercase">Bloqueado pela regra de carteira ERP</p>}
+                  {isRepLocked && <p className="text-[9px] font-bold text-red-500 mt-1 uppercase relative z-10">Bloqueado pela regra de carteira ERP</p>}
               </div>
+              
               <div className="md:col-span-2">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Status no Funil</label>
                   <select className="w-full bg-white border border-slate-300 text-blue-700 text-sm font-bold p-3 rounded-xl outline-none shadow-sm cursor-pointer" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
