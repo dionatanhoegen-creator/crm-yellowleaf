@@ -118,6 +118,27 @@ export default function PipelinePage() {
   const formatPropostaId = (id: any) => String(id).padStart(5, '0');
   const formatCurrency = (val: any) => (Number(val) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+  // NOVO: Função para formatar a data que vem do Google Sheets para DD/MM/YYYY
+  const formatarDataPlanilha = (val: any) => {
+      if (!val) return '';
+      // Verifica se é uma data ISO ou string de data que pode ser convertida
+      if (typeof val === 'string' && val.includes('T') && val.includes('-')) {
+          try {
+              const d = new Date(val);
+              // Corrige fuso horário para evitar que caia um dia antes
+              d.setMinutes(d.getMinutes() + d.getTimezoneOffset());
+              return d.toLocaleDateString('pt-BR');
+          } catch (e) {
+              return String(val);
+          }
+      }
+      // Se for uma data direta do JS
+      if (val instanceof Date) {
+          return val.toLocaleDateString('pt-BR');
+      }
+      return String(val);
+  };
+
   const carregarExclusividades = async () => {
     const { data } = await supabase.from('exclusividades').select('*');
     setExclusividades(data || []);
@@ -137,12 +158,16 @@ export default function PipelinePage() {
         const res = await fetch(`${API_PRODUTOS_URL}?path=produtos`);
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
-            const produtosLimpos = json.data.map((p: any) => ({
-                ativo: p.ativo ? p.ativo.trim() : 'Sem Nome',
-                preco_grama: parseMoney(p.preco_grama), 
-                peso_formula: parseMoney(p.peso_formula) || 13.2,
-                validade: p.validade || p.data_validade || p.vencimento || '' 
-            }));
+            const produtosLimpos = json.data.map((p: any) => {
+                // Captura variações comuns de nome de coluna e formata a data
+                let validadeBruta = p.validade || p.data_validade || p.vencimento || p['validade do ativo'] || p['Validade'] || '';
+                return {
+                    ativo: p.ativo ? p.ativo.trim() : 'Sem Nome',
+                    preco_grama: parseMoney(p.preco_grama), 
+                    peso_formula: parseMoney(p.peso_formula) || 13.2,
+                    validade: formatarDataPlanilha(validadeBruta)
+                }
+            });
             setProdutosApi(produtosLimpos.sort((a: any, b: any) => a.ativo.localeCompare(b.ativo)));
         }
     } catch (e) {}
@@ -298,9 +323,7 @@ export default function PipelinePage() {
       }
     } catch (e) {
        if (chavesERP) {
-          setFormData(prev => ({
-             ...prev, nome_cliente: (chavesERP.razaosocial || chavesERP.fantasia || '').toUpperCase(), cidade_exclusividade: (chavesERP.cidade || '').toUpperCase(), uf_exclusividade: (chavesERP.uf || '').toUpperCase(), telefone: chavesERP.telefone || prev.telefone
-          }));
+          setFormData(prev => ({ ...prev, nome_cliente: (chavesERP.razaosocial || chavesERP.fantasia || '').toUpperCase(), cidade_exclusividade: (chavesERP.cidade || '').toUpperCase(), uf_exclusividade: (chavesERP.uf || '').toUpperCase(), telefone: chavesERP.telefone || prev.telefone }));
        }
     }
     setLoadingCNPJ(false);
@@ -314,7 +337,7 @@ export default function PipelinePage() {
       setNovaNotaInput(""); 
   };
 
-  // --- RELATÓRIO PDF: PROPOSTA COMERCIAL (COMPACTA EM 1 PÁGINA COM selo.jpg) ---
+  // --- RELATÓRIO PDF: PROPOSTA COMERCIAL ---
   const gerarPropostaIndividualPDF = () => {
     if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
 
@@ -429,7 +452,7 @@ export default function PipelinePage() {
     const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e\npromovemos sua comercialização com responsabilidade e ética.";
     doc.text(textQualidade, 105, finalY + 17, { align: "center", lineHeightFactor: 1.5 });
 
-    // IMAGEM DOS SELOS (Puxando selo.jpg conforme anexo)
+    // IMAGEM DOS SELOS
     let imagemAdicionada = false;
     const logoY = finalY + 23;
     try { 
