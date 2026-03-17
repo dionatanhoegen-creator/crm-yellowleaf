@@ -50,7 +50,7 @@ export default function PipelinePage() {
   const [buscaTermo, setBuscaTermo] = useState(""); 
   
   const [usuarioLogado, setUsuarioLogado] = useState<any>(null);
-  const [visaoAdmin, setVisaoAdmin] = useState<'meus' | 'todos'>('meus'); // NOVO: Controle de visão do Admin
+  const [visaoAdmin, setVisaoAdmin] = useState<'meus' | 'todos'>('meus');
   
   const [modalOpen, setModalOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<any>(null);
@@ -72,7 +72,7 @@ export default function PipelinePage() {
   };
 
   const [formData, setFormData] = useState({
-    cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '',
+    cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', validade_produto: '',
     aplicacao: '', valor: '', data_entrada: getLocalData(), data_lembrete: '', 
     canal_contato: 'WhatsApp', observacoes: '', observacoes_proposta: '', 
     status: 'prospeccao', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45',
@@ -147,7 +147,8 @@ export default function PipelinePage() {
             const produtosLimpos = json.data.map((p: any) => ({
                 ativo: p.ativo ? p.ativo.trim() : 'Sem Nome',
                 preco_grama: parseMoney(p.preco_grama), 
-                peso_formula: parseMoney(p.peso_formula) || 13.2
+                peso_formula: parseMoney(p.peso_formula) || 13.2,
+                validade: p.validade || p.data_validade || p.vencimento || '' // Extrai a validade da API
             }));
             setProdutosApi(produtosLimpos.sort((a: any, b: any) => a.ativo.localeCompare(b.ativo)));
         }
@@ -156,12 +157,9 @@ export default function PipelinePage() {
   };
 
   const carregarOportunidades = async (perfil: any) => {
-    // CORREÇÃO DO BUG ZERO: Removemos o JOIN complexo e buscamos apenas os dados da tabela.
     let query = supabase.from('pipeline').select('*').order('created_at', { ascending: false });
-    
     const isAdmin = perfil && ['admin', 'Admin', 'diretor', 'Diretor'].includes(perfil.cargo);
     
-    // Se não for admin, filtra direto no banco por segurança.
     if (!isAdmin) {
         query = query.or(`user_id.eq.${perfil.id},sdr_id.eq.${perfil.id}`);
     }
@@ -187,14 +185,16 @@ export default function PipelinePage() {
     if (!formData.produto) return;
     const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
     if (produtoSelecionado) {
-        const precoAtual = parseMoney(formData.valor_g_tabela);
-        if (precoAtual === 0 || !formData.valor_g_tabela) {
-             setFormData(prev => ({ 
-                ...prev, 
-                valor_g_tabela: produtoSelecionado.preco_grama.toFixed(2).replace('.', ','), 
-                peso_formula_g: produtoSelecionado.peso_formula.toString() 
-            }));
-        }
+        setFormData(prev => ({
+            ...prev,
+            validade_produto: produtoSelecionado.validade || prev.validade_produto, // Atualiza validade
+            valor_g_tabela: (parseMoney(prev.valor_g_tabela) === 0 || !prev.valor_g_tabela) 
+                ? produtoSelecionado.preco_grama.toFixed(2).replace('.', ',') 
+                : prev.valor_g_tabela,
+            peso_formula_g: prev.peso_formula_g === '13.2' 
+                ? produtoSelecionado.peso_formula.toString() 
+                : prev.peso_formula_g
+        }));
     }
   }, [formData.produto, produtosApi]);
 
@@ -253,12 +253,10 @@ export default function PipelinePage() {
         if (vendedorERP !== "") {
             const repEncontrado = equipe.find(u => vendedorERP.toLowerCase().includes(u.nome.toLowerCase()) || u.nome.toLowerCase().includes(vendedorERP.toLowerCase()));
             if (repEncontrado) {
-                
-                // REGRA DA JAQUE (P&D) vs DIONATAN
                 const isSDR = usuarioLogado?.cargo?.toLowerCase().includes('p&d') || usuarioLogado?.cargo?.toLowerCase().includes('sdr') || usuarioLogado?.nome?.toLowerCase().includes('jaque');
                 
                 if (isSDR) {
-                    setIsRepLocked(false); // Jaque pode furar o bloqueio
+                    setIsRepLocked(false); 
                     setConfirmModal({
                         open: true,
                         title: 'CLIENTE COM CARTEIRA NO ERP',
@@ -267,7 +265,7 @@ export default function PipelinePage() {
                         onCancel: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, cnpj: '', user_id: usuarioLogado.id })); setLoadingCNPJ(false); }
                     });
                 } else {
-                    setIsRepLocked(true); // Dionatan/Outros são bloqueados
+                    setIsRepLocked(true); 
                     setConfirmModal({
                         open: true,
                         title: 'DIRECIONAMENTO AUTOMÁTICO',
@@ -330,11 +328,13 @@ export default function PipelinePage() {
       setNovaNotaInput(""); 
   };
 
-  // --- O BOTÃO DA PROPOSTA INDIVIDUAL ---
+  // --- RELATÓRIO PDF: PROPOSTA COMERCIAL (COM VALIDADE DO ATIVO) ---
   const gerarPropostaIndividualPDF = () => {
     if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
 
     const doc = new jsPDF();
+    
+    // Header
     try { doc.addImage("/logo.png", "PNG", 14, 10, 45, 18); } 
     catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 14, 10, 45, 18); } catch (err) {} }
 
@@ -342,45 +342,102 @@ export default function PipelinePage() {
     doc.text("PROPOSTA COMERCIAL", 14, 40);
 
     doc.setFontSize(12); doc.setTextColor(100);
-    doc.text(`Proposta Nº: ${formatPropostaId(formData.numero_proposta)}`, 14, 48);
-    doc.text(`Data: ${new Date().toLocaleDateString('pt-BR')}`, 14, 54);
-    doc.setDrawColor(200); doc.line(14, 60, 196, 60);
+    doc.text(`Nº ${formatPropostaId(formData.numero_proposta)}`, 175, 40);
+    doc.text("YellowLeaf - Nutraceuticals Company", 14, 46);
 
-    doc.setFontSize(14); doc.setTextColor(20, 83, 45); doc.text("DADOS DO CLIENTE", 14, 70);
-    doc.setFontSize(11); doc.setTextColor(50); doc.setFont("helvetica", "normal");
-    doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 14, 78);
-    doc.text(`CNPJ: ${formData.cnpj || 'N/D'}`, 14, 84);
-    doc.text(`Telefone: ${formData.telefone || 'N/D'}`, 14, 90);
-    doc.text(`Localidade: ${formData.cidade_exclusividade || '-'} / ${formData.uf_exclusividade || '-'}`, 14, 96);
+    doc.setDrawColor(200); doc.line(14, 52, 196, 52);
 
+    // Dados do Cliente
+    doc.setFontSize(14); doc.setTextColor(20, 83, 45); doc.text("DADOS DO CLIENTE", 14, 62);
+    doc.setFontSize(10); doc.setTextColor(50); doc.setFont("helvetica", "normal");
+    doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 14, 70);
+    doc.text(`Contato: ${formData.contato || 'N/D'} | Tel: ${formData.telefone || 'N/D'}`, 14, 76);
+    doc.text(`Cidade/UF: ${formData.cidade_exclusividade || '-'} / ${formData.uf_exclusividade || '-'}`, 14, 82);
+
+    // Variáveis Matemáticas do Payback
+    const precoGrama = parseFloat(String(formData.valor_g_tabela).replace(',', '.')) || 0;
+    const kgProposto = parseFloat(String(formData.kg_proposto)) || 0;
+    const kgBonificado = parseFloat(String(formData.kg_bonificado)) || 0;
+    const totalKg = kgProposto + kgBonificado;
+    const investimentoTotal = precoGrama * 1000 * kgProposto;
+    const precoGramaBonificado = totalKg > 0 ? investimentoTotal / (totalKg * 1000) : precoGrama;
+    const parcelas = parseInt(String(formData.parcelas)) || 1;
+    const valorParcela = parcelas > 0 ? investimentoTotal / parcelas : investimentoTotal;
+    const diasPrimeiraParcela = formData.dias_primeira_parcela || '30';
+    
+    const pesoFormula = parseFloat(String(formData.peso_formula_g).replace(',', '.')) || 13.2;
+    const custoFixo = parseFloat(String(formData.custo_fixo_operacional).replace('R$', '').replace(',', '.')) || 0;
+    const fatorLucro = parseFloat(String(formData.fator_lucro).replace(',', '.')) || 5;
+    
+    const custoMP = precoGramaBonificado * pesoFormula;
+    const custoTotalFormula = custoMP + custoFixo;
+    const sugestaoVenda = (custoMP * fatorLucro) + custoFixo;
+    
+    const qtdFormulasParaPagarParcela = sugestaoVenda > 0 ? (valorParcela / sugestaoVenda) : 0;
+    const viabilidadeDiaria = parseInt(String(diasPrimeiraParcela)) > 0 ? (qtdFormulasParaPagarParcela / parseInt(String(diasPrimeiraParcela))) : 0;
+
+    // Tabela 1: Especificação com VALIDADE DO LOTE
     doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.setTextColor(20, 83, 45);
-    doc.text("DETALHES DO PRODUTO", 14, 110);
+    doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 14, 98);
     
     autoTable(doc, {
-        startY: 115,
-        head: [['Produto / Ativo', 'Quantidade (KG)', 'Valor Total']],
-        body: [[formData.produto || 'N/D', `${formData.kg_proposto} kg`, formatCurrency(formData.valor)]],
+        startY: 103,
+        head: [['DESCRIÇÃO', 'VALORES']],
+        body: [
+            ['Ativo/Insumo', formData.produto || 'N/D'],
+            ['Validade do Lote/Ativo', formData.validade_produto || 'Consulte Lote Atual'], // NOVO
+            ['Preço por grama (g)', formatCurrency(precoGrama)],
+            ['Quantidade da proposta (kg)', `${kgProposto} kg`],
+            ['Quantidade bonificada (kg)', `${kgBonificado} kg`],
+            ['Investimento Total (R$)', formatCurrency(investimentoTotal)],
+            ['Preço do grama c/ bonificação (g)', formatCurrency(precoGramaBonificado)],
+            ['Condição de Pagamento', `${parcelas} parcelas de ${formatCurrency(valorParcela)}`],
+            ['Vencimento 1ª Parcela', `${diasPrimeiraParcela} dias`]
+        ],
         theme: 'grid',
         headStyles: { fillColor: [20, 83, 45], textColor: 255, fontStyle: 'bold' },
-        styles: { fontSize: 11, cellPadding: 4 },
+        styles: { fontSize: 10, cellPadding: 4 },
+        columnStyles: { 1: { fontStyle: 'bold' } }
     });
 
-    const finalY = (doc as any).lastAutoTable.finalY || 135;
+    let finalY = (doc as any).lastAutoTable.finalY || 165;
 
-    doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.setTextColor(20, 83, 45);
-    doc.text("CONDIÇÕES DE PAGAMENTO", 14, finalY + 15);
-    doc.setFontSize(11); doc.setTextColor(50); doc.setFont("helvetica", "normal");
-    doc.text(`Parcelamento: ${formData.parcelas}x`, 14, finalY + 23);
-    doc.text(`Dias para a primeira parcela: ${formData.dias_primeira_parcela} dias`, 14, finalY + 29);
+    // Tabela 2: Payback
+    autoTable(doc, {
+        startY: finalY + 10,
+        head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
+        body: [
+            [`Custo Matéria-Prima (Dose ${pesoFormula}g)`, formatCurrency(custoMP)],
+            ['Custo Total por Fórmula (Manipulado)', formatCurrency(custoTotalFormula)],
+            [`Sugestão de Venda (Fator ${fatorLucro} no Ativo)`, formatCurrency(sugestaoVenda)],
+            ['META DE VIABILIDADE', `${viabilidadeDiaria.toFixed(2)} fórmulas/dia`]
+        ],
+        theme: 'grid',
+        headStyles: { fillColor: [240, 240, 240], textColor: [20, 83, 45], fontStyle: 'bold' },
+        styles: { fontSize: 10, cellPadding: 4 },
+        columnStyles: { 1: { fontStyle: 'bold' } }
+    });
 
-    if (formData.observacoes_proposta) {
-        doc.text("Observações Adicionais:", 14, finalY + 40);
-        doc.setFont("helvetica", "italic");
-        doc.text(formData.observacoes_proposta, 14, finalY + 46, { maxWidth: 180 });
-    }
+    finalY = (doc as any).lastAutoTable.finalY || 205;
 
-    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(150);
-    doc.text("YellowLeaf Indústria e Comércio - Validade da proposta: 5 dias úteis.", 14, 280);
+    // Rodapé de Certificações
+    doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(20, 83, 45);
+    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 14, finalY + 15);
+    doc.setFontSize(9); doc.setTextColor(100); doc.setFont("helvetica", "normal");
+    const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e promovemos sua comercialização com responsabilidade e ética.";
+    doc.text(textQualidade, 14, finalY + 22, { maxWidth: 180 });
+    doc.setFont("helvetica", "bold");
+    doc.text("HACCP  |  ISO FSSC 22000  |  GMP  |  CENTHIRD", 14, finalY + 32);
+
+    // Contatos e Vendedor
+    doc.setDrawColor(200); doc.line(14, 270, 196, 270);
+    doc.setFontSize(8); doc.setTextColor(100); doc.setFont("helvetica", "normal");
+    doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, 275);
+    doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 14, 280);
+
+    const responsavelNome = equipe.find(u => u.id === formData.user_id)?.nome || usuarioLogado?.nome || 'Comercial YellowLeaf';
+    doc.setFont("helvetica", "bold"); doc.setTextColor(20, 83, 45);
+    doc.text(`${responsavelNome} Comercial YellowLeaf`, 140, 275);
 
     doc.save(`Proposta_${formData.nome_cliente.replace(/\s+/g, '_')}_${formatPropostaId(formData.numero_proposta)}.pdf`);
   };
@@ -460,6 +517,7 @@ export default function PipelinePage() {
       uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '',
       valor: valorFinal,
       valor_g_tabela: parseFloat(String(formData.valor_g_tabela).replace(',', '.')) || 0,
+      validade_produto: formData.validade_produto || null, // NOVO CAMPO NO PAYLOAD
       kg_proposto: parseFloat(String(formData.kg_proposto)) || 0,
       kg_bonificado: parseFloat(String(formData.kg_bonificado)) || 0,
       parcelas: parseInt(String(formData.parcelas)) || 1,
@@ -566,7 +624,6 @@ export default function PipelinePage() {
     const ops = oportunidades.filter(o => {
         if (o.status !== estagioId) return false;
         
-        // Filtro de Visão do Admin
         if (isAdminUser && visaoAdmin === 'meus') {
             if (o.user_id !== usuarioLogado?.id && o.sdr_id !== usuarioLogado?.id) return false;
         }
@@ -602,7 +659,6 @@ export default function PipelinePage() {
 
         <div className="flex items-center gap-3 w-full md:w-auto">
             
-            {/* NOVO: Toggle de Visão do Administrador */}
             {isAdminUser && (
                 <div className="flex bg-slate-200/70 p-1 rounded-xl shrink-0 mr-2">
                     <button onClick={() => setVisaoAdmin('meus')} className={`px-4 py-2 text-[10px] font-black tracking-widest uppercase rounded-lg transition ${visaoAdmin === 'meus' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
@@ -621,7 +677,7 @@ export default function PipelinePage() {
             <button onClick={gerarRelatorioGeral} className="bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 flex items-center gap-2 whitespace-nowrap text-sm hover:bg-slate-900">
                 <Printer size={16} /> Relatório Pipeline
             </button>
-            <button onClick={() => { setEditingOp(null); setIsRepLocked(false); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); setNovaNotaInput(""); setModalOpen(true); }} className="bg-blue-600 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-sm flex items-center gap-2 hover:bg-blue-700">
+            <button onClick={() => { setEditingOp(null); setIsRepLocked(false); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); setNovaNotaInput(""); setModalOpen(true); }} className="bg-blue-600 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-sm flex items-center gap-2 hover:bg-blue-700">
                 <Plus size={16} /> Nova Oportunidade
             </button>
         </div>
@@ -643,6 +699,7 @@ export default function PipelinePage() {
           </div>
       </div>
 
+      {/* MODAL DE CRIAÇÃO E EDIÇÃO */}
       {modalOpen && mounted && createPortal(
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-5xl rounded-[2rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95 duration-200">
@@ -654,7 +711,6 @@ export default function PipelinePage() {
                   <p className="text-sm font-medium text-slate-300 mt-1">{editingOp ? editingOp.nome_cliente : 'Preencha o CNPJ para validar o cliente e a carteira.'}</p>
               </div>
               <div className="flex items-center gap-3">
-                {/* BOTÃO DA PROPOSTA INDIVIDUAL (RESTABELECIDO AQUI) */}
                 {editingOp && (
                     <button onClick={gerarPropostaIndividualPDF} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition border border-white/20">
                         <FileText size={16}/> Gerar Proposta PDF
@@ -719,9 +775,29 @@ export default function PipelinePage() {
                       {produtosDisponiveis.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}
                   </select>
               </div>
+
+              {/* CAMPO DE VALIDADE */}
+              <div className="md:col-span-2">
+                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Validade do Ativo</label>
+                  <input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm text-slate-500" value={formData.validade_produto} onChange={e => setFormData({...formData, validade_produto: e.target.value})} placeholder="Mês/Ano ou Lote" />
+              </div>
+
               <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Preço/Grama (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-black text-emerald-700 outline-none shadow-sm" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} /></div>
               <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Proposto</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
               
+              <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Bonificado</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
+              <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Parcelas</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
+              <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Dias para 1ª Parcela</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
+
+              <div className="md:col-span-4 border-t border-slate-200 my-4 pt-4">
+                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Variáveis do Payback (Para o PDF)</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Peso da Fórmula (g)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.peso_formula_g} onChange={e => setFormData({...formData, peso_formula_g: e.target.value})}/></div>
+                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Fator de Lucro (Markup)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.fator_lucro} onChange={e => setFormData({...formData, fator_lucro: e.target.value})}/></div>
+                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Custo Fixo por Fórmula (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.custo_fixo_operacional} onChange={e => setFormData({...formData, custo_fixo_operacional: e.target.value})}/></div>
+                  </div>
+              </div>
+
               <div className="md:col-span-4 bg-slate-800 p-4 rounded-2xl flex items-center justify-between text-white mt-2 shadow-lg">
                   <span className="text-xs font-black uppercase tracking-widest text-slate-300">Valor Total da Proposta</span>
                   <span className="text-2xl font-black text-[#82D14D]">{formatCurrency(formData.valor)}</span>
