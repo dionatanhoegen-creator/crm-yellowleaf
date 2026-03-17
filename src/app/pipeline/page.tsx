@@ -6,7 +6,7 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users, ChevronRight, ChevronLeft
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -360,7 +360,6 @@ export default function PipelinePage() {
     doc.text(`Contato: ${formData.contato || 'N/D'}   |   Tel: ${formData.telefone || 'N/D'}`, 18, 52);
     doc.text(`Cidade/UF: ${formData.cidade_exclusividade || '-'} / ${formData.uf_exclusividade || '-'}`, 18, 57);
 
-    // CORREÇÃO: MATEMÁTICA PROTEGIDA PELO PARSEMONEY GLOBAL
     const precoGrama = parseMoney(formData.valor_g_tabela);
     const kgProposto = parseMoney(formData.kg_proposto);
     const kgBonificado = parseMoney(formData.kg_bonificado);
@@ -522,9 +521,7 @@ export default function PipelinePage() {
         obsFinal = `📅 ${dataHora} | 💬 ${novaNotaInput}\n────────────────────────────────────────\n${obsFinal}`;
     }
 
-    // CORREÇÃO: Lê o valor calculado corretamente do estado
     let valorFinal = parseFloat(String(formData.valor)) || 0;
-    
     let numeroFinal = formData.numero_proposta;
     if (!editingOp) {
         const { data: maxOp } = await supabase.from('pipeline').select('numero_proposta').order('numero_proposta', { ascending: false }).limit(1);
@@ -533,7 +530,6 @@ export default function PipelinePage() {
 
     const isRepasse = formData.user_id !== usuarioLogado?.id;
 
-    // CORREÇÃO: Aplica ParseMoney global para envio ao Supabase
     const payload = {
       ...formData,
       user_id: formData.user_id, 
@@ -674,48 +670,54 @@ export default function PipelinePage() {
   };
 
   return (
-    <div className="w-full p-4 h-[calc(100vh-64px)] flex flex-col">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 shrink-0">
+    <div className="w-full p-3 md:p-4 h-[calc(100vh-64px)] flex flex-col overflow-hidden">
+      
+      {/* CABEÇALHO MOBILE-FRIENDLY */}
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-4 md:mb-6 gap-4 shrink-0">
         <div>
-            <h1 className="text-2xl font-black text-[#0f392b] tracking-tight flex items-center gap-2">
+            <h1 className="text-xl md:text-2xl font-black text-[#0f392b] tracking-tight flex items-center gap-2">
                 <Trello className="text-[#82D14D]"/> Pipeline Comercial
             </h1>
-            <p className="text-sm text-slate-500 font-medium mt-1">Gestão de propostas, aprovações e Hand-off de SDR.</p>
+            <p className="text-xs md:text-sm text-slate-500 font-medium mt-1">Gestão de propostas, aprovações e Hand-off.</p>
         </div>
 
-        <div className="flex items-center gap-3 w-full md:w-auto">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 md:gap-3 w-full xl:w-auto">
             {isAdminUser && (
-                <div className="flex bg-slate-200/70 p-1 rounded-xl shrink-0 mr-2">
-                    <button onClick={() => setVisaoAdmin('meus')} className={`px-4 py-2 text-[10px] font-black tracking-widest uppercase rounded-lg transition ${visaoAdmin === 'meus' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                <div className="flex bg-slate-200/70 p-1 rounded-xl shrink-0 w-full sm:w-auto">
+                    <button onClick={() => setVisaoAdmin('meus')} className={`flex-1 sm:flex-none px-4 py-2.5 md:py-2 text-[10px] font-black tracking-widest uppercase rounded-lg transition text-center ${visaoAdmin === 'meus' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                         Meus Cards
                     </button>
-                    <button onClick={() => setVisaoAdmin('todos')} className={`px-4 py-2 text-[10px] font-black tracking-widest uppercase rounded-lg transition flex items-center gap-1 ${visaoAdmin === 'todos' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                        <Users size={12}/> Toda a Empresa
+                    <button onClick={() => setVisaoAdmin('todos')} className={`flex-1 sm:flex-none px-4 py-2.5 md:py-2 text-[10px] font-black tracking-widest uppercase rounded-lg transition flex items-center justify-center gap-1 ${visaoAdmin === 'todos' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                        <Users size={12}/> Empresa
                     </button>
                 </div>
             )}
-            <div className="relative flex-1 md:w-64">
-                <input type="text" placeholder="Buscar (Nome, CNPJ, Nº...)" className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 outline-none text-sm font-bold uppercase text-slate-600 shadow-sm" value={buscaTermo} onChange={(e) => setBuscaTermo(e.target.value)} />
+            <div className="relative flex-1 sm:w-64 w-full">
+                <input type="text" placeholder="Buscar (Nome, CNPJ...)" className="w-full pl-10 pr-4 py-3 md:py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 outline-none text-sm font-bold uppercase text-slate-600 shadow-sm" value={buscaTermo} onChange={(e) => setBuscaTermo(e.target.value)} />
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             </div>
-            <button onClick={gerarRelatorioGeral} className="bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 flex items-center gap-2 whitespace-nowrap text-sm hover:bg-slate-900">
-                <Printer size={16} /> Relatório Pipeline
-            </button>
-            <button onClick={() => { setEditingOp(null); setIsRepLocked(false); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); setNovaNotaInput(""); setModalOpen(true); }} className="bg-blue-600 text-white px-4 py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-sm flex items-center gap-2 hover:bg-blue-700">
-                <Plus size={16} /> Nova Oportunidade
-            </button>
+            
+            <div className="flex gap-2 w-full sm:w-auto">
+                <button onClick={gerarRelatorioGeral} className="flex-1 sm:flex-none bg-slate-800 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 flex items-center justify-center gap-2 whitespace-nowrap text-xs md:text-sm hover:bg-slate-900">
+                    <Printer size={16} /> <span className="hidden sm:inline">Relatório</span>
+                </button>
+                <button onClick={() => { setEditingOp(null); setIsRepLocked(false); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); setNovaNotaInput(""); setModalOpen(true); }} className="flex-1 sm:flex-none bg-blue-600 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-xs md:text-sm flex items-center justify-center gap-2 hover:bg-blue-700">
+                    <Plus size={16} /> Nova Op.
+                </button>
+            </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-x-auto pb-4">
-          <div className="flex gap-4 h-full min-w-max">
+      {/* KANBAN SCROLL MOBILE (SNAP) */}
+      <div className="flex-1 overflow-x-auto pb-4 snap-x snap-mandatory scroll-smooth custom-scrollbar -mx-3 px-3 md:mx-0 md:px-0">
+          <div className="flex gap-3 md:gap-4 h-full min-w-max">
             {ESTAGIOS.map(est => (
-              <div key={est.id} className="w-[300px] bg-slate-100/50 rounded-2xl border border-slate-200 flex flex-col h-full overflow-hidden">
+              <div key={est.id} className="w-[85vw] sm:w-[300px] snap-center shrink-0 bg-slate-100/50 rounded-2xl border border-slate-200 flex flex-col h-full overflow-hidden">
                 <div className={`p-4 border-b-4 ${est.color} bg-white flex justify-between items-center shadow-sm shrink-0`}>
                     <h3 className={`font-black text-xs uppercase tracking-widest ${est.text}`}>{est.label}</h3>
                     <span className="bg-slate-100 text-slate-600 text-xs font-bold px-2 py-1 rounded-lg">{getSortedOpportunities(est.id).length}</span>
                 </div>
-                <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+                <div className="flex-1 overflow-y-auto p-2 md:p-3 space-y-3 custom-scrollbar">
                   {getSortedOpportunities(est.id).map(op => renderCard(op))}
                 </div>
               </div>
@@ -723,30 +725,32 @@ export default function PipelinePage() {
           </div>
       </div>
 
+      {/* MODAL RESPONSIVO (FULL SCREEN NO MOBILE) */}
       {modalOpen && mounted && createPortal(
-        <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-5xl rounded-[2rem] shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="bg-[#1e293b] p-6 flex justify-between items-center text-white shrink-0 border-b-4 border-blue-500">
-              <div>
-                  <h2 className="text-xl font-black flex items-center gap-2">
-                     {editingOp ? `Editar Proposta #${formatPropostaId(editingOp.numero_proposta)}` : 'Nova Oportunidade Comercial'}
+        <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-end md:items-center justify-center md:p-4">
+          <div className="bg-white w-full h-[95vh] md:h-auto md:max-h-[95vh] md:max-w-5xl rounded-t-3xl md:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-200">
+            
+            <div className="bg-[#1e293b] p-4 md:p-6 flex justify-between items-center text-white shrink-0 border-b-4 border-blue-500">
+              <div className="overflow-hidden mr-2">
+                  <h2 className="text-lg md:text-xl font-black flex items-center gap-2 truncate">
+                     {editingOp ? `Editar #${formatPropostaId(editingOp.numero_proposta)}` : 'Nova Oportunidade'}
                   </h2>
-                  <p className="text-sm font-medium text-slate-300 mt-1">{editingOp ? editingOp.nome_cliente : 'Preencha o CNPJ para validar o cliente e a carteira.'}</p>
+                  <p className="text-xs md:text-sm font-medium text-slate-300 mt-1 truncate">{editingOp ? editingOp.nome_cliente : 'Preencha o CNPJ para validar.'}</p>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 shrink-0">
                 {editingOp && (
-                    <button onClick={gerarPropostaIndividualPDF} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition border border-white/20">
-                        <FileText size={16}/> Gerar Proposta PDF
+                    <button onClick={gerarPropostaIndividualPDF} className="bg-white/10 hover:bg-white/20 text-white px-3 md:px-4 py-2 rounded-xl text-[10px] md:text-xs font-bold flex items-center gap-1.5 transition border border-white/20">
+                        <FileText size={16}/> <span className="hidden sm:inline">Gerar PDF</span>
                     </button>
                 )}
                 <button onClick={() => setModalOpen(false)} className="hover:bg-white/20 p-2 rounded-full transition bg-white/10 text-white"><X size={20}/></button>
               </div>
             </div>
 
-            <div className="p-6 md:p-8 grid grid-cols-1 md:grid-cols-4 gap-6 overflow-y-auto bg-slate-50 flex-1 custom-scrollbar">
-              <div className="md:col-span-4 flex items-center gap-2 mb-2">
-                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black">1</div>
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Identificação e Atribuição</h3>
+            <div className="p-4 md:p-8 grid grid-cols-1 md:grid-cols-4 gap-4 md:gap-6 overflow-y-auto bg-slate-50 flex-1 custom-scrollbar">
+              <div className="md:col-span-4 flex items-center gap-2 mb-1 md:mb-2">
+                  <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black text-xs md:text-sm">1</div>
+                  <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Identificação e Atribuição</h3>
               </div>
               <div className="md:col-span-2">
                   <label className="text-xs font-bold text-slate-700 mb-1.5 block">CNPJ (Com Validação)</label>
@@ -772,9 +776,9 @@ export default function PipelinePage() {
                   </select>
               </div>
 
-              <div className="md:col-span-4 flex items-center gap-2 mb-2 mt-6">
-                  <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-black">2</div>
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Produto e Precificação</h3>
+              <div className="md:col-span-4 flex items-center gap-2 mb-1 md:mb-2 mt-4 md:mt-6">
+                  <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-black text-xs md:text-sm">2</div>
+                  <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Produto e Precificação</h3>
               </div>
               <div className="md:col-span-2">
                   <label className="text-xs font-bold text-slate-700 mb-1.5 flex justify-between">Ativo a Negociar <Loader2 size={12} className={loadingProdutos ? "animate-spin text-blue-500" : "hidden"}/></label>
@@ -784,49 +788,54 @@ export default function PipelinePage() {
                   </select>
               </div>
               <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Validade do Ativo</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm text-slate-500" value={formData.validade_produto} onChange={e => setFormData({...formData, validade_produto: e.target.value})} placeholder="Mês/Ano ou Lote" /></div>
-              <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Preço/Grama (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-black text-emerald-700 outline-none shadow-sm" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} /></div>
-              <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Proposto</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
-              <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Bonificado</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
-              <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Parcelas</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
+              
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:col-span-4">
+                  <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Preço/g (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-black text-emerald-700 outline-none shadow-sm" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} /></div>
+                  <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Proposto</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
+                  <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Bonificado</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
+                  <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Parcelas</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
+              </div>
               <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Dias para 1ª Parcela</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
 
-              <div className="md:col-span-4 border-t border-slate-200 my-4 pt-4">
+              <div className="md:col-span-4 border-t border-slate-200 my-2 md:my-4 pt-4">
                   <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Variáveis do Payback (Para o PDF)</h4>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Peso da Fórmula (g)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.peso_formula_g} onChange={e => setFormData({...formData, peso_formula_g: e.target.value})}/></div>
-                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Fator de Lucro (Markup)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.fator_lucro} onChange={e => setFormData({...formData, fator_lucro: e.target.value})}/></div>
-                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Custo Fixo por Fórmula (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.custo_fixo_operacional} onChange={e => setFormData({...formData, custo_fixo_operacional: e.target.value})}/></div>
+                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Fator de Lucro</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.fator_lucro} onChange={e => setFormData({...formData, fator_lucro: e.target.value})}/></div>
+                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Custo Fixo / Fórm. (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.custo_fixo_operacional} onChange={e => setFormData({...formData, custo_fixo_operacional: e.target.value})}/></div>
                   </div>
               </div>
 
               <div className="md:col-span-4 bg-slate-800 p-4 rounded-2xl flex items-center justify-between text-white mt-2 shadow-lg">
-                  <span className="text-xs font-black uppercase tracking-widest text-slate-300">Valor Total da Proposta</span>
-                  <span className="text-2xl font-black text-[#82D14D]">{formatCurrency(formData.valor)}</span>
+                  <span className="text-xs font-black uppercase tracking-widest text-slate-300">Total Proposta</span>
+                  <span className="text-xl md:text-2xl font-black text-[#82D14D]">{formatCurrency(formData.valor)}</span>
               </div>
 
-              <div className="md:col-span-4 flex items-center gap-2 mb-2 mt-6">
-                  <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-black">3</div>
-                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Follow-up e Histórico</h3>
+              <div className="md:col-span-4 flex items-center gap-2 mb-1 md:mb-2 mt-4 md:mt-6">
+                  <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-black text-xs md:text-sm">3</div>
+                  <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Follow-up e Histórico</h3>
               </div>
-              <div className="md:col-span-2"><label className="text-xs font-black text-red-600 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Clock size={14}/> Próximo Contato (Obrigatório)</label><input type="date" className="w-full bg-white border border-red-200 focus:border-red-500 rounded-xl p-3 text-sm font-bold text-red-900 outline-none shadow-sm cursor-pointer" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} /></div>
+              <div className="md:col-span-2"><label className="text-xs font-black text-red-600 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Clock size={14}/> Próximo Contato</label><input type="date" className="w-full bg-white border border-red-200 focus:border-red-500 rounded-xl p-3 text-sm font-bold text-red-900 outline-none shadow-sm cursor-pointer" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} /></div>
               <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Canal de Contato</label><select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
               <div className="md:col-span-4 space-y-3">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2"><MessageSquare size={14}/> Diário de Bordo</label>
                   <div className="flex gap-2">
-                      <input className="flex-1 bg-white border-2 border-blue-100 focus:border-blue-500 rounded-xl p-3 outline-none text-sm font-medium shadow-sm transition" placeholder="Escreva um resumo do contato aqui..." value={novaNotaInput} onChange={(e) => setNovaNotaInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && adicionarNotaAoHistorico()}/>
+                      <input className="flex-1 bg-white border-2 border-blue-100 focus:border-blue-500 rounded-xl p-3 outline-none text-sm font-medium shadow-sm transition" placeholder="Escreva um resumo..." value={novaNotaInput} onChange={(e) => setNovaNotaInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && adicionarNotaAoHistorico()}/>
                       <button type="button" onClick={adicionarNotaAoHistorico} className="bg-blue-600 text-white px-5 rounded-xl hover:bg-blue-700 transition font-bold shadow-md active:scale-95"><Send size={18}/></button>
                   </div>
-                  <textarea className="w-full bg-slate-100 border border-slate-200 rounded-xl p-4 h-32 resize-none text-xs text-slate-700 font-mono leading-relaxed shadow-inner outline-none" value={formData.observacoes} readOnly placeholder="O histórico será salvo aqui, mais novos no topo..."/>
+                  <textarea className="w-full bg-slate-100 border border-slate-200 rounded-xl p-4 h-32 resize-none text-xs text-slate-700 font-mono leading-relaxed shadow-inner outline-none" value={formData.observacoes} readOnly placeholder="O histórico será salvo aqui..."/>
               </div>
             </div>
 
-            <div className="p-6 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
-              {editingOp ? <button onClick={handleDelete} className="text-red-500 font-bold text-xs uppercase px-4 py-2 hover:bg-red-50 rounded-lg transition flex items-center gap-1"><Trash2 size={14}/> Excluir</button> : <div></div>}
-              <div className="flex gap-3">
-                  <button onClick={() => setModalOpen(false)} className="px-6 py-3 font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition text-sm">Cancelar</button>
-                  <button onClick={handleSave} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-black shadow-lg shadow-blue-200 transition transform active:scale-95 hover:bg-blue-700 text-sm flex items-center gap-2"><Save size={16}/> Salvar Oportunidade</button>
+            <div className="p-4 md:p-6 bg-white border-t border-slate-200 flex flex-col md:flex-row justify-between items-center shrink-0 gap-3">
+              {editingOp ? <button onClick={handleDelete} className="w-full md:w-auto text-red-500 font-bold text-xs uppercase px-4 py-3 md:py-2 border border-red-100 md:border-none hover:bg-red-50 rounded-xl md:rounded-lg transition flex items-center justify-center gap-2"><Trash2 size={16}/> Excluir Registro</button> : <div className="hidden md:block"></div>}
+              
+              <div className="flex flex-col-reverse md:flex-row gap-3 w-full md:w-auto">
+                  <button onClick={() => setModalOpen(false)} className="w-full md:w-auto px-6 py-3.5 md:py-3 font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition text-sm">Cancelar</button>
+                  <button onClick={handleSave} className="w-full md:w-auto bg-blue-600 text-white px-8 py-3.5 md:py-3 rounded-xl font-black shadow-lg shadow-blue-200 transition transform active:scale-95 hover:bg-blue-700 text-sm flex items-center justify-center gap-2"><Save size={18}/> Salvar Oportunidade</button>
               </div>
             </div>
+
           </div>
         </div>, document.body
       )}
@@ -839,9 +848,9 @@ export default function PipelinePage() {
                  <h2 className="text-xl font-black text-slate-800 mb-3">{confirmModal.title}</h2>
                  <p className="text-slate-600 font-medium leading-relaxed whitespace-pre-wrap">{confirmModal.message}</p>
               </div>
-              <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
-                 <button onClick={confirmModal.onCancel} className="flex-1 bg-white border border-slate-200 text-slate-600 font-bold py-3 rounded-xl hover:bg-slate-100 transition">Cancelar</button>
-                 <button onClick={confirmModal.onConfirm} className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-xl shadow-lg transition active:scale-95">Sim, Continuar</button>
+              <div className="p-4 md:p-6 bg-slate-50 border-t border-slate-100 flex flex-col md:flex-row gap-3">
+                 <button onClick={confirmModal.onCancel} className="w-full bg-white border border-slate-200 text-slate-600 font-bold py-3.5 md:py-3 rounded-xl hover:bg-slate-100 transition">Cancelar</button>
+                 <button onClick={confirmModal.onConfirm} className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3.5 md:py-3 rounded-xl shadow-lg transition active:scale-95">Sim, Continuar</button>
               </div>
            </div>
         </div>, document.body
@@ -850,12 +859,12 @@ export default function PipelinePage() {
       {blockModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in duration-300">
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
-              <div className="bg-red-600 p-8 flex flex-col items-center justify-center text-white"><ShieldAlert size={64} className="mb-4 opacity-90"/><h2 className="text-2xl font-black uppercase tracking-tight text-center">{blockModal.title}</h2></div>
-              <div className="p-8 text-center bg-white">
-                 <p className="text-slate-800 font-bold text-lg mb-2">{blockModal.message}</p>
+              <div className="bg-red-600 p-6 md:p-8 flex flex-col items-center justify-center text-white"><ShieldAlert size={50} className="mb-4 opacity-90"/><h2 className="text-xl md:text-2xl font-black uppercase tracking-tight text-center">{blockModal.title}</h2></div>
+              <div className="p-6 md:p-8 text-center bg-white">
+                 <p className="text-slate-800 font-bold text-base md:text-lg mb-2">{blockModal.message}</p>
                  <div className="bg-red-50 border border-red-100 rounded-xl p-4 mt-4 text-left"><p className="text-xs text-red-500 font-bold uppercase tracking-wider mb-1">Motivo</p><p className="text-red-800 font-bold text-sm whitespace-pre-wrap">{blockModal.motivo}</p></div>
               </div>
-              <div className="p-6 bg-slate-50 border-t border-slate-100"><button onClick={() => setBlockModal({ ...blockModal, open: false })} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-xl transition active:scale-95">FECHAR</button></div>
+              <div className="p-4 md:p-6 bg-slate-50 border-t border-slate-100"><button onClick={() => setBlockModal({ ...blockModal, open: false })} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-xl transition active:scale-95">FECHAR</button></div>
            </div>
         </div>, document.body
       )}
