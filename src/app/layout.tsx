@@ -116,11 +116,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   };
 
   // Marcar como lida
-  const marcarComoLida = async (id: string) => {
+  const marcarComoLida = async (id: string, link?: string) => {
       // Atualiza na tela na hora
       setNotificacoes(prev => prev.map(n => n.id === id ? { ...n, lida: true } : n));
       // Grava no banco
       await supabase.from('notificacoes').update({ lida: true }).eq('id', id);
+      
+      // Se houver link, navega
+      if (link) {
+          setIsNotifOpen(false);
+          router.push(link);
+      }
   };
 
   const handleLogout = async () => {
@@ -153,14 +159,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="flex items-center gap-3">
               <button 
                 onClick={() => setIsOpen(true)}
-                className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-green-600 transition active:scale-95"
+                className="p-2 -ml-2 sm:ml-0 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-green-600 transition active:scale-95"
               >
                 <Menu size={24} />
               </button>
 
               <div className="flex flex-col leading-none select-none">
                  <span className="font-black text-lg text-[#0f392b] tracking-tight">YELLOW<span className="text-[#82D14D]">LEAF</span></span>
-                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">CRM System</span>
+                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest hidden sm:block">CRM System</span>
               </div>
             </div>
 
@@ -185,7 +191,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
              
              {/* --- O SININHO DE NOTIFICAÇÕES --- */}
              <div className="relative">
@@ -203,30 +209,37 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
                  {isNotifOpen && (
                      <>
-                         <div className="fixed inset-0 z-[30]" onClick={() => setIsNotifOpen(false)}></div>
-                         <div className="absolute right-0 top-14 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 z-[40] overflow-hidden animate-in fade-in slide-in-from-top-4 flex flex-col max-h-[400px]">
-                             <div className="p-4 bg-slate-800 flex justify-between items-center text-white shrink-0">
-                                 <h3 className="font-bold text-sm flex items-center gap-2"><Bell size={16} className="text-yellow-400"/> Notificações</h3>
-                                 <span className="text-[10px] font-black uppercase tracking-widest bg-white/20 px-2 py-0.5 rounded">{notificacoesNaoLidas} Novas</span>
+                         {/* Fundo escuro apenas no mobile */}
+                         <div className="fixed inset-0 z-[50] bg-black/50 sm:bg-transparent transition-all" onClick={() => setIsNotifOpen(false)}></div>
+                         
+                         {/* Dropdown / Bottom Sheet */}
+                         <div className="fixed sm:absolute inset-x-0 bottom-0 sm:inset-auto sm:right-0 sm:top-14 w-full sm:w-80 bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl sm:shadow-2xl border-t sm:border border-slate-200 z-[60] overflow-hidden animate-in slide-in-from-bottom-10 sm:slide-in-from-top-4 flex flex-col max-h-[85vh] sm:max-h-[400px]">
+                             
+                             <div className="p-5 sm:p-4 bg-slate-800 flex justify-between items-center text-white shrink-0">
+                                 <h3 className="font-bold text-base sm:text-sm flex items-center gap-2"><Bell size={18} className="text-yellow-400"/> Notificações</h3>
+                                 <div className="flex items-center gap-3">
+                                    <span className="text-[10px] font-black uppercase tracking-widest bg-white/20 px-2 py-0.5 rounded">{notificacoesNaoLidas} Novas</span>
+                                    <button onClick={() => setIsNotifOpen(false)} className="sm:hidden text-slate-300 hover:text-white"><X size={20}/></button>
+                                 </div>
                              </div>
                              
-                             <div className="flex-1 overflow-y-auto custom-scrollbar p-2 bg-slate-50">
+                             <div className="flex-1 overflow-y-auto custom-scrollbar p-3 sm:p-2 bg-slate-50 pb-8 sm:pb-2">
                                  {notificacoes.length === 0 ? (
-                                     <p className="text-center text-slate-400 text-xs p-6 font-medium">Nenhuma notificação por enquanto.</p>
+                                     <p className="text-center text-slate-400 text-sm sm:text-xs p-6 font-medium">Nenhuma notificação por enquanto.</p>
                                  ) : (
                                      notificacoes.map((n: any) => (
                                          <div 
                                              key={n.id} 
-                                             onClick={() => marcarComoLida(n.id)}
-                                             className={`p-3 mb-2 rounded-xl text-sm border transition cursor-pointer flex gap-3 ${n.lida ? 'bg-transparent border-transparent opacity-60 hover:bg-slate-100' : 'bg-white border-blue-200 shadow-sm hover:border-blue-300'}`}
+                                             onClick={() => marcarComoLida(n.id, n.link)}
+                                             className={`p-4 sm:p-3 mb-2 sm:mb-2 rounded-2xl sm:rounded-xl text-sm border transition cursor-pointer flex gap-3 ${n.lida ? 'bg-transparent border-transparent opacity-60 hover:bg-slate-100' : 'bg-white border-blue-200 shadow-sm hover:border-blue-300'}`}
                                          >
-                                             <div className="mt-1">
-                                                 {n.lida ? <CheckCircle2 size={16} className="text-slate-300"/> : <div className="w-2.5 h-2.5 rounded-full bg-blue-500 mt-1 shadow-sm shadow-blue-200"></div>}
+                                             <div className="mt-1 shrink-0">
+                                                 {n.lida ? <CheckCircle2 size={18} className="text-slate-300"/> : <div className="w-2.5 h-2.5 rounded-full bg-blue-500 mt-1 shadow-sm shadow-blue-200"></div>}
                                              </div>
                                              <div>
                                                  <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-0.5">{n.remetente || 'Sistema'}</p>
-                                                 <p className={`text-xs ${n.lida ? 'text-slate-500' : 'text-slate-800 font-bold'}`}>{n.mensagem}</p>
-                                                 <span className="text-[9px] text-slate-400 font-medium block mt-1">{new Date(n.created_at).toLocaleString('pt-BR')}</span>
+                                                 <p className={`text-sm sm:text-xs leading-tight ${n.lida ? 'text-slate-500' : 'text-slate-800 font-bold'}`}>{n.mensagem}</p>
+                                                 <span className="text-[10px] sm:text-[9px] text-slate-400 font-medium block mt-1.5 sm:mt-1">{new Date(n.created_at).toLocaleString('pt-BR')}</span>
                                              </div>
                                          </div>
                                      ))
@@ -243,7 +256,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
              <div className="relative shrink-0">
                 <button 
                    onClick={() => { setIsProfileOpen(!isProfileOpen); setIsNotifOpen(false); }}
-                   className="flex items-center gap-3 hover:bg-slate-50 p-2 rounded-xl transition"
+                   className="flex items-center gap-2 sm:gap-3 hover:bg-slate-50 p-1.5 sm:p-2 rounded-xl transition"
                 >
                     <div className="text-right hidden sm:block">
                        <p className="text-xs font-bold text-slate-700 max-w-[150px] truncate">{userEmail}</p>
@@ -252,26 +265,35 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     <div className="w-9 h-9 rounded-full bg-[#0f392b] text-[#82D14D] flex items-center justify-center font-bold text-sm border-2 border-[#82D14D]">
                        {userEmail.substring(0, 2).toUpperCase()}
                     </div>
-                    <ChevronDown size={16} className={`text-slate-400 transition-transform ${isProfileOpen ? 'rotate-180' : ''}`}/>
+                    <ChevronDown size={16} className={`text-slate-400 transition-transform hidden sm:block ${isProfileOpen ? 'rotate-180' : ''}`}/>
                 </button>
 
                 {isProfileOpen && (
                   <>
-                    <div className="fixed inset-0 z-[30]" onClick={() => setIsProfileOpen(false)}></div> 
-                    <div className="absolute right-0 top-14 w-48 bg-white rounded-xl shadow-xl border border-slate-100 p-2 z-[40] animate-in fade-in slide-in-from-top-2">
-                       <div className="px-3 py-2 border-b border-slate-100 mb-1">
-                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Minha Conta</p>
+                    {/* Fundo escuro apenas no mobile */}
+                    <div className="fixed inset-0 z-[50] bg-black/50 sm:bg-transparent transition-all" onClick={() => setIsProfileOpen(false)}></div> 
+                    
+                    {/* Dropdown / Bottom Sheet */}
+                    <div className="fixed sm:absolute inset-x-0 bottom-0 sm:inset-auto sm:right-0 sm:top-14 w-full sm:w-56 bg-white rounded-t-3xl sm:rounded-xl shadow-2xl sm:shadow-xl sm:border border-slate-100 p-5 sm:p-2 z-[60] animate-in slide-in-from-bottom-10 sm:slide-in-from-top-2 pb-10 sm:pb-2">
+                       
+                       <div className="px-3 py-3 sm:py-2 border-b border-slate-100 mb-3 sm:mb-1 flex justify-between items-center sm:block">
+                          <div>
+                             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest text-left">Minha Conta</p>
+                             <p className="text-sm font-bold text-slate-800 truncate mt-1 sm:hidden">{userEmail}</p>
+                          </div>
+                          <button onClick={() => setIsProfileOpen(false)} className="sm:hidden p-2 text-slate-400 hover:bg-slate-100 rounded-full"><X size={20}/></button>
                        </div>
+                       
                        {menuPermitido.some(m => m.key === 'admin') && (
-                           <Link href="/equipe" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded-lg transition font-medium">
-                              <Shield size={16}/> Gestão de Acessos
+                           <Link href="/equipe" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-3 sm:gap-2 w-full text-left px-4 sm:px-3 py-4 sm:py-2 text-base sm:text-sm text-slate-700 hover:bg-slate-50 rounded-xl sm:rounded-lg transition font-medium">
+                              <Shield size={18} className="sm:w-4 sm:h-4"/> Gestão de Acessos
                            </Link>
                        )}
                        <button 
                           onClick={handleLogout}
-                          className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition font-bold mt-1"
+                          className="flex items-center gap-3 sm:gap-2 w-full text-left px-4 sm:px-3 py-4 sm:py-2 text-base sm:text-sm text-red-600 hover:bg-red-50 rounded-xl sm:rounded-lg transition font-bold mt-2 sm:mt-1 border border-red-50 sm:border-transparent bg-red-50/50 sm:bg-transparent"
                        >
-                          <LogOut size={16}/> Sair do Sistema
+                          <LogOut size={18} className="sm:w-4 sm:h-4"/> Sair do Sistema
                        </button>
                     </div>
                   </>
@@ -290,12 +312,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
 
         <aside 
-          className={`fixed top-0 left-0 h-full w-72 bg-[#0f392b] text-white z-[60] shadow-2xl transform transition-transform duration-300 ease-out ${
+          className={`fixed top-0 left-0 h-full w-[80vw] max-w-[300px] sm:w-72 bg-[#0f392b] text-white z-[60] shadow-2xl transform transition-transform duration-300 ease-out ${
             isOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
         >
           <div className="p-6 flex justify-between items-center border-b border-white/10 h-16">
-            <span className="font-bold text-lg text-white tracking-wide">Menu de Módulos</span>
+            <span className="font-bold text-lg text-white tracking-wide">Módulos</span>
             <button onClick={() => setIsOpen(false)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 text-white transition"><X size={20} /></button>
           </div>
 
@@ -321,16 +343,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             })}
             
             {menuPermitido.length === 0 && (
-                <p className="text-center text-xs text-slate-500 mt-10 px-4">Seu usuário não possui módulos liberados. Fale com o Administrador.</p>
+                <p className="text-center text-xs text-slate-500 mt-10 px-4 leading-relaxed">Seu usuário não possui módulos liberados.<br/>Fale com o Administrador.</p>
             )}
           </nav>
 
           <div className="absolute bottom-0 left-0 right-0 p-6 bg-[#0a261d] border-t border-white/5">
             <button 
               onClick={handleLogout}
-              className="flex items-center gap-3 text-red-400 hover:text-red-300 text-sm font-bold w-full p-2 rounded-lg hover:bg-white/5 transition"
+              className="flex items-center justify-center gap-3 text-red-400 hover:text-red-300 text-sm font-bold w-full p-3 rounded-xl border border-red-500/20 hover:bg-white/5 transition"
             >
-              <LogOut size={18} /> Sair
+              <LogOut size={18} /> Encerrar Sessão
             </button>
           </div>
         </aside>
