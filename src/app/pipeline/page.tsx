@@ -88,7 +88,6 @@ export default function PipelinePage() {
 
   const inicializarDados = async () => {
     setLoading(true);
-    
     const { data: { user } } = await supabase.auth.getUser();
     let perfilUsuario = null;
     
@@ -104,13 +103,7 @@ export default function PipelinePage() {
         setEquipe(vendedoresAtivos);
     }
 
-    await Promise.all([
-        carregarOportunidades(perfilUsuario), 
-        carregarProdutosDaAPI(), 
-        carregarExclusividades(), 
-        carregarBaseClientesOficial()
-    ]);
-    
+    await Promise.all([carregarOportunidades(perfilUsuario), carregarProdutosDaAPI(), carregarExclusividades(), carregarBaseClientesOficial()]);
     setLoading(false);
   };
 
@@ -159,10 +152,7 @@ export default function PipelinePage() {
   const carregarOportunidades = async (perfil: any) => {
     let query = supabase.from('pipeline').select('*').order('created_at', { ascending: false });
     const isAdmin = perfil && ['admin', 'Admin', 'diretor', 'Diretor'].includes(perfil.cargo);
-    
-    if (!isAdmin) {
-        query = query.or(`user_id.eq.${perfil.id},sdr_id.eq.${perfil.id}`);
-    }
+    if (!isAdmin) query = query.or(`user_id.eq.${perfil.id},sdr_id.eq.${perfil.id}`);
     
     const { data, error } = await query;
     if (error) console.error("Erro ao buscar:", error);
@@ -174,11 +164,7 @@ export default function PipelinePage() {
     const ufAtual = (formData.uf_exclusividade || '').toUpperCase().trim();
     const cidadeAtual = (formData.cidade_exclusividade || '').toUpperCase().trim();
     if (!ufAtual) return true;
-    return !exclusividades.some(ex => 
-      ex.produto === nomeProduto && ex.uf === ufAtual && 
-      (ex.cidade === cidadeAtual || ex.cidade === 'TODAS') &&
-      ex.nome_cliente !== formData.nome_cliente
-    );
+    return !exclusividades.some(ex => ex.produto === nomeProduto && ex.uf === ufAtual && (ex.cidade === cidadeAtual || ex.cidade === 'TODAS') && ex.nome_cliente !== formData.nome_cliente);
   });
 
   useEffect(() => {
@@ -328,42 +314,43 @@ export default function PipelinePage() {
       setNovaNotaInput(""); 
   };
 
-  // --- RELATÓRIO PDF (RECONSTRUÍDO IDENTICO AO MODELO ORIGINAL) ---
+  // --- RELATÓRIO PDF: PROPOSTA COMERCIAL (COMPACTA EM 1 PÁGINA COM selo.jpg) ---
   const gerarPropostaIndividualPDF = () => {
     if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
 
     const doc = new jsPDF();
-    const darkGreen = [18, 85, 48]; // Verde Escuro da YellowLeaf
+    const darkGreen = [18, 85, 48]; 
+    const lightGreen = [0, 150, 0]; 
     
-    // LOGO E CABEÇALHO
-    try { doc.addImage("/logo.png", "PNG", 14, 10, 45, 18); } 
-    catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 14, 10, 45, 18); } catch (err) {} }
+    // CABEÇALHO
+    try { doc.addImage("/logo.png", "PNG", 14, 10, 40, 16); } 
+    catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 14, 10, 40, 16); } catch (err) {} }
 
-    doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]); 
-    doc.text("PROPOSTA COMERCIAL", 196, 18, { align: "right" });
+    doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]); 
+    doc.text("PROPOSTA COMERCIAL", 196, 17, { align: "right" });
 
-    doc.setFontSize(10); doc.setTextColor(150, 150, 150);
-    doc.text(`Nº ${formatPropostaId(formData.numero_proposta)}`, 196, 24, { align: "right" });
-    doc.text("YellowLeaf – Nutraceuticals Company", 196, 29, { align: "right" });
+    doc.setFontSize(9); doc.setTextColor(150, 150, 150);
+    doc.text(`Nº ${formatPropostaId(formData.numero_proposta)}`, 196, 22, { align: "right" });
+    doc.text("YellowLeaf – Nutraceuticals Company", 196, 26, { align: "right" });
 
     // LINHA SEPARADORA
     doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.setLineWidth(1.5);
-    doc.line(14, 34, 196, 34);
+    doc.setLineWidth(1.2);
+    doc.line(14, 31, 196, 31);
 
     // CAIXA CINZA (DADOS DO CLIENTE)
-    doc.setFillColor(245, 245, 245);
-    doc.rect(14, 40, 182, 30, 'F');
+    doc.setFillColor(248, 249, 250); 
+    doc.rect(14, 35, 182, 23, 'F');
 
-    doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.text("DADOS DO CLIENTE", 18, 48);
+    doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+    doc.text("DADOS DO CLIENTE", 18, 41);
 
-    doc.setFontSize(10); doc.setTextColor(80, 80, 80); doc.setFont("helvetica", "normal");
-    doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 18, 55);
-    doc.text(`Contato: ${formData.contato || 'N/D'}   |   Tel: ${formData.telefone || 'N/D'}`, 18, 60);
-    doc.text(`Cidade/UF: ${formData.cidade_exclusividade || '-'} / ${formData.uf_exclusividade || '-'}`, 18, 65);
+    doc.setFontSize(9); doc.setTextColor(80, 80, 80); doc.setFont("helvetica", "normal");
+    doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 18, 47);
+    doc.text(`Contato: ${formData.contato || 'N/D'}   |   Tel: ${formData.telefone || 'N/D'}`, 18, 52);
+    doc.text(`Cidade/UF: ${formData.cidade_exclusividade || '-'} / ${formData.uf_exclusividade || '-'}`, 18, 57);
 
-    // VARIÁVEIS MATEMÁTICAS DO PAYBACK
+    // MATEMÁTICA
     const precoGrama = parseFloat(String(formData.valor_g_tabela).replace(',', '.')) || 0;
     const kgProposto = parseFloat(String(formData.kg_proposto)) || 0;
     const kgBonificado = parseFloat(String(formData.kg_bonificado)) || 0;
@@ -385,11 +372,11 @@ export default function PipelinePage() {
     const viabilidadeDiaria = parseInt(String(diasPrimeiraParcela)) > 0 ? (qtdFormulasParaPagarParcela / parseInt(String(diasPrimeiraParcela))) : 0;
 
     // TABELA 1: ESPECIFICAÇÃO
-    doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 14, 82);
-    
+    doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+    doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 14, 66); 
+
     autoTable(doc, {
-        startY: 86,
+        startY: 69,
         head: [['DESCRIÇÃO', 'VALORES']],
         body: [
             ['Ativo/Insumo', formData.produto || 'N/D'],
@@ -404,18 +391,15 @@ export default function PipelinePage() {
         ],
         theme: 'grid',
         headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
-        styles: { fontSize: 10, cellPadding: 5, textColor: [60, 60, 60] },
-        columnStyles: {
-            0: { fontStyle: 'normal' },
-            1: { fontStyle: 'bold', halign: 'right' }
-        }
+        styles: { fontSize: 9, cellPadding: 3, textColor: [60, 60, 60] },
+        columnStyles: { 0: { fontStyle: 'normal' }, 1: { fontStyle: 'bold', halign: 'right' } }
     });
 
-    let finalY = (doc as any).lastAutoTable.finalY || 160;
+    let finalY = (doc as any).lastAutoTable.finalY || 130;
 
     // TABELA 2: PAYBACK
     autoTable(doc, {
-        startY: finalY + 10,
+        startY: finalY + 6,
         head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
         body: [
             [`Custo Matéria-Prima (Dose ${pesoFormula}g)`, formatCurrency(custoMP)],
@@ -425,47 +409,55 @@ export default function PipelinePage() {
         ],
         theme: 'grid',
         headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
-        styles: { fontSize: 10, cellPadding: 5, textColor: [60, 60, 60] },
-        columnStyles: {
-            0: { fontStyle: 'normal' },
-            1: { fontStyle: 'bold', halign: 'right' }
-        },
+        styles: { fontSize: 9, cellPadding: 3, textColor: [60, 60, 60] },
+        columnStyles: { 0: { fontStyle: 'normal' }, 1: { fontStyle: 'bold', halign: 'right' } },
         didParseCell: (data) => {
             if (data.section === 'body' && data.row.index === 3) {
                 data.cell.styles.fontStyle = 'bold';
-                if (data.column.index === 1) data.cell.styles.textColor = [0, 150, 0];
+                if (data.column.index === 1) data.cell.styles.textColor = lightGreen;
             }
         }
     });
 
-    finalY = (doc as any).lastAutoTable.finalY || 205;
+    finalY = (doc as any).lastAutoTable.finalY || 165;
 
-    // RODAPÉ (CERTIFICAÇÕES E CONTATOS)
-    doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, finalY + 20, { align: "center" });
+    // CERTIFICAÇÕES
+    doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, finalY + 12, { align: "center" });
 
-    doc.setFontSize(9); doc.setTextColor(100, 100, 100); doc.setFont("helvetica", "normal");
+    doc.setFontSize(8); doc.setTextColor(100, 100, 100); doc.setFont("helvetica", "normal");
     const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e\npromovemos sua comercialização com responsabilidade e ética.";
-    doc.text(textQualidade, 105, finalY + 27, { align: "center", lineHeightFactor: 1.5 });
+    doc.text(textQualidade, 105, finalY + 17, { align: "center", lineHeightFactor: 1.5 });
 
-    doc.setFontSize(14); doc.setFont("helvetica", "bold");
-    doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", 105, finalY + 42, { align: "center" });
+    // IMAGEM DOS SELOS (Puxando selo.jpg conforme anexo)
+    let imagemAdicionada = false;
+    const logoY = finalY + 23;
+    try { 
+        doc.addImage("/selo.jpg", "JPEG", 65, logoY, 80, 16); 
+        imagemAdicionada = true; 
+    } catch (e1) {
+        try { doc.addImage("/selo.png", "PNG", 65, logoY, 80, 16); imagemAdicionada = true; } catch (e2) {}
+    }
+    
+    if (!imagemAdicionada) {
+        doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", 105, logoY + 8, { align: "center" });
+    }
 
-    // Linha final
+    // INFORMAÇÕES DO VENDEDOR E RODAPÉ
     doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
     doc.setLineWidth(1); doc.line(14, 275, 196, 275);
 
-    // Info Empresa e Vendedor
     doc.setFontSize(8); doc.setTextColor(150, 150, 150); doc.setFont("helvetica", "normal");
-    doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, 282);
-    doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 14, 286);
+    doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, 280);
+    doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 14, 284);
 
     const representante = equipe.find(u => u.id === formData.user_id);
     const responsavelNome = representante?.nome || usuarioLogado?.nome || 'Comercial YellowLeaf';
-    const responsavelTel = representante?.telefone || '(44) 99102-7642'; // Puxa do perfil ou usa o padrao
-    
-    doc.text(`${responsavelNome} - Comercial YellowLeaf`, 196, 282, { align: "right" });
-    doc.text(`WhatsApp: ${responsavelTel}`, 196, 286, { align: "right" });
+    const responsavelTel = representante?.telefone || '(44) 99102-7642';
+
+    doc.text(`${responsavelNome} - Comercial YellowLeaf`, 196, 280, { align: "right" });
+    doc.text(`WhatsApp: ${responsavelTel}`, 196, 284, { align: "right" });
 
     doc.save(`Proposta_${formData.nome_cliente.replace(/\s+/g, '_')}_${formatPropostaId(formData.numero_proposta)}.pdf`);
   };
@@ -651,11 +643,9 @@ export default function PipelinePage() {
   const getSortedOpportunities = (estagioId: string) => {
     const ops = oportunidades.filter(o => {
         if (o.status !== estagioId) return false;
-        
         if (isAdminUser && visaoAdmin === 'meus') {
             if (o.user_id !== usuarioLogado?.id && o.sdr_id !== usuarioLogado?.id) return false;
         }
-
         if (!buscaTermo) return true;
         const term = buscaTermo.toLowerCase();
         const termClean = term.replace(/\D/g, ''); 
@@ -686,7 +676,6 @@ export default function PipelinePage() {
         </div>
 
         <div className="flex items-center gap-3 w-full md:w-auto">
-            
             {isAdminUser && (
                 <div className="flex bg-slate-200/70 p-1 rounded-xl shrink-0 mr-2">
                     <button onClick={() => setVisaoAdmin('meus')} className={`px-4 py-2 text-[10px] font-black tracking-widest uppercase rounded-lg transition ${visaoAdmin === 'meus' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
@@ -697,7 +686,6 @@ export default function PipelinePage() {
                     </button>
                 </div>
             )}
-
             <div className="relative flex-1 md:w-64">
                 <input type="text" placeholder="Buscar (Nome, CNPJ, Nº...)" className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 focus:border-blue-500 outline-none text-sm font-bold uppercase text-slate-600 shadow-sm" value={buscaTermo} onChange={(e) => setBuscaTermo(e.target.value)} />
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -748,41 +736,27 @@ export default function PipelinePage() {
             </div>
 
             <div className="p-6 md:p-8 grid grid-cols-1 md:grid-cols-4 gap-6 overflow-y-auto bg-slate-50 flex-1 custom-scrollbar">
-              
               <div className="md:col-span-4 flex items-center gap-2 mb-2">
                   <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black">1</div>
                   <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Identificação e Atribuição</h3>
               </div>
-              
               <div className="md:col-span-2">
                   <label className="text-xs font-bold text-slate-700 mb-1.5 block">CNPJ (Com Validação)</label>
                   <div className="flex gap-2">
                       <input className="w-full bg-white border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none rounded-xl p-3 text-sm font-medium transition shadow-sm" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} onBlur={buscarDadosCNPJ} placeholder="Digite para buscar..."/>
-                      <button type="button" onClick={buscarDadosCNPJ} className="bg-blue-600 text-white p-3 rounded-xl shadow-sm hover:bg-blue-700 transition">
-                          {loadingCNPJ ? <Loader2 size={20} className="animate-spin"/> : <Search size={20}/>}
-                      </button>
+                      <button type="button" onClick={buscarDadosCNPJ} className="bg-blue-600 text-white p-3 rounded-xl shadow-sm hover:bg-blue-700 transition"><Loader2 size={20} className={loadingCNPJ ? "animate-spin" : "hidden"}/><Search size={20} className={loadingCNPJ ? "hidden" : ""}/></button>
                   </div>
               </div>
-              <div className="md:col-span-2">
-                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Razão Social da Farmácia</label>
-                  <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})}/>
-              </div>
-              
+              <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Razão Social da Farmácia</label><input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})}/></div>
               <div className="md:col-span-2 bg-blue-50 border border-blue-200 p-4 rounded-xl shadow-sm relative overflow-hidden">
                   <div className="absolute right-0 top-0 w-16 h-16 bg-blue-500 rounded-bl-full opacity-10"></div>
                   <label className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-2 flex items-center gap-1"><Briefcase size={12}/> Vendedor Responsável (Hand-off)</label>
-                  <select 
-                      value={formData.user_id} 
-                      onChange={e => setFormData({...formData, user_id: e.target.value})} 
-                      disabled={isRepLocked}
-                      className="w-full bg-white border border-blue-200 rounded-lg p-2.5 text-sm font-bold text-slate-800 outline-none shadow-sm cursor-pointer disabled:bg-slate-100 disabled:text-slate-500"
-                  >
+                  <select value={formData.user_id} onChange={e => setFormData({...formData, user_id: e.target.value})} disabled={isRepLocked} className="w-full bg-white border border-blue-200 rounded-lg p-2.5 text-sm font-bold text-slate-800 outline-none shadow-sm cursor-pointer disabled:bg-slate-100 disabled:text-slate-500">
                       <option value="">Selecione o Representante...</option>
                       {equipe.map(u => <option key={u.id} value={u.id}>{u.nome} ({u.cargo})</option>)}
                   </select>
                   {isRepLocked && <p className="text-[9px] font-bold text-red-500 mt-1 uppercase">Bloqueado pela regra de carteira ERP</p>}
               </div>
-
               <div className="md:col-span-2">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Status no Funil</label>
                   <select className="w-full bg-white border border-slate-300 text-blue-700 text-sm font-bold p-3 rounded-xl outline-none shadow-sm cursor-pointer" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
@@ -794,23 +768,16 @@ export default function PipelinePage() {
                   <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-black">2</div>
                   <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Produto e Precificação</h3>
               </div>
-
               <div className="md:col-span-2">
-                  <label className="text-xs font-bold text-slate-700 mb-1.5 flex justify-between">Ativo a Negociar {loadingProdutos && <Loader2 size={12} className="animate-spin text-blue-500"/>}</label>
+                  <label className="text-xs font-bold text-slate-700 mb-1.5 flex justify-between">Ativo a Negociar <Loader2 size={12} className={loadingProdutos ? "animate-spin text-blue-500" : "hidden"}/></label>
                   <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold disabled:opacity-50 outline-none shadow-sm cursor-pointer" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})} disabled={loadingProdutos}>
                       <option value="">Selecione...</option>
                       {produtosDisponiveis.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}
                   </select>
               </div>
-
-              <div className="md:col-span-2">
-                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Validade do Ativo</label>
-                  <input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm text-slate-500" value={formData.validade_produto} onChange={e => setFormData({...formData, validade_produto: e.target.value})} placeholder="Mês/Ano ou Lote" />
-              </div>
-
+              <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Validade do Ativo</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm text-slate-500" value={formData.validade_produto} onChange={e => setFormData({...formData, validade_produto: e.target.value})} placeholder="Mês/Ano ou Lote" /></div>
               <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Preço/Grama (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-black text-emerald-700 outline-none shadow-sm" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} /></div>
               <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Proposto</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
-              
               <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Bonificado</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
               <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Parcelas</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
               <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Dias para 1ª Parcela</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
@@ -833,18 +800,8 @@ export default function PipelinePage() {
                   <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-black">3</div>
                   <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Follow-up e Histórico</h3>
               </div>
-              
-              <div className="md:col-span-2">
-                  <label className="text-xs font-black text-red-600 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Clock size={14}/> Próximo Contato (Obrigatório)</label>
-                  <input type="date" className="w-full bg-white border border-red-200 focus:border-red-500 rounded-xl p-3 text-sm font-bold text-red-900 outline-none shadow-sm cursor-pointer" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} />
-              </div>
-              <div className="md:col-span-2">
-                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Canal de Contato</label>
-                  <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>
-                      {CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-              </div>
-              
+              <div className="md:col-span-2"><label className="text-xs font-black text-red-600 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Clock size={14}/> Próximo Contato (Obrigatório)</label><input type="date" className="w-full bg-white border border-red-200 focus:border-red-500 rounded-xl p-3 text-sm font-bold text-red-900 outline-none shadow-sm cursor-pointer" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} /></div>
+              <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Canal de Contato</label><select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
               <div className="md:col-span-4 space-y-3">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2"><MessageSquare size={14}/> Diário de Bordo</label>
                   <div className="flex gap-2">
@@ -856,14 +813,10 @@ export default function PipelinePage() {
             </div>
 
             <div className="p-6 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
-              {editingOp ? (
-                  <button onClick={handleDelete} className="text-red-500 font-bold text-xs uppercase px-4 py-2 hover:bg-red-50 rounded-lg transition flex items-center gap-1"><Trash2 size={14}/> Excluir</button>
-              ) : <div></div>}
+              {editingOp ? <button onClick={handleDelete} className="text-red-500 font-bold text-xs uppercase px-4 py-2 hover:bg-red-50 rounded-lg transition flex items-center gap-1"><Trash2 size={14}/> Excluir</button> : <div></div>}
               <div className="flex gap-3">
                   <button onClick={() => setModalOpen(false)} className="px-6 py-3 font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition text-sm">Cancelar</button>
-                  <button onClick={handleSave} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-black shadow-lg shadow-blue-200 transition transform active:scale-95 hover:bg-blue-700 text-sm flex items-center gap-2">
-                      <Save size={16}/> Salvar Oportunidade
-                  </button>
+                  <button onClick={handleSave} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-black shadow-lg shadow-blue-200 transition transform active:scale-95 hover:bg-blue-700 text-sm flex items-center gap-2"><Save size={16}/> Salvar Oportunidade</button>
               </div>
             </div>
           </div>
@@ -874,9 +827,7 @@ export default function PipelinePage() {
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
               <div className="p-8 text-center">
-                 <div className="mx-auto w-16 h-16 bg-yellow-50 text-yellow-600 rounded-full flex items-center justify-center mb-6">
-                    <AlertTriangle size={32} />
-                 </div>
+                 <div className="mx-auto w-16 h-16 bg-yellow-50 text-yellow-600 rounded-full flex items-center justify-center mb-6"><AlertTriangle size={32} /></div>
                  <h2 className="text-xl font-black text-slate-800 mb-3">{confirmModal.title}</h2>
                  <p className="text-slate-600 font-medium leading-relaxed whitespace-pre-wrap">{confirmModal.message}</p>
               </div>
@@ -891,24 +842,15 @@ export default function PipelinePage() {
       {blockModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in duration-300">
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
-              <div className="bg-red-600 p-8 flex flex-col items-center justify-center text-white">
-                 <ShieldAlert size={64} className="mb-4 opacity-90"/>
-                 <h2 className="text-2xl font-black uppercase tracking-tight text-center">{blockModal.title}</h2>
-              </div>
+              <div className="bg-red-600 p-8 flex flex-col items-center justify-center text-white"><ShieldAlert size={64} className="mb-4 opacity-90"/><h2 className="text-2xl font-black uppercase tracking-tight text-center">{blockModal.title}</h2></div>
               <div className="p-8 text-center bg-white">
                  <p className="text-slate-800 font-bold text-lg mb-2">{blockModal.message}</p>
-                 <div className="bg-red-50 border border-red-100 rounded-xl p-4 mt-4 text-left">
-                    <p className="text-xs text-red-500 font-bold uppercase tracking-wider mb-1">Motivo</p>
-                    <p className="text-red-800 font-bold text-sm whitespace-pre-wrap">{blockModal.motivo}</p>
-                 </div>
+                 <div className="bg-red-50 border border-red-100 rounded-xl p-4 mt-4 text-left"><p className="text-xs text-red-500 font-bold uppercase tracking-wider mb-1">Motivo</p><p className="text-red-800 font-bold text-sm whitespace-pre-wrap">{blockModal.motivo}</p></div>
               </div>
-              <div className="p-6 bg-slate-50 border-t border-slate-100">
-                 <button onClick={() => setBlockModal({ ...blockModal, open: false })} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-xl transition active:scale-95">FECHAR</button>
-              </div>
+              <div className="p-6 bg-slate-50 border-t border-slate-100"><button onClick={() => setBlockModal({ ...blockModal, open: false })} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-xl transition active:scale-95">FECHAR</button></div>
            </div>
         </div>, document.body
       )}
-
     </div>
   );
 }
