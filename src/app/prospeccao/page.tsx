@@ -12,6 +12,7 @@ const API_CLIENTES_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TY
 
 export default function ProspeccaoPage() {
   const [loading, setLoading] = useState(false);
+  const [progresso, setProgresso] = useState(0);
   const [clientesERP, setClientesERP] = useState<any[]>([]);
   
   // Estados do Mailing
@@ -20,7 +21,8 @@ export default function ProspeccaoPage() {
   const [resultados, setResultados] = useState({
       virgens: [] as any[],
       clientes: [] as any[],
-      totalLinhas: 0
+      totalLinhas: 0,
+      cabecalhos: [] as string[]
   });
 
   useEffect(() => {
@@ -47,10 +49,11 @@ export default function ProspeccaoPage() {
       return String(cnpj).replace(/\D/g, ''); 
   };
 
-  const cruzarDados = () => {
+  const cruzarDados = async () => {
       if (!textoColado.trim()) return alert("Cole os dados do Excel primeiro!");
       
       setLoading(true);
+      setProgresso(0);
 
       const cnpjsERP = new Set(
           clientesERP.map(c => limparCNPJ(c.cnpj || c.documento)).filter(c => c.length > 0)
@@ -63,7 +66,8 @@ export default function ProspeccaoPage() {
           return alert("O texto colado precisa ter pelo menos um cabeçalho e uma linha de dados.");
       }
 
-      const cabecalhos = linhas[0].split('\t').map(h => h.toLowerCase().trim());
+      const cabecalhosRaw = linhas[0].split('\t');
+      const cabecalhos = cabecalhosRaw.map(h => h.toLowerCase().trim());
       const indexCnpj = cabecalhos.findIndex(h => h.includes('cnpj') || h.includes('documento'));
 
       if (indexCnpj === -1) {
@@ -71,20 +75,55 @@ export default function ProspeccaoPage() {
           return alert("Não encontrei uma coluna chamada 'CNPJ' no cabeçalho colado. Verifique os dados.");
       }
 
+      // Prepara os cabeçalhos finais para garantir que Razão Social e Fantasia existam
+      let cabecalhosFinais = [...cabecalhosRaw.map(h => h.trim())];
+      const temRazao = cabecalhos.some(h => h.includes('razão') || h.includes('razao'));
+      const temFantasia = cabecalhos.some(h => h.includes('fantasia'));
+      
+      if (!temRazao) cabecalhosFinais.push('Razão Social');
+      if (!temFantasia) cabecalhosFinais.push('Nome Fantasia');
+
       const novasOportunidades: any[] = [];
       const jaClientes: any[] = [];
 
       for (let i = 1; i < linhas.length; i++) {
           const colunas = linhas[i].split('\t');
-          
           const lead: any = {};
-          cabecalhos.forEach((cabecalho, index) => {
-              lead[cabecalho] = colunas[index] ? colunas[index].trim() : '';
+          
+          // Inicializa todas as chaves
+          cabecalhosFinais.forEach(cab => lead[cab] = '');
+
+          // Popula o que veio do Excel
+          cabecalhosRaw.forEach((cabecalho, index) => {
+              lead[cabecalho.trim()] = colunas[index] ? colunas[index].trim() : '';
           });
 
           const cnpjLead = limparCNPJ(colunas[indexCnpj]);
 
           if (cnpjLead.length >= 11) {
+              
+              // --- BUSCA NA RECEITA FEDERAL (BRASIL API) ---
+              try {
+                  const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLead}`);
+                  if (res.ok) {
+                      const data = await res.json();
+                      
+                      // Preenche Razão Social se estiver vazio
+                      const chaveRazao = cabecalhosFinais.find(h => h.toLowerCase().includes('razão') || h.toLowerCase().includes('razao')) || 'Razão Social';
+                      if (!lead[chaveRazao] || lead[chaveRazao].trim() === '') {
+                          lead[chaveRazao] = data.razao_social || '';
+                      }
+
+                      // Preenche Fantasia se estiver vazio
+                      const chaveFantasia = cabecalhosFinais.find(h => h.toLowerCase().includes('fantasia')) || 'Nome Fantasia';
+                      if (!lead[chaveFantasia] || lead[chaveFantasia].trim() === '') {
+                          lead[chaveFantasia] = data.nome_fantasia || data.razao_social || '';
+                      }
+                  }
+              } catch (e) {
+                  // Se a API falhar (ex: excesso de requisições), ignora silenciosamente e usa o que tem do Excel
+              }
+
               lead.cnpj_limpo = cnpjLead;
               if (cnpjsERP.has(cnpjLead)) {
                   jaClientes.push(lead);
@@ -92,12 +131,16 @@ export default function ProspeccaoPage() {
                   novasOportunidades.push(lead);
               }
           }
+          
+          // Atualiza a barra de progresso (útil se o Mailing for grande)
+          setProgresso(Math.round((i / (linhas.length - 1)) * 100));
       }
 
       setResultados({
           virgens: novasOportunidades,
           clientes: jaClientes,
-          totalLinhas: linhas.length - 1
+          totalLinhas: linhas.length - 1,
+          cabecalhos: cabecalhosFinais
       });
       
       setAnalisado(true);
@@ -105,60 +148,110 @@ export default function ProspeccaoPage() {
   };
 
   const exportarPDFOportunidades = () => {
-      if (resultados.virgens.length === 0) return alert("Não há oportunidades virgens para exportar.");
+      if (resultados.virgens.length === 0 && resultados.clientes.length === 0) {
+          return alert("Não há dados para exportar.");
+      }
 
       const doc = new jsPDF('l', 'mm', 'a4');
       doc.setFont("helvetica", "bold");
       doc.setFontSize(18);
       doc.setTextColor(20, 83, 45); 
-      doc.text("RELATÓRIO DE MAILING: OPORTUNIDADES VIRGENS", 14, 20);
+      doc.text("RELATÓRIO DE MAILING: DIAGNÓSTICO DE BASE", 14, 20);
       
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(100);
-      doc.text(`Total de Prospects: ${resultados.virgens.length} | Gerado em: ${new Date().toLocaleString('pt-BR')}`, 14, 26);
+      doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')} | Total Analisado: ${resultados.totalLinhas}`, 14, 26);
 
-      // AGORA PEGA ATÉ 9 COLUNAS (Vai incluir CNPJ, Razão, Endereço, Bairro, Cidade, UF, Tel, etc)
-      const chavesDisponiveis = Object.keys(resultados.virgens[0]).filter(k => k !== 'cnpj_limpo').slice(0, 9); 
-
+      const chavesDisponiveis = resultados.cabecalhos.slice(0, 9); 
       const tableHead = chavesDisponiveis.map(k => k.toUpperCase());
-      const tableBody = resultados.virgens.map(lead => chavesDisponiveis.map(k => lead[k] || '-'));
+      
+      let startY = 35;
 
-      autoTable(doc, {
-          startY: 35,
-          head: [tableHead],
-          body: tableBody,
-          theme: 'grid',
-          headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
-          styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' }, // Letra tamanho 7 para caber as 9 colunas
-      });
+      // TABELA 1: OPORTUNIDADES VIRGENS
+      if (resultados.virgens.length > 0) {
+          doc.setFontSize(12);
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(37, 99, 235); // Azul
+          doc.text(`OPORTUNIDADES (LEADS VIRGENS) - ${resultados.virgens.length} encontrados`, 14, startY);
+          
+          const tableBodyVirgens = resultados.virgens.map(lead => chavesDisponiveis.map(k => lead[k] || '-'));
+          
+          autoTable(doc, {
+              startY: startY + 5,
+              head: [tableHead],
+              body: tableBodyVirgens,
+              theme: 'grid',
+              headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+              styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' }, 
+          });
+          
+          startY = (doc as any).lastAutoTable.finalY + 15;
+      }
 
-      doc.save(`Mailing_Oportunidades_${new Date().toISOString().split('T')[0]}.pdf`);
+      // TABELA 2: JÁ CLIENTES (BASE ERP)
+      if (resultados.clientes.length > 0) {
+          if (startY > 170) { 
+              doc.addPage(); 
+              startY = 20; 
+          }
+          
+          doc.setFontSize(12);
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(22, 163, 74); // Verde
+          doc.text(`JÁ SÃO CLIENTES (BASE ERP) - ${resultados.clientes.length} encontrados`, 14, startY);
+          
+          const tableBodyClientes = resultados.clientes.map(cliente => chavesDisponiveis.map(k => cliente[k] || '-'));
+
+          autoTable(doc, {
+              startY: startY + 5,
+              head: [tableHead],
+              body: tableBodyClientes,
+              theme: 'grid',
+              headStyles: { fillColor: [22, 163, 74], textColor: 255, fontStyle: 'bold' },
+              styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' }, 
+          });
+      }
+
+      doc.save(`Mailing_Completo_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
   const exportarExcelOportunidades = () => {
-      if (resultados.virgens.length === 0) return alert("Não há oportunidades virgens para exportar.");
+      if (resultados.virgens.length === 0 && resultados.clientes.length === 0) {
+          return alert("Não há dados para exportar.");
+      }
 
-      // No Excel exporta 100% das colunas que foram coladas
-      const chavesDisponiveis = Object.keys(resultados.virgens[0]).filter(k => k !== 'cnpj_limpo');
+      const chavesDisponiveis = resultados.cabecalhos;
       
       let csvContent = "\uFEFF"; 
-      csvContent += chavesDisponiveis.map(k => `"${k.toUpperCase()}"`).join(';') + "\n";
+      // Adiciona uma coluna STATUS no início
+      csvContent += `"STATUS DE MAILING";` + chavesDisponiveis.map(k => `"${k.toUpperCase()}"`).join(';') + "\n";
 
+      // Adiciona Oportunidades
       resultados.virgens.forEach(lead => {
           const linha = chavesDisponiveis.map(k => {
               let valor = lead[k] || '';
               valor = String(valor).replace(/"/g, '""').replace(/\n/g, ' ');
               return `"${valor}"`; 
           });
-          csvContent += linha.join(';') + "\n";
+          csvContent += `"OPORTUNIDADE (LEAD)";` + linha.join(';') + "\n";
+      });
+
+      // Adiciona Clientes
+      resultados.clientes.forEach(cliente => {
+          const linha = chavesDisponiveis.map(k => {
+              let valor = cliente[k] || '';
+              valor = String(valor).replace(/"/g, '""').replace(/\n/g, ' ');
+              return `"${valor}"`; 
+          });
+          csvContent += `"JÁ É CLIENTE (ERP)";` + linha.join(';') + "\n";
       });
 
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.setAttribute("href", url);
-      link.setAttribute("download", `Mailing_Oportunidades_${new Date().toISOString().split('T')[0]}.csv`);
+      link.setAttribute("download", `Mailing_Classificado_${new Date().toISOString().split('T')[0]}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -167,7 +260,8 @@ export default function ProspeccaoPage() {
   const reiniciar = () => {
       setTextoColado("");
       setAnalisado(false);
-      setResultados({ virgens: [], clientes: [], totalLinhas: 0 });
+      setProgresso(0);
+      setResultados({ virgens: [], clientes: [], totalLinhas: 0, cabecalhos: [] });
   };
 
   return (
@@ -207,10 +301,19 @@ export default function ProspeccaoPage() {
                 <button 
                     onClick={cruzarDados}
                     disabled={loading || !textoColado || clientesERP.length === 0}
-                    className="w-full bg-[#0f392b] hover:bg-[#16503c] text-white py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-3 shadow-lg transition transform active:scale-[0.98] disabled:opacity-50 uppercase tracking-wide"
+                    className="w-full bg-[#0f392b] hover:bg-[#16503c] text-white py-4 rounded-2xl font-black text-lg flex items-center justify-center gap-3 shadow-lg transition transform active:scale-[0.98] disabled:opacity-50 uppercase tracking-wide relative overflow-hidden"
                 >
-                    {loading ? <Activity className="animate-spin" size={24}/> : <Search size={24}/>}
-                    {loading ? 'Analisando e Cruzando Dados...' : 'Cruzar com a Base ERP'}
+                    {/* Barra de Progresso visual no fundo do botão */}
+                    {loading && (
+                        <div 
+                            className="absolute left-0 top-0 bottom-0 bg-green-500/30 transition-all duration-300"
+                            style={{ width: `${progresso}%` }}
+                        ></div>
+                    )}
+                    <span className="relative flex items-center gap-3 z-10">
+                        {loading ? <Activity className="animate-spin" size={24}/> : <Search size={24}/>}
+                        {loading ? `Analisando Dados: ${progresso}%...` : 'Cruzar com a Base ERP'}
+                    </span>
                 </button>
 
                 {clientesERP.length === 0 && !loading && (
@@ -245,12 +348,12 @@ export default function ProspeccaoPage() {
                             <Target size={28}/>
                         </div>
                         <div>
-                            <p className="text-[10px] font-black text-blue-200 uppercase tracking-widest">Mailing Virgem (Prospects)</p>
+                            <p className="text-[10px] font-black text-blue-200 uppercase tracking-widest">Oportunidades Virgens</p>
                             <p className="text-3xl font-black text-white">{resultados.virgens.length}</p>
                         </div>
                     </div>
 
-                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4 opacity-75">
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4 opacity-80">
                         <div className="w-14 h-14 bg-green-50 text-green-600 rounded-xl flex items-center justify-center shrink-0">
                             <CheckCircle2 size={28}/>
                         </div>
@@ -265,18 +368,18 @@ export default function ProspeccaoPage() {
                     <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                         <div>
                             <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
-                                <Building2 className="text-blue-600"/> Oportunidades Identificadas
+                                <Building2 className="text-blue-600"/> Tabela de Oportunidades (Visualização)
                             </h3>
-                            <p className="text-xs text-slate-500 mt-1">Essas empresas não constam no histórico de vendas do sistema.</p>
+                            <p className="text-xs text-slate-500 mt-1">Ao exportar, o sistema separará Leads Virgens de Clientes ERP automaticamente.</p>
                         </div>
                         
-                        {resultados.virgens.length > 0 && (
+                        {(resultados.virgens.length > 0 || resultados.clientes.length > 0) && (
                             <div className="flex gap-2">
                                 <button onClick={exportarPDFOportunidades} className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition flex items-center gap-2 shadow-sm shrink-0">
-                                    <Download size={16}/> PDF
+                                    <Download size={16}/> Baixar PDF
                                 </button>
                                 <button onClick={exportarExcelOportunidades} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition flex items-center gap-2 shadow-sm shrink-0">
-                                    <FileSpreadsheet size={16}/> Excel / CSV
+                                    <FileSpreadsheet size={16}/> Baixar Excel / CSV
                                 </button>
                             </div>
                         )}
@@ -286,14 +389,9 @@ export default function ProspeccaoPage() {
                         <table className="w-full text-left text-sm border-collapse">
                             <thead className="bg-slate-50">
                                 <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-200">
-                                    {/* AGORA MOSTRA ATÉ 9 COLUNAS NA TELA */}
-                                    {resultados.virgens.length > 0 && Object.keys(resultados.virgens[0])
-                                        .filter(k => k !== 'cnpj_limpo')
-                                        .slice(0, 9) 
-                                        .map((k, idx) => (
-                                            <th key={idx} className="p-4">{k}</th>
-                                        ))
-                                    }
+                                    {resultados.cabecalhos.slice(0, 9).map((k, idx) => (
+                                        <th key={idx} className="p-4">{k}</th>
+                                    ))}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -308,15 +406,11 @@ export default function ProspeccaoPage() {
                                 ) : (
                                     resultados.virgens.slice(0, 100).map((lead, idx) => (
                                         <tr key={idx} className="hover:bg-blue-50/50 transition">
-                                            {Object.keys(lead)
-                                                .filter(k => k !== 'cnpj_limpo')
-                                                .slice(0, 9)
-                                                .map((k, colIdx) => (
-                                                    <td key={colIdx} className="p-4 font-medium text-slate-700 truncate max-w-[150px]" title={lead[k]}>
-                                                        {lead[k] || '-'}
-                                                    </td>
-                                                ))
-                                            }
+                                            {resultados.cabecalhos.slice(0, 9).map((k, colIdx) => (
+                                                <td key={colIdx} className="p-4 font-medium text-slate-700 truncate max-w-[150px]" title={lead[k]}>
+                                                    {lead[k] || '-'}
+                                                </td>
+                                            ))}
                                         </tr>
                                     ))
                                 )}
@@ -324,7 +418,7 @@ export default function ProspeccaoPage() {
                         </table>
                         {resultados.virgens.length > 100 && (
                             <div className="p-4 text-center text-xs font-bold text-slate-500 bg-slate-50 border-t border-slate-100">
-                                Mostrando os primeiros 100 registros. Clique em "Excel / CSV" para baixar a lista completa.
+                                Mostrando os primeiros 100 registros virgens. Clique em "Baixar Excel / CSV" para obter a lista separada e completa.
                             </div>
                         )}
                     </div>
