@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* FORÇAR NOVA FONTE GLOBAL: HALYARD DISPLAY */
 @layer base {
   body, html {
@@ -6,7 +10,7 @@
   }
 
   /* Textos e apoio (Halyard Display Book = font-weight 400) */
-  p, span, div, input, textarea, select {
+  p, span, div, input, textarea, select, a, button {
     font-weight: 400;
   }
 
