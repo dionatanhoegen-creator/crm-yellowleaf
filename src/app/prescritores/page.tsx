@@ -28,7 +28,6 @@ export default function PrescritoresPage() {
   const [busca, setBusca] = useState("");
   const [mounted, setMounted] = useState(false);
   
-  // NOVO: Controle de visualização (Grade ou Lista)
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
   const [modalAberto, setModalAberto] = useState(false);
@@ -152,15 +151,25 @@ export default function PrescritoresPage() {
     }
   };
 
+  // CORREÇÃO DO BUG DA EXCLUSÃO
   const handleExcluirPrescritor = async () => {
-      if (!confirm(`Tem certeza que deseja EXCLUIR o prescritor ${form.nome}? Todo o histórico será perdido.`)) return;
+      if (!confirm(`Tem certeza que deseja EXCLUIR o prescritor ${form.nome}? Todo o histórico de visitas também será apagado permanentemente.`)) return;
       setExcluindo(true);
       try {
-          await supabase.from('prescritores').delete().eq('id', form.id);
+          // 1. Apaga primeiro as interações do diário de visitas para evitar erro de Foreign Key
+          await supabase.from('interacoes').delete().eq('prescritor_id', form.id);
+          
+          // 2. Só depois apaga o prescritor
+          const { error } = await supabase.from('prescritores').delete().eq('id', form.id);
+          if (error) throw error; // Se a API retornar erro, joga para o catch alertar você
+
           setModalAberto(false);
           carregarPrescritores();
-      } catch (error: any) {} 
-      finally { setExcluindo(false); }
+      } catch (error: any) {
+          alert(`Erro ao excluir: ${error.message}`);
+      } finally { 
+          setExcluindo(false); 
+      }
   };
 
   const abrirInteracoes = async (medico: any) => {
@@ -288,7 +297,6 @@ export default function PrescritoresPage() {
               <Search size={22} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
             </div>
 
-            {/* NOVO: Toggle de Visão */}
             <div className="flex bg-slate-200/70 p-1 rounded-xl shrink-0 self-center md:self-stretch">
                 <button 
                   onClick={() => setViewMode('grid')} 
@@ -329,9 +337,7 @@ export default function PrescritoresPage() {
                 </div>
             )}
 
-            {/* RENDERIZAÇÃO CONDICIONAL */}
             {viewMode === 'grid' ? (
-              // VISÃO EM GRADE (CARDS)
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
                 {filtrados.map((p) => {
                   const alertaAtraso = isAtrasado(p.proximo_contato);
@@ -399,7 +405,6 @@ export default function PrescritoresPage() {
                 )})}
               </div>
             ) : (
-              // VISÃO EM LISTA (COMPACTA)
               <div className="flex flex-col gap-2">
                 {filtrados.map((p) => {
                   const alertaAtraso = isAtrasado(p.proximo_contato);
@@ -539,10 +544,10 @@ export default function PrescritoresPage() {
                             </div>
 
                             <div className="relative">
-                                <label className="text-xs md:text-sm font-bold text-slate-700 mb-1.5 block">Ativos Apresentados</label>
+                                <label className="text-xs md:text-sm font-bold text-slate-700 mb-1.5 block">Ativos Apresentados (Selecione da lista)</label>
                                 <div className="min-h-[48px] w-full bg-white border border-slate-300 hover:border-blue-400 focus-within:border-blue-500 rounded-xl p-1.5 md:p-2 flex flex-wrap gap-1.5 items-center cursor-text transition shadow-sm" onClick={() => setDropdownProdutosAberto(true)}>
                                     {novaInteracao.produtos_vinculados.length === 0 && !termoProdutoDropdown && (
-                                        <span className="text-slate-400 text-xs font-medium px-2 absolute pointer-events-none">Ex: Lipoartich...</span>
+                                        <span className="text-slate-400 text-xs font-medium px-2 absolute pointer-events-none">Ex: Lipoartich, Purim...</span>
                                     )}
                                     {novaInteracao.produtos_vinculados.map(ativo => (
                                         <span key={ativo} className="bg-[#82D14D]/20 text-[#0f392b] border border-[#82D14D]/50 px-2 py-1 rounded-lg text-[10px] md:text-xs font-bold flex items-center gap-1 z-10">
@@ -557,7 +562,7 @@ export default function PrescritoresPage() {
                                         <div className="fixed inset-0 z-30" onClick={() => setDropdownProdutosAberto(false)}></div>
                                         <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-48 overflow-y-auto z-40 p-1 custom-scrollbar">
                                             {produtosApi.filter(p => p.toLowerCase().includes(termoProdutoDropdown.toLowerCase())).map(produto => (
-                                                <button type="button" key={produto} onClick={() => toggleAtivo(produto)} className="w-full text-left px-3 md:px-4 py-2 rounded-lg hover:bg-slate-50 transition flex items-center justify-between text-xs md:text-sm font-bold text-slate-700 border-b border-slate-50 last:border-0">
+                                                <button type="button" key={produto} onClick={() => toggleAtivo(produto)} className="w-full text-left px-3 md:px-4 py-2 md:py-2 rounded-lg hover:bg-slate-50 transition flex items-center justify-between text-xs md:text-sm font-bold text-slate-700 border-b border-slate-50 last:border-0">
                                                     {produto} {novaInteracao.produtos_vinculados.includes(produto) && <Check size={14} className="text-[#82D14D]"/>}
                                                 </button>
                                             ))}
@@ -568,12 +573,12 @@ export default function PrescritoresPage() {
 
                             <div className="relative">
                                 <label className="text-xs md:text-sm font-bold text-slate-700 mb-1.5 flex items-center justify-between">
-                                    <span>Farmácia Parceira</span>
+                                    <span>Vincular Farmácia Parceira</span>
                                     <span className="text-[9px] md:text-[10px] text-slate-400 font-normal uppercase">Opcional</span>
                                 </label>
                                 <div className="flex items-center bg-white border border-slate-300 rounded-xl shadow-sm focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500 transition px-2.5 md:px-3">
                                     <Building2 size={16} className="text-slate-400 shrink-0"/>
-                                    <input type="text" value={novaInteracao.farmacia_vinculada} onChange={(e) => buscarFarmaciaInteligente(e.target.value)} onFocus={() => setDropdownFarmaciaAberto(true)} className="w-full p-3 md:p-3.5 bg-transparent outline-none text-sm md:text-base font-medium text-slate-900 placeholder-slate-400" placeholder="Nome ou CNPJ..."/>
+                                    <input type="text" value={novaInteracao.farmacia_vinculada} onChange={(e) => buscarFarmaciaInteligente(e.target.value)} onFocus={() => setDropdownFarmaciaAberto(true)} className="w-full p-3 md:p-3.5 bg-transparent outline-none text-sm md:text-base font-medium text-slate-900 placeholder-slate-400" placeholder="Digite nome ou CNPJ..."/>
                                     {novaInteracao.farmacia_vinculada && <button type="button" onClick={() => {setNovaInteracao({...novaInteracao, farmacia_vinculada: ''}); setFarmaciasBuscadas([])}} className="shrink-0"><X size={16} className="text-slate-400 hover:text-red-500"/></button>}
                                 </div>
                                 {dropdownFarmaciaAberto && farmaciasBuscadas.length > 0 && (
@@ -581,7 +586,7 @@ export default function PrescritoresPage() {
                                         <div className="fixed inset-0 z-30" onClick={() => setDropdownFarmaciaAberto(false)}></div>
                                         <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden z-40 max-h-48 overflow-y-auto">
                                             {farmaciasBuscadas.map((f, i) => (
-                                                <button type="button" key={i} onClick={() => {setNovaInteracao({...novaInteracao, farmacia_vinculada: f.nome}); setDropdownFarmaciaAberto(false);}} className="w-full text-left px-3 md:px-4 py-2.5 hover:bg-slate-50 transition border-b border-slate-50 last:border-0 flex flex-col">
+                                                <button type="button" key={i} onClick={() => {setNovaInteracao({...novaInteracao, farmacia_vinculada: f.nome}); setDropdownFarmaciaAberto(false);}} className="w-full text-left px-3 md:px-4 py-2.5 md:py-3 hover:bg-slate-50 transition border-b border-slate-50 last:border-0 flex flex-col">
                                                     <span className="text-xs md:text-sm font-bold text-slate-700 truncate w-full">{f.nome}</span>
                                                     {f.documento && <span className="text-[9px] md:text-[10px] text-slate-400 font-mono">{f.documento}</span>}
                                                 </button>
@@ -593,16 +598,16 @@ export default function PrescritoresPage() {
 
                             <div>
                                 <label className="text-xs md:text-sm font-bold text-slate-700 mb-1.5 block">Resumo da Conversa *</label>
-                                <textarea required rows={3} value={novaInteracao.resumo} onChange={e => setNovaInteracao({...novaInteracao, resumo: e.target.value})} className="w-full p-3 md:p-4 border border-slate-300 rounded-xl text-sm md:text-base font-medium text-slate-900 bg-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none transition shadow-sm" placeholder="Qual foi a aceitação?"></textarea>
+                                <textarea required rows={3} value={novaInteracao.resumo} onChange={e => setNovaInteracao({...novaInteracao, resumo: e.target.value})} className="w-full p-3 md:p-4 border border-slate-300 rounded-xl text-sm md:text-base font-medium text-slate-900 bg-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none transition shadow-sm" placeholder="Qual foi a aceitação? Focou em qual protocolo?"></textarea>
                             </div>
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4 bg-blue-50/50 p-3 md:p-4 rounded-xl border border-blue-100">
                                 <div>
                                     <label className="text-[10px] md:text-xs font-black text-blue-800 uppercase tracking-widest mb-1.5 block">Próximo Passo</label>
-                                    <input type="text" value={novaInteracao.proximo_passo} onChange={e => setNovaInteracao({...novaInteracao, proximo_passo: e.target.value})} className="w-full p-2.5 md:p-3 border border-blue-200 rounded-xl text-xs md:text-sm font-bold text-slate-900 bg-white placeholder-slate-400 focus:border-blue-500 outline-none transition shadow-sm"/>
+                                    <input type="text" value={novaInteracao.proximo_passo} onChange={e => setNovaInteracao({...novaInteracao, proximo_passo: e.target.value})} className="w-full p-2.5 md:p-3 border border-blue-200 rounded-xl text-xs md:text-sm font-bold text-slate-900 bg-white placeholder-slate-400 focus:border-blue-500 outline-none transition shadow-sm" placeholder="Ex: Enviar literatura"/>
                                 </div>
                                 <div>
-                                    <label className="text-[10px] md:text-xs font-black text-red-600 uppercase tracking-widest mb-1.5 flex items-center gap-1"><Clock size={12}/> Alerta Limite</label>
+                                    <label className="text-[10px] md:text-xs font-black text-red-600 uppercase tracking-widest mb-1.5 flex items-center gap-1"><Clock size={12}/> Data Limite (Alerta)</label>
                                     <input type="date" value={novaInteracao.data_proximo_contato} onChange={e => setNovaInteracao({...novaInteracao, data_proximo_contato: e.target.value})} className="w-full p-2.5 md:p-3 border border-red-200 rounded-xl text-xs md:text-sm font-bold text-red-900 bg-white focus:border-red-500 outline-none transition shadow-sm cursor-pointer"/>
                                 </div>
                             </div>
