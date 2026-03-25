@@ -7,7 +7,7 @@ import {
   Search, Plus, MapPin, Phone, Star, Edit, X, Stethoscope, Save, Building2, 
   CalendarCheck, FileText, ChevronRight, User, AlignLeft, Activity, Trash2, 
   Clock, Beaker, Check, AlertCircle, ChevronDown, MessageCircle, Loader2,
-  LayoutGrid, List
+  LayoutGrid, List, AlertTriangle
 } from 'lucide-react';
 
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
@@ -32,6 +32,8 @@ export default function PrescritoresPage() {
   
   const [modalAberto, setModalAberto] = useState(false);
   const [modalInteracoes, setModalInteracoes] = useState(false);
+  const [modalConfirmarExclusao, setModalConfirmarExclusao] = useState(false); // NOVO: Modal de exclusão
+  
   const [salvando, setSalvando] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
   
@@ -151,22 +153,28 @@ export default function PrescritoresPage() {
     }
   };
 
-  // CORREÇÃO DO BUG DA EXCLUSÃO
-  const handleExcluirPrescritor = async () => {
-      if (!confirm(`Tem certeza que deseja EXCLUIR o prescritor ${form.nome}? Todo o histórico de visitas também será apagado permanentemente.`)) return;
+  // Abre o modal de confirmação no lugar daquele alerta feio do navegador
+  const abrirConfirmacaoExclusao = () => {
+      setModalConfirmarExclusao(true);
+  };
+
+  // Função que realmente vai no banco e apaga tudo
+  const confirmarExclusao = async () => {
       setExcluindo(true);
       try {
           // 1. Apaga primeiro as interações do diário de visitas para evitar erro de Foreign Key
-          await supabase.from('interacoes').delete().eq('prescritor_id', form.id);
+          const { error: errInteracoes } = await supabase.from('interacoes').delete().eq('prescritor_id', form.id);
+          if (errInteracoes) throw errInteracoes;
           
           // 2. Só depois apaga o prescritor
           const { error } = await supabase.from('prescritores').delete().eq('id', form.id);
-          if (error) throw error; // Se a API retornar erro, joga para o catch alertar você
+          if (error) throw error; 
 
+          setModalConfirmarExclusao(false);
           setModalAberto(false);
           carregarPrescritores();
       } catch (error: any) {
-          alert(`Erro ao excluir: ${error.message}`);
+          alert(`Erro ao excluir no banco de dados: ${error.message}`);
       } finally { 
           setExcluindo(false); 
       }
@@ -728,7 +736,7 @@ export default function PrescritoresPage() {
                     {/* RODAPÉ FIXO NA BASE DO MODAL */}
                     <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4 border-t border-slate-200 shrink-0 mt-auto pb-4 sm:pb-0 bg-slate-50">
                         {form.id && (
-                            <button type="button" onClick={handleExcluirPrescritor} disabled={excluindo} className="w-full sm:w-auto px-5 py-3 text-red-600 font-bold bg-white sm:bg-red-50 border border-red-200 sm:border-transparent hover:bg-red-100 rounded-xl transition text-sm flex items-center justify-center gap-2 disabled:opacity-50">
+                            <button type="button" onClick={abrirConfirmacaoExclusao} disabled={excluindo} className="w-full sm:w-auto px-5 py-3 text-red-600 font-bold bg-white sm:bg-red-50 border border-red-200 sm:border-transparent hover:bg-red-100 rounded-xl transition text-sm flex items-center justify-center gap-2 disabled:opacity-50">
                                 {excluindo ? <Activity className="animate-spin" size={16}/> : <Trash2 size={16}/>} <span className="sm:hidden lg:inline">Excluir</span>
                             </button>
                         )}
@@ -742,6 +750,32 @@ export default function PrescritoresPage() {
                 </form>
              </div>
            </div>, document.body
+        )}
+
+        {/* --- NOVO MODAL DE CONFIRMAÇÃO DE EXCLUSÃO (PERSONALIZADO) --- */}
+        {modalConfirmarExclusao && mounted && createPortal(
+          <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
+             <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-red-100">
+                <div className="p-8 text-center">
+                   <div className="mx-auto w-16 h-16 bg-red-50 text-red-600 rounded-full flex items-center justify-center mb-6">
+                      <AlertTriangle size={32} />
+                   </div>
+                   <h2 className="text-xl font-black text-slate-800 mb-3">AVISO IMPORTANTE</h2>
+                   <p className="text-slate-600 font-medium leading-relaxed whitespace-pre-wrap">
+                      Tem certeza que deseja EXCLUIR o prescritor <strong className="text-slate-800">{form.nome}</strong>? Todo o histórico de visitas também será apagado permanentemente.
+                   </p>
+                </div>
+                <div className="p-4 md:p-6 bg-slate-50 border-t border-slate-100 flex flex-col md:flex-row gap-3">
+                   <button onClick={() => setModalConfirmarExclusao(false)} disabled={excluindo} className="w-full bg-white border border-slate-200 text-slate-600 font-bold py-3.5 md:py-3 rounded-xl hover:bg-slate-100 transition disabled:opacity-50">
+                       Cancelar
+                   </button>
+                   <button onClick={confirmarExclusao} disabled={excluindo} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3.5 md:py-3 rounded-xl shadow-lg transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50">
+                      {excluindo ? <Activity className="animate-spin" size={18}/> : <Trash2 size={18}/>}
+                      {excluindo ? 'Excluindo...' : 'Sim, Excluir'}
+                   </button>
+                </div>
+             </div>
+          </div>, document.body
         )}
       </div>
     </div>
