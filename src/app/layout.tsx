@@ -14,20 +14,30 @@ import {
 
 const outfit = Outfit({ subsets: ["latin"] });
 
+// ORGANIZAÇÃO DO MENU POR SETORES (SEM INVENTAR TELAS)
 const MENU_BASE = [
-  { name: 'Dashboard', path: '/', icon: LayoutDashboard, key: 'faturamento' },
-  { name: 'Análise de Vendas', path: '/analise-vendas', icon: TrendingUp, key: 'faturamento' },
-  { name: 'Prospecção', path: '/prospeccao', icon: Target, key: 'pipeline' },
-  { name: 'Inteligência', path: '/inteligencia', icon: Lightbulb, key: 'inteligencia' },
-  { name: 'Clientes', path: '/clientes', icon: Users, key: 'clientes' },
-  { name: 'Prescritores', path: '/prescritores', icon: Stethoscope, key: 'prescritores' },
-  { name: 'Visitas P&D', path: '/visitas', icon: CalendarCheck, key: 'prescritores' }, 
-  { name: 'Pipeline', path: '/pipeline', icon: Trello, key: 'pipeline' },
-  { name: 'Produtos', path: '/produtos', icon: Package, key: 'produtos' },
-  { name: 'Exclusividades', path: '/exclusividades', icon: Lock, key: 'exclusividades' },
-  { name: 'Faturamento', path: '/faturamento', icon: BarChart3, key: 'faturamento' },
-  { name: 'Relatórios', path: '/relatorios', icon: FileText, key: 'relatorios' }, 
-  { name: 'Equipe', path: '/equipe', icon: Shield, key: 'admin' },
+  // VISÃO GERAL
+  { name: 'Dashboard', path: '/', icon: LayoutDashboard, key: 'faturamento', section: 'Visão Geral' },
+  { name: 'Análise de Vendas', path: '/analise-vendas', icon: TrendingUp, key: 'faturamento', section: 'Visão Geral' },
+  { name: 'Faturamento', path: '/faturamento', icon: BarChart3, key: 'faturamento', section: 'Visão Geral' },
+  { name: 'Relatórios', path: '/relatorios', icon: FileText, key: 'relatorios', section: 'Visão Geral' },
+  
+  // COMERCIAL
+  { name: 'Prospecção', path: '/prospeccao', icon: Target, key: 'pipeline', section: 'Vendas & Comercial' },
+  { name: 'Pipeline', path: '/pipeline', icon: Trello, key: 'pipeline', section: 'Vendas & Comercial' },
+  { name: 'Clientes', path: '/clientes', icon: Users, key: 'clientes', section: 'Vendas & Comercial' },
+  
+  // P&D / MÉDICO
+  { name: 'Prescritores', path: '/prescritores', icon: Stethoscope, key: 'prescritores', section: 'Pesquisa & Desenvolvimento' },
+  { name: 'Visitas P&D', path: '/visitas', icon: CalendarCheck, key: 'prescritores', section: 'Pesquisa & Desenvolvimento' },
+  { name: 'Inteligência', path: '/inteligencia', icon: Lightbulb, key: 'inteligencia', section: 'Pesquisa & Desenvolvimento' },
+  
+  // APOIO
+  { name: 'Produtos', path: '/produtos', icon: Package, key: 'produtos', section: 'Apoio Técnico' },
+  { name: 'Exclusividades', path: '/exclusividades', icon: Lock, key: 'exclusividades', section: 'Apoio Técnico' },
+  
+  // ADMIN
+  { name: 'Equipe', path: '/equipe', icon: Shield, key: 'admin', section: 'Administração' },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -40,18 +50,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const [userEmail, setUserEmail] = useState("Carregando..."); 
   const [menuPermitido, setMenuPermitido] = useState<any[]>([]);
 
-  // --- ESTADOS DO SISTEMA DE NOTIFICAÇÕES ---
   const [notificacoes, setNotificacoes] = useState<any[]>([]);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
 
   const isLoginPage = pathname === '/login';
 
-  // --- O BARULHINHO (SOM DE NOTIFICAÇÃO) ---
   const tocarSom = () => {
-      try {
-          const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-          audio.play();
-      } catch (e) { console.error("Sem permissão para tocar som.", e); }
+      const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+      audio.play().catch(e => console.error("O navegador bloqueou o áudio automático.", e));
   };
 
   useEffect(() => {
@@ -74,9 +80,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             setMenuPermitido([]);
         }
 
-        // Busca notificações imediatas
         buscarNotificacoes(user.id);
-        // Deixa o "Radar" ligado a cada 15 segundos
         intervalId = setInterval(() => buscarNotificacoes(user.id), 15000);
 
       } else {
@@ -92,7 +96,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     };
   }, [supabase, isLoginPage]);
 
-  // Função que busca as notificações no banco
   const buscarNotificacoes = async (userId: string) => {
       const { data } = await supabase
           .from('notificacoes')
@@ -105,24 +108,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           setNotificacoes(prev => {
               const novasNaoLidas = data.filter(d => !d.lida).length;
               const antigasNaoLidas = prev.filter(p => !p.lida).length;
-              
-              // Se o número de não lidas aumentou, toca o sino!
-              if (novasNaoLidas > antigasNaoLidas) {
-                  tocarSom();
-              }
+              if (novasNaoLidas > antigasNaoLidas) tocarSom();
               return data;
           });
       }
   };
 
-  // Marcar como lida
   const marcarComoLida = async (id: string, link?: string) => {
-      // Atualiza na tela na hora
       setNotificacoes(prev => prev.map(n => n.id === id ? { ...n, lida: true } : n));
-      // Grava no banco
       await supabase.from('notificacoes').update({ lida: true }).eq('id', id);
       
-      // Se houver link, navega
       if (link) {
           setIsNotifOpen(false);
           router.push(link);
@@ -148,11 +143,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
   const notificacoesNaoLidas = notificacoes.filter(n => !n.lida).length;
 
+  // AGRUPA O MENU PERMITIDO POR SEÇÃO PARA RENDERIZAR NA GAVETA
+  const groupedMenu = menuPermitido.reduce((acc, item) => {
+      if (!acc[item.section]) acc[item.section] = [];
+      acc[item.section].push(item);
+      return acc;
+  }, {} as Record<string, typeof MENU_BASE>);
+
   return (
     <html lang="pt-br">
       <body className={`${outfit.className} bg-slate-50 text-slate-700 overflow-x-hidden`}>
         
-        {/* --- CABEÇALHO FIXO GLOBAL --- */}
         <header className="fixed top-0 left-0 right-0 h-16 bg-white border-b border-slate-200 z-[40] flex items-center px-4 justify-between shadow-sm">
           
           <div className="flex items-center gap-6">
@@ -170,8 +171,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
             </div>
 
-            {/* --- BARRA DE NAVEGAÇÃO RÁPIDA (DINÂMICA) --- */}
             <div className="hidden lg:flex items-center gap-2 pl-6 border-l border-slate-200 h-8 overflow-hidden max-w-2xl">
+               {/* Exibe os primeiros 5 atalhos no topo, ignorando a categoria */}
                {menuPermitido.slice(0, 5).map((item) => {
                  const active = pathname === item.path;
                  return (
@@ -193,7 +194,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
           <div className="flex items-center gap-2 sm:gap-3">
              
-             {/* --- O SININHO DE NOTIFICAÇÕES --- */}
              <div className="relative">
                  <button 
                      onClick={() => { setIsNotifOpen(!isNotifOpen); setIsProfileOpen(false); }}
@@ -209,10 +209,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
                  {isNotifOpen && (
                      <>
-                         {/* Fundo escuro apenas no mobile */}
                          <div className="fixed inset-0 z-[50] bg-black/50 sm:bg-transparent transition-all" onClick={() => setIsNotifOpen(false)}></div>
                          
-                         {/* Dropdown / Bottom Sheet */}
                          <div className="fixed sm:absolute inset-x-0 bottom-0 sm:inset-auto sm:right-0 sm:top-14 w-full sm:w-80 bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl sm:shadow-2xl border-t sm:border border-slate-200 z-[60] overflow-hidden animate-in slide-in-from-bottom-10 sm:slide-in-from-top-4 flex flex-col max-h-[85vh] sm:max-h-[400px]">
                              
                              <div className="p-5 sm:p-4 bg-slate-800 flex justify-between items-center text-white shrink-0">
@@ -252,7 +250,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
              <div className="w-px h-6 bg-slate-200 hidden sm:block"></div>
 
-             {/* --- PERFIL COM DROPDOWN --- */}
              <div className="relative shrink-0">
                 <button 
                    onClick={() => { setIsProfileOpen(!isProfileOpen); setIsNotifOpen(false); }}
@@ -270,10 +267,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
                 {isProfileOpen && (
                   <>
-                    {/* Fundo escuro apenas no mobile */}
                     <div className="fixed inset-0 z-[50] bg-black/50 sm:bg-transparent transition-all" onClick={() => setIsProfileOpen(false)}></div> 
                     
-                    {/* Dropdown / Bottom Sheet */}
                     <div className="fixed sm:absolute inset-x-0 bottom-0 sm:inset-auto sm:right-0 sm:top-14 w-full sm:w-56 bg-white rounded-t-3xl sm:rounded-xl shadow-2xl sm:shadow-xl sm:border border-slate-100 p-5 sm:p-2 z-[60] animate-in slide-in-from-bottom-10 sm:slide-in-from-top-2 pb-10 sm:pb-2">
                        
                        <div className="px-3 py-3 sm:py-2 border-b border-slate-100 mb-3 sm:mb-1 flex justify-between items-center sm:block">
@@ -303,7 +298,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </header>
 
-        {/* --- MENU LATERAL (DRAWER DINÂMICO) --- */}
         <div 
           className={`fixed inset-0 bg-black/60 z-[50] backdrop-blur-sm transition-opacity duration-300 ${
             isOpen ? 'opacity-100 visible' : 'opacity-0 invisible pointer-events-none'
@@ -316,31 +310,40 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             isOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
         >
-          <div className="p-6 flex justify-between items-center border-b border-white/10 h-16">
+          <div className="p-6 flex justify-between items-center border-b border-white/10 h-16 shrink-0">
             <span className="font-bold text-lg text-white tracking-wide">Módulos</span>
             <button onClick={() => setIsOpen(false)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 text-white transition"><X size={20} /></button>
           </div>
 
-          <nav className="p-4 space-y-2 overflow-y-auto h-[calc(100vh-140px)] custom-scrollbar">
-            {menuPermitido.map((item) => {
-              const active = pathname === item.path;
-              return (
-                <Link 
-                  key={item.path} 
-                  href={item.path}
-                  onClick={() => setIsOpen(false)}
-                  className={`flex items-center justify-between p-3 rounded-xl transition-all duration-200 group ${
-                    active ? 'bg-[#82D14D] text-[#0f392b] font-bold shadow-lg' : 'text-slate-300 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <item.icon size={20} className={active ? 'text-[#0f392b]' : 'text-slate-400 group-hover:text-white'} />
-                    <span className="text-sm">{item.name}</span>
+          <nav className="p-4 overflow-y-auto h-[calc(100vh-140px)] custom-scrollbar">
+            
+            {/* RENDERIZA O MENU AGRUPADO POR SEÇÕES */}
+            {Object.keys(groupedMenu).map((section) => (
+               <div key={section} className="mb-4">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-3">{section}</h4>
+                  <div className="space-y-1">
+                      {groupedMenu[section].map((item) => {
+                        const active = pathname === item.path;
+                        return (
+                          <Link 
+                            key={item.path} 
+                            href={item.path}
+                            onClick={() => setIsOpen(false)}
+                            className={`flex items-center justify-between p-3 rounded-xl transition-all duration-200 group ${
+                              active ? 'bg-[#82D14D] text-[#0f392b] font-bold shadow-lg' : 'text-slate-300 hover:bg-white/5 hover:text-white'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <item.icon size={18} className={active ? 'text-[#0f392b]' : 'text-slate-400 group-hover:text-white'} />
+                              <span className="text-sm font-medium">{item.name}</span>
+                            </div>
+                            {active && <ChevronRight size={16} />}
+                          </Link>
+                        );
+                      })}
                   </div>
-                  {active && <ChevronRight size={16} />}
-                </Link>
-              );
-            })}
+               </div>
+            ))}
             
             {menuPermitido.length === 0 && (
                 <p className="text-center text-xs text-slate-500 mt-10 px-4 leading-relaxed">Seu usuário não possui módulos liberados.<br/>Fale com o Administrador.</p>
@@ -357,7 +360,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </aside>
 
-        {/* --- CONTEÚDO PRINCIPAL --- */}
         <main className="w-full min-h-screen pt-16 bg-slate-50 relative z-0">
           {children}
         </main>
