@@ -6,10 +6,6 @@ body, html {
   font-family: 'Halyard Display', system-ui, -apple-system, sans-serif !important;
 }
 
-p, span, div, input, textarea, select, a, button {
-  font-weight: 400;
-}
-
-h1, h2, h3, h4, h5, h6, strong, .font-bold, .font-black {
+strong, .font-bold, .font-black, h1, h2, h3, h4, h5, h6 {
   font-weight: 600 !important;
 }
