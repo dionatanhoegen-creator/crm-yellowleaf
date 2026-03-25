@@ -2,20 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
-/* FORÇAR NOVA FONTE GLOBAL: HALYARD DISPLAY */
-@layer base {
-  body, html {
-    /* Força o sistema inteiro a usar a Halyard Display. Se não achar, usa fontes do sistema */
-    font-family: 'Halyard Display', system-ui, -apple-system, sans-serif !important;
-  }
+body, html {
+  font-family: 'Halyard Display', system-ui, -apple-system, sans-serif !important;
+}
 
-  /* Textos e apoio (Halyard Display Book = font-weight 400) */
-  p, span, div, input, textarea, select, a, button {
-    font-weight: 400;
-  }
+p, span, div, input, textarea, select, a, button {
+  font-weight: 400;
+}
 
-  /* Títulos e destaques (Halyard Display SemiBold = font-weight 600) */
-  h1, h2, h3, h4, h5, h6, strong, .font-bold, .font-black {
-    font-weight: 600 !important;
-  }
+h1, h2, h3, h4, h5, h6, strong, .font-bold, .font-black {
+  font-weight: 600 !important;
 }
