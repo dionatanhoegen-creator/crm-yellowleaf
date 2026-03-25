@@ -32,7 +32,7 @@ export default function PrescritoresPage() {
   
   const [modalAberto, setModalAberto] = useState(false);
   const [modalInteracoes, setModalInteracoes] = useState(false);
-  const [modalConfirmarExclusao, setModalConfirmarExclusao] = useState(false); // NOVO: Modal de exclusão
+  const [modalConfirmarExclusao, setModalConfirmarExclusao] = useState(false);
   
   const [salvando, setSalvando] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
@@ -153,28 +153,29 @@ export default function PrescritoresPage() {
     }
   };
 
-  // Abre o modal de confirmação no lugar daquele alerta feio do navegador
   const abrirConfirmacaoExclusao = () => {
       setModalConfirmarExclusao(true);
   };
 
-  // Função que realmente vai no banco e apaga tudo
+  // --- FUNÇÃO DE EXCLUSÃO BLINDADA ---
   const confirmarExclusao = async () => {
       setExcluindo(true);
       try {
-          // 1. Apaga primeiro as interações do diário de visitas para evitar erro de Foreign Key
-          const { error: errInteracoes } = await supabase.from('interacoes').delete().eq('prescritor_id', form.id);
-          if (errInteracoes) throw errInteracoes;
-          
-          // 2. Só depois apaga o prescritor
+          // Tenta apagar o prescritor direto (Se o CASCADE estiver ativo no Supabase, apaga tudo junto)
           const { error } = await supabase.from('prescritores').delete().eq('id', form.id);
-          if (error) throw error; 
+          
+          if (error) {
+              // Se der erro de Foreign Key (porque não rodou o SQL do Cascade ainda), tenta forçar a limpeza
+              await supabase.from('interacoes').delete().eq('prescritor_id', form.id);
+              const { error: err2 } = await supabase.from('prescritores').delete().eq('id', form.id);
+              if (err2) throw err2;
+          }
 
           setModalConfirmarExclusao(false);
           setModalAberto(false);
           carregarPrescritores();
       } catch (error: any) {
-          alert(`Erro ao excluir no banco de dados: ${error.message}`);
+          alert(`Aviso do Banco de Dados: Não foi possível excluir. \n\nDetalhe técnico: ${error.message}`);
       } finally { 
           setExcluindo(false); 
       }
@@ -635,10 +636,8 @@ export default function PrescritoresPage() {
         {/* MODAL DE CADASTRO CORPORATIVO (COMPACTO COM OVERFLOW INTERNO) */}
         {modalAberto && mounted && !modalInteracoes && createPortal(
            <div className="fixed inset-0 z-[99999] flex items-end md:items-center justify-center bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-200 md:p-4 overflow-hidden">
-             {/* Note o max-h-[90vh] e overflow-hidden na div principal */}
              <div className="bg-white w-full h-[95vh] md:h-auto md:max-h-[90vh] md:max-w-4xl rounded-t-3xl md:rounded-[2rem] shadow-2xl flex flex-col animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-200 overflow-hidden">
                 
-                {/* CABEÇALHO FIXO */}
                 <div className="bg-[#1e293b] p-4 md:p-5 flex justify-between items-center text-white shrink-0 relative overflow-hidden">
                    <div className="absolute -right-4 -top-4 text-white/5 transform rotate-12 pointer-events-none"><User size={100} className="md:w-[120px] md:h-[120px]"/></div>
                    <div className="relative z-10 min-w-0 pr-4">
@@ -648,7 +647,6 @@ export default function PrescritoresPage() {
                    <button type="button" onClick={() => setModalAberto(false)} className="hover:bg-white/20 p-2 rounded-full transition bg-white/10 text-white relative z-10 shrink-0"><X size={20}/></button>
                 </div>
                 
-                {/* MIOLO ROLÁVEL (FORMULÁRIO) */}
                 <form onSubmit={handleSalvarPrescritor} className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-5 flex flex-col bg-slate-50">
                     <div className="flex-1">
                         <h3 className="text-sm md:text-base font-black text-slate-800 mb-3 md:mb-4 flex items-center gap-2 border-b border-slate-200 pb-2">
@@ -733,7 +731,6 @@ export default function PrescritoresPage() {
                         </div>
                     </div>
 
-                    {/* RODAPÉ FIXO NA BASE DO MODAL */}
                     <div className="flex flex-col-reverse sm:flex-row gap-3 pt-4 border-t border-slate-200 shrink-0 mt-auto pb-4 sm:pb-0 bg-slate-50">
                         {form.id && (
                             <button type="button" onClick={abrirConfirmacaoExclusao} disabled={excluindo} className="w-full sm:w-auto px-5 py-3 text-red-600 font-bold bg-white sm:bg-red-50 border border-red-200 sm:border-transparent hover:bg-red-100 rounded-xl transition text-sm flex items-center justify-center gap-2 disabled:opacity-50">
@@ -752,7 +749,7 @@ export default function PrescritoresPage() {
            </div>, document.body
         )}
 
-        {/* --- NOVO MODAL DE CONFIRMAÇÃO DE EXCLUSÃO (PERSONALIZADO) --- */}
+        {/* --- NOVO MODAL DE CONFIRMAÇÃO DE EXCLUSÃO --- */}
         {modalConfirmarExclusao && mounted && createPortal(
           <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
              <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-red-100">
