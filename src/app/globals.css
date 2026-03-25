@@ -1,26 +1,17 @@
-@import "tailwindcss";
-
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* FORÇAR NOVA FONTE GLOBAL: HALYARD DISPLAY */
+@layer base {
+  body, html {
+    /* Força o sistema inteiro a usar a Halyard Display. Se não achar, usa fontes do sistema */
+    font-family: 'Halyard Display', system-ui, -apple-system, sans-serif !important;
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* Textos e apoio (Halyard Display Book = font-weight 400) */
+  p, span, div, input, textarea, select {
+    font-weight: 400;
+  }
+
+  /* Títulos e destaques (Halyard Display SemiBold = font-weight 600) */
+  h1, h2, h3, h4, h5, h6, strong, .font-bold, .font-black {
+    font-weight: 600 !important;
+  }
 }

@@ -1,8 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Outfit } from "next/font/google";
-import "./globals.css";
+import "./globals.css"; // A fonte antiga (Outfit) foi removida daqui!
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
@@ -12,9 +11,6 @@ import {
   FileText, Shield, ChevronDown, Stethoscope, Lightbulb, CalendarCheck, Target, TrendingUp, Bell, CheckCircle2
 } from 'lucide-react';
 
-const outfit = Outfit({ subsets: ["latin"] });
-
-// ORGANIZAÇÃO DO MENU POR SETORES (SEM INVENTAR TELAS)
 const MENU_BASE = [
   // VISÃO GERAL
   { name: 'Dashboard', path: '/', icon: LayoutDashboard, key: 'faturamento', section: 'Visão Geral' },
@@ -134,7 +130,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   if (isLoginPage) {
     return (
       <html lang="pt-br">
-        <body className={`${outfit.className} bg-slate-50 text-slate-700`}>
+        {/* FONTE HALYARD APLICADA AQUI VIA CLASSE BASE */}
+        <body className={`bg-slate-50 text-slate-700`}>
           {children}
         </body>
       </html>
@@ -143,7 +140,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
   const notificacoesNaoLidas = notificacoes.filter(n => !n.lida).length;
 
-  // AGRUPA O MENU PERMITIDO POR SEÇÃO PARA RENDERIZAR NA GAVETA
   const groupedMenu = menuPermitido.reduce((acc, item) => {
       if (!acc[item.section]) acc[item.section] = [];
       acc[item.section].push(item);
@@ -152,7 +148,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <html lang="pt-br">
-      <body className={`${outfit.className} bg-slate-50 text-slate-700 overflow-x-hidden`}>
+      {/* FONTE HALYARD APLICADA AQUI VIA CLASSE BASE */}
+      <body className={`bg-slate-50 text-slate-700 overflow-x-hidden`}>
         
         <header className="fixed top-0 left-0 right-0 h-16 bg-white border-b border-slate-200 z-[40] flex items-center px-4 justify-between shadow-sm">
           
@@ -172,7 +169,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
 
             <div className="hidden lg:flex items-center gap-2 pl-6 border-l border-slate-200 h-8 overflow-hidden max-w-2xl">
-               {/* Exibe os primeiros 5 atalhos no topo, ignorando a categoria */}
                {menuPermitido.slice(0, 5).map((item) => {
                  const active = pathname === item.path;
                  return (
@@ -317,7 +313,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
           <nav className="p-4 overflow-y-auto h-[calc(100vh-140px)] custom-scrollbar">
             
-            {/* RENDERIZA O MENU AGRUPADO POR SEÇÕES */}
             {Object.keys(groupedMenu).map((section) => (
                <div key={section} className="mb-4">
                   <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-3">{section}</h4>
