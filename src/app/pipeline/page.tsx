@@ -7,7 +7,7 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users, Building2
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -36,7 +36,6 @@ const STAGE_COLORS: any = {
 
 const CANAIS_CONTATO = ['WhatsApp', 'Ligação', 'E-mail', 'Visita Presencial', 'Instagram'];
 
-// Componente principal contendo a lógica
 function PipelineContent() {
   const supabase = createClientComponentClient();
   const searchParams = useSearchParams();
@@ -80,7 +79,7 @@ function PipelineContent() {
     canal_contato: 'WhatsApp', observacoes: '', observacoes_proposta: '', 
     status: 'prospeccao', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45',
     peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', 
-    cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0,
+    endereco: '', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0,
     user_id: '' 
   });
 
@@ -89,7 +88,6 @@ function PipelineContent() {
     inicializarDados();
   }, []);
 
-  // NOVO OLHEIRO DE LINK (Abre a oportunidade se vier pela notificação)
   const opIdUrl = searchParams.get('op_id');
   useEffect(() => {
       if (opIdUrl && oportunidades.length > 0 && !modalOpen) {
@@ -100,7 +98,6 @@ function PipelineContent() {
               setIsRepLocked(false);
               setNovaNotaInput("");
               setModalOpen(true);
-              // Limpa o link na barra de endereços silenciosamente para não ficar reabrindo
               router.replace('/pipeline', { scroll: false });
           }
       }
@@ -324,9 +321,12 @@ function PipelineContent() {
       const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`);
       if (res.ok) {
           const data = await res.json();
+          const enderecoFormatado = data.logradouro ? `${data.logradouro}, ${data.numero || 'S/N'}${data.complemento ? ' - ' + data.complemento : ''}` : '';
+          
           setFormData(prev => ({ 
             ...prev, 
             nome_cliente: (data.nome_fantasia || data.razao_social || chavesERP?.razaosocial || '').toUpperCase(),
+            endereco: enderecoFormatado.toUpperCase(),
             cidade_exclusividade: (data.municipio || chavesERP?.cidade || '').toUpperCase(),
             uf_exclusividade: (data.uf || chavesERP?.uf || '').toUpperCase(),
             telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : (chavesERP?.telefone || prev.telefone),
@@ -338,6 +338,7 @@ function PipelineContent() {
           setFormData(prev => ({ 
               ...prev, 
               nome_cliente: (chavesERP.razaosocial || chavesERP.fantasia || '').toUpperCase(), 
+              endereco: (chavesERP.endereco || chavesERP.logradouro || '').toUpperCase(),
               cidade_exclusividade: (chavesERP.cidade || '').toUpperCase(), 
               uf_exclusividade: (chavesERP.uf || '').toUpperCase(), 
               telefone: chavesERP.telefone || prev.telefone,
@@ -348,12 +349,16 @@ function PipelineContent() {
     setLoadingCNPJ(false);
   };
 
+  // NOVA FUNÇÃO DO DIÁRIO DE BORDO
   const adicionarNotaAoHistorico = () => {
-      if (!novaNotaInput.trim()) return;
-      const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-      const novaEntrada = `📅 ${dataHora} | 💬 ${novaNotaInput}\n────────────────────────────────────────\n${formData.observacoes || ''}`;
-      setFormData({ ...formData, observacoes: novaEntrada });
-      setNovaNotaInput(""); 
+    if (!novaNotaInput.trim()) return;
+    const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const autor = usuarioLogado?.nome ? usuarioLogado.nome.split(' ')[0] : 'Usuário';
+    
+    const notaFormatada = `📅 ${dataHora} | 👤 ${autor}\n${novaNotaInput}\n────────────────────────────────────────\n${formData.observacoes || ''}`;
+    
+    setFormData({ ...formData, observacoes: notaFormatada });
+    setNovaNotaInput(""); 
   };
 
   const gerarPropostaIndividualPDF = () => {
@@ -540,13 +545,15 @@ function PipelineContent() {
   const handleSave = async () => {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     if (!formData.user_id) return alert("Selecione um Representante Responsável para assumir esta oportunidade.");
-    if ((!formData.observacoes || formData.observacoes.trim() === "") && !novaNotaInput.trim()) return alert("O campo 'Anotações Internas' é obrigatório. Registre o andamento da negociação.");
+    if ((!formData.observacoes || formData.observacoes.trim() === "") && !novaNotaInput.trim()) return alert("O campo 'Diário de Bordo' é obrigatório. Registre o andamento da negociação.");
     if (!formData.data_lembrete || formData.data_lembrete.trim() === "") return alert("Por favor, selecione uma data para 'Próximo Contato'. É obrigatório definir um retorno.");
     
+    // Auto-salva a nota se ele esqueceu de apertar o botão registrar
     let obsFinal = formData.observacoes || "";
     if (novaNotaInput.trim()) {
         const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-        obsFinal = `📅 ${dataHora} | 💬 ${novaNotaInput}\n────────────────────────────────────────\n${obsFinal}`;
+        const autor = usuarioLogado?.nome ? usuarioLogado.nome.split(' ')[0] : 'Usuário';
+        obsFinal = `📅 ${dataHora} | 👤 ${autor}\n${novaNotaInput}\n────────────────────────────────────────\n${obsFinal}`;
     }
 
     let valorFinal = parseFloat(String(formData.valor)) || 0;
@@ -558,15 +565,40 @@ function PipelineContent() {
 
     const isRepasse = formData.user_id !== usuarioLogado?.id;
 
+    const dadosSalvar = {
+        ...formData, 
+        user_id: formData.user_id, 
+        sdr_id: isRepasse && !editingOp ? usuarioLogado?.id : (editingOp?.sdr_id || null), 
+        numero_proposta: numeroFinal, 
+        nome_cliente: formData.nome_cliente.toUpperCase(), 
+        endereco: formData.endereco ? formData.endereco.toUpperCase() : '',
+        contato: formData.contato ? formData.contato.toUpperCase() : '', 
+        email: formData.email ? formData.email.toLowerCase() : '', 
+        cidade_exclusividade: formData.cidade_exclusividade ? formData.cidade_exclusividade.toUpperCase() : '', 
+        uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '', 
+        valor: valorFinal, 
+        valor_g_tabela: parseMoney(formData.valor_g_tabela), 
+        validade_produto: formData.validade_produto || null, 
+        kg_proposto: parseMoney(formData.kg_proposto), 
+        kg_bonificado: parseMoney(formData.kg_bonificado), 
+        parcelas: parseInt(String(formData.parcelas)) || 1, 
+        dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45, 
+        peso_formula_g: String(parseMoney(formData.peso_formula_g)), 
+        fator_lucro: String(parseMoney(formData.fator_lucro)), 
+        custo_fixo_operacional: parseMoney(formData.custo_fixo_operacional), 
+        data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null, 
+        data_entrada: formData.data_entrada || getLocalData(), 
+        canal_contato: formData.canal_contato, 
+        observacoes: obsFinal, 
+        observacoes_proposta: formData.observacoes_proposta 
+    };
+
     const { data: savedOpData, error } = editingOp 
-        ? await supabase.from('pipeline').update({
-              ...formData, user_id: formData.user_id, sdr_id: isRepasse && !editingOp ? usuarioLogado?.id : (editingOp?.sdr_id || null), numero_proposta: numeroFinal, nome_cliente: formData.nome_cliente.toUpperCase(), contato: formData.contato ? formData.contato.toUpperCase() : '', email: formData.email ? formData.email.toLowerCase() : '', cidade_exclusividade: formData.cidade_exclusividade ? formData.cidade_exclusividade.toUpperCase() : '', uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '', valor: valorFinal, valor_g_tabela: parseMoney(formData.valor_g_tabela), validade_produto: formData.validade_produto || null, kg_proposto: parseMoney(formData.kg_proposto), kg_bonificado: parseMoney(formData.kg_bonificado), parcelas: parseInt(String(formData.parcelas)) || 1, dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45, peso_formula_g: String(parseMoney(formData.peso_formula_g)), fator_lucro: String(parseMoney(formData.fator_lucro)), custo_fixo_operacional: parseMoney(formData.custo_fixo_operacional), data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null, data_entrada: formData.data_entrada || getLocalData(), canal_contato: formData.canal_contato, observacoes: obsFinal, observacoes_proposta: formData.observacoes_proposta 
-          }).eq('id', editingOp.id).select() 
-        : await supabase.from('pipeline').insert({
-              ...formData, user_id: formData.user_id, sdr_id: isRepasse && !editingOp ? usuarioLogado?.id : (editingOp?.sdr_id || null), numero_proposta: numeroFinal, nome_cliente: formData.nome_cliente.toUpperCase(), contato: formData.contato ? formData.contato.toUpperCase() : '', email: formData.email ? formData.email.toLowerCase() : '', cidade_exclusividade: formData.cidade_exclusividade ? formData.cidade_exclusividade.toUpperCase() : '', uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '', valor: valorFinal, valor_g_tabela: parseMoney(formData.valor_g_tabela), validade_produto: formData.validade_produto || null, kg_proposto: parseMoney(formData.kg_proposto), kg_bonificado: parseMoney(formData.kg_bonificado), parcelas: parseInt(String(formData.parcelas)) || 1, dias_primeira_parcela: parseInt(String(formData.dias_primeira_parcela)) || 45, peso_formula_g: String(parseMoney(formData.peso_formula_g)), fator_lucro: String(parseMoney(formData.fator_lucro)), custo_fixo_operacional: parseMoney(formData.custo_fixo_operacional), data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null, data_entrada: formData.data_entrada || getLocalData(), canal_contato: formData.canal_contato, observacoes: obsFinal, observacoes_proposta: formData.observacoes_proposta 
-          }).select();
+        ? await supabase.from('pipeline').update(dadosSalvar).eq('id', editingOp.id).select() 
+        : await supabase.from('pipeline').insert(dadosSalvar).select();
     
     if (!error) { 
+      // Notificação 1: Se for repasse novo
       if (isRepasse && !editingOp && savedOpData && savedOpData.length > 0) {
           await supabase.from('notificacoes').insert({
               user_id: formData.user_id,
@@ -575,6 +607,17 @@ function PipelineContent() {
               link: `/pipeline?op_id=${savedOpData[0].id}` 
           });
       }
+
+      // NOVA Notificação 2: Feedback para o SDR
+      if (editingOp && editingOp.sdr_id && editingOp.sdr_id !== usuarioLogado?.id) {
+          await supabase.from('notificacoes').insert({
+              user_id: editingOp.sdr_id,
+              remetente: usuarioLogado.nome,
+              mensagem: `A proposta #${formatPropostaId(numeroFinal)} da farmácia ${formData.nome_cliente} foi atualizada no Pipeline.`,
+              link: `/pipeline?op_id=${editingOp.id}` 
+          });
+      }
+
       setModalOpen(false); setNovaNotaInput(""); carregarOportunidades(usuarioLogado); 
     } else { 
       alert(`Erro ao salvar: ${error.message}`); 
@@ -709,7 +752,7 @@ function PipelineContent() {
                 <button onClick={gerarRelatorioGeral} className="flex-1 sm:flex-none bg-slate-800 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 flex items-center justify-center gap-2 whitespace-nowrap text-xs md:text-sm hover:bg-slate-900">
                     <Printer size={16} /> <span className="hidden sm:inline">Relatório</span>
                 </button>
-                <button onClick={() => { setEditingOp(null); setIsRepLocked(false); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); setNovaNotaInput(""); setModalOpen(true); }} className="flex-1 sm:flex-none bg-blue-600 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-xs md:text-sm flex items-center justify-center gap-2 hover:bg-blue-700">
+                <button onClick={() => { setEditingOp(null); setIsRepLocked(false); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', endereco: '', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); setNovaNotaInput(""); setModalOpen(true); }} className="flex-1 sm:flex-none bg-blue-600 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-xs md:text-sm flex items-center justify-center gap-2 hover:bg-blue-700">
                     <Plus size={16} /> Nova Op.
                 </button>
             </div>
@@ -758,6 +801,7 @@ function PipelineContent() {
                   <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black text-xs md:text-sm">1</div>
                   <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Identificação e Atribuição</h3>
               </div>
+              
               <div className="md:col-span-2">
                   <label className="text-xs font-bold text-slate-700 mb-1.5 block">CNPJ (Com Validação)</label>
                   <div className="flex gap-2">
@@ -765,9 +809,28 @@ function PipelineContent() {
                       <button type="button" onClick={buscarDadosCNPJ} className="bg-blue-600 text-white p-3 rounded-xl shadow-sm hover:bg-blue-700 transition"><Loader2 size={20} className={loadingCNPJ ? "animate-spin" : "hidden"}/><Search size={20} className={loadingCNPJ ? "hidden" : ""}/></button>
                   </div>
               </div>
-              <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Razão Social da Farmácia</label><input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})}/></div>
+
+              {/* FARMÁCIA DESTAQUE E ENDEREÇO */}
+              <div className="md:col-span-2">
+                  <label className="text-xs font-black text-green-700 mb-1.5 block uppercase tracking-widest">Farmácia (Nome Fantasia)</label>
+                  <input className="w-full bg-green-50 border-2 border-green-400 focus:border-green-600 rounded-xl p-3 text-sm font-black text-green-900 uppercase outline-none shadow-sm transition-colors" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})} placeholder="NOME DA FARMÁCIA"/>
+              </div>
+
+              <div className="md:col-span-2">
+                  <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1"><MapPin size={14}/> Endereço Completo</label>
+                  <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-medium uppercase outline-none shadow-sm" value={formData.endereco} onChange={e => setFormData({...formData, endereco: e.target.value.toUpperCase()})} placeholder="Rua, Número, Bairro"/>
+              </div>
+
+              <div className="md:col-span-1">
+                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Cidade</label>
+                  <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm" value={formData.cidade_exclusividade} onChange={e => setFormData({...formData, cidade_exclusividade: e.target.value.toUpperCase()})} placeholder="CIDADE"/>
+              </div>
+
+              <div className="md:col-span-1">
+                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">UF</label>
+                  <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm text-center" value={formData.uf_exclusividade} onChange={e => setFormData({...formData, uf_exclusividade: e.target.value.toUpperCase()})} placeholder="SP" maxLength={2}/>
+              </div>
               
-              {/* === NOVOS CAMPOS RESTAURADOS AQUI === */}
               <div className="md:col-span-2">
                   <label className="text-xs font-bold text-slate-700 mb-1.5 block">Nome do Contato</label>
                   <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value.toUpperCase()})} placeholder="EX: DRA. JULIA"/>
@@ -838,13 +901,36 @@ function PipelineContent() {
               </div>
               <div className="md:col-span-2"><label className="text-xs font-black text-red-600 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Clock size={14}/> Próximo Contato</label><input type="date" className="w-full bg-white border border-red-200 focus:border-red-500 rounded-xl p-3 text-sm font-bold text-red-900 outline-none shadow-sm cursor-pointer" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} /></div>
               <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Canal de Contato</label><select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+              
+              {/* DIÁRIO DE BORDO - AUDITORIA E NOTAS */}
               <div className="md:col-span-4 space-y-3">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2"><MessageSquare size={14}/> Diário de Bordo</label>
-                  <div className="flex gap-2">
-                      <input className="flex-1 bg-white border-2 border-blue-100 focus:border-blue-500 rounded-xl p-3 outline-none text-sm font-medium shadow-sm transition" placeholder="Escreva um resumo..." value={novaNotaInput} onChange={(e) => setNovaNotaInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && adicionarNotaAoHistorico()}/>
-                      <button type="button" onClick={adicionarNotaAoHistorico} className="bg-blue-600 text-white px-5 rounded-xl hover:bg-blue-700 transition font-bold shadow-md active:scale-95"><Send size={18}/></button>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2">
+                      <MessageSquare size={14}/> Nova Anotação
+                  </label>
+                  
+                  {/* Caixa para escrever a nota (Permite Enter) */}
+                  <div className="flex flex-col gap-2 bg-blue-50/50 p-3 border border-blue-100 rounded-2xl">
+                      <textarea 
+                          className="w-full bg-white border border-slate-200 focus:border-blue-500 rounded-xl p-3 outline-none text-sm text-slate-700 font-medium shadow-sm transition resize-none min-h-[80px] custom-scrollbar" 
+                          placeholder="Escreva sua anotação aqui... (Use a tecla 'Enter' para pular linhas e formatar o texto livremente)" 
+                          value={novaNotaInput} 
+                          onChange={(e) => setNovaNotaInput(e.target.value)} 
+                      />
+                      <button type="button" onClick={adicionarNotaAoHistorico} className="self-end bg-blue-600 text-white px-5 py-2.5 rounded-xl hover:bg-blue-700 transition font-bold shadow-md active:scale-95 flex items-center gap-2 text-xs">
+                          <Send size={14}/> Registrar no Histórico
+                      </button>
                   </div>
-                  <textarea className="w-full bg-slate-100 border border-slate-200 rounded-xl p-4 h-32 resize-none text-xs text-slate-700 font-mono leading-relaxed shadow-inner outline-none" value={formData.observacoes} readOnly placeholder="O histórico será salvo aqui..."/>
+
+                  {/* Histórico Bloqueado (Read-Only) */}
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mt-4 mb-2">
+                      <History size={14}/> Histórico Imutável
+                  </label>
+                  <textarea 
+                      className="w-full bg-slate-100 border border-slate-200 rounded-xl p-4 h-48 resize-none text-xs text-slate-700 font-mono leading-relaxed shadow-inner outline-none custom-scrollbar" 
+                      value={formData.observacoes} 
+                      readOnly 
+                      placeholder="Todo o histórico de conversas será registrado aqui com data e hora e não poderá ser alterado..."
+                  />
               </div>
             </div>
 

@@ -9,7 +9,7 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
   LayoutDashboard, Users, Trello, Package, Lock, 
   BarChart3, LogOut, Menu, X, ChevronRight,
-  FileText, Shield, ChevronDown, Stethoscope, Lightbulb, CalendarCheck, Target, TrendingUp, Bell, CheckCircle2
+  FileText, Shield, ChevronDown, Stethoscope, Lightbulb, CalendarCheck, Target, TrendingUp, Bell, CheckCircle2, Circle, Trash2
 } from 'lucide-react';
 
 const outfit = Outfit({ subsets: ["latin"] });
@@ -94,7 +94,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           .select('*')
           .eq('user_id', userId)
           .order('created_at', { ascending: false })
-          .limit(20);
+          .limit(30); // Aumentei o limite para 30 para ver as mais antigas
 
       if (data) {
           setNotificacoes(prev => {
@@ -106,7 +106,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       }
   };
 
-  const marcarComoLida = async (id: string, link?: string) => {
+  const clicarNotificacao = async (id: string, link?: string) => {
       setNotificacoes(prev => prev.map(n => n.id === id ? { ...n, lida: true } : n));
       await supabase.from('notificacoes').update({ lida: true }).eq('id', id);
       
@@ -114,6 +114,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           setIsNotifOpen(false);
           router.push(link);
       }
+  };
+
+  // NOVA FUNÇÃO: Marcar e Desmarcar como Lida sem sair da tela
+  const toggleLida = async (e: React.MouseEvent, id: string, statusAtual: boolean) => {
+      e.stopPropagation(); // Evita que o clique abra o link
+      setNotificacoes(prev => prev.map(n => n.id === id ? { ...n, lida: !statusAtual } : n));
+      await supabase.from('notificacoes').update({ lida: !statusAtual }).eq('id', id);
+  };
+
+  // NOVA FUNÇÃO: Limpar todas as lidas
+  const limparNotificacoesLidas = async () => {
+      const lidas = notificacoes.filter(n => n.lida);
+      if (lidas.length === 0) return;
+      
+      const idsLidas = lidas.map(n => n.id);
+      setNotificacoes(prev => prev.filter(n => !n.lida));
+      await supabase.from('notificacoes').delete().in('id', idsLidas);
   };
 
   const handleLogout = async () => {
@@ -134,6 +151,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   }
 
   const notificacoesNaoLidas = notificacoes.filter(n => !n.lida).length;
+  const temNotificacaoLida = notificacoes.some(n => n.lida);
 
   const groupedMenu = menuPermitido.reduce((acc, item) => {
       if (!acc[item.section]) acc[item.section] = [];
@@ -183,27 +201,36 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                  {isNotifOpen && (
                      <>
                          <div className="fixed inset-0 z-[50] bg-black/50 sm:bg-transparent transition-all" onClick={() => setIsNotifOpen(false)}></div>
-                         <div className="fixed sm:absolute inset-x-0 bottom-0 sm:inset-auto sm:right-0 sm:top-14 w-full sm:w-80 bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl sm:shadow-2xl border-t sm:border border-slate-200 z-[60] overflow-hidden animate-in slide-in-from-bottom-10 sm:slide-in-from-top-4 flex flex-col max-h-[85vh] sm:max-h-[400px]">
-                             <div className="p-5 sm:p-4 bg-slate-800 flex justify-between items-center text-white shrink-0">
-                                 <h3 className="font-bold text-base sm:text-sm flex items-center gap-2"><Bell size={18} className="text-yellow-400"/> Notificações</h3>
+                         <div className="fixed sm:absolute inset-x-0 bottom-0 sm:inset-auto sm:right-0 sm:top-14 w-full sm:w-96 bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl border-t sm:border border-slate-200 z-[60] overflow-hidden animate-in slide-in-from-bottom-10 sm:slide-in-from-top-4 flex flex-col max-h-[85vh] sm:max-h-[500px]">
+                             <div className="p-4 bg-slate-800 flex justify-between items-center text-white shrink-0">
+                                 <h3 className="font-bold text-sm flex items-center gap-2"><Bell size={18} className="text-yellow-400"/> Notificações</h3>
                                  <div className="flex items-center gap-3">
+                                    {temNotificacaoLida && (
+                                      <button onClick={limparNotificacoesLidas} className="text-[10px] font-bold text-slate-300 hover:text-red-400 flex items-center gap-1 transition">
+                                          <Trash2 size={12}/> Limpar Lidas
+                                      </button>
+                                    )}
                                     <span className="text-[10px] font-black uppercase tracking-widest bg-white/20 px-2 py-0.5 rounded">{notificacoesNaoLidas} Novas</span>
                                     <button onClick={() => setIsNotifOpen(false)} className="sm:hidden text-slate-300 hover:text-white"><X size={20}/></button>
                                  </div>
                              </div>
-                             <div className="flex-1 overflow-y-auto custom-scrollbar p-3 sm:p-2 bg-slate-50 pb-8 sm:pb-2">
+                             <div className="flex-1 overflow-y-auto custom-scrollbar p-3 bg-slate-50 pb-8 sm:pb-2">
                                  {notificacoes.length === 0 ? (
-                                     <p className="text-center text-slate-400 text-sm sm:text-xs p-6 font-medium">Nenhuma notificação por enquanto.</p>
+                                     <p className="text-center text-slate-400 text-xs p-6 font-medium">Nenhuma notificação por enquanto.</p>
                                  ) : (
                                      notificacoes.map((n: any) => (
-                                         <div key={n.id} onClick={() => marcarComoLida(n.id, n.link)} className={`p-4 sm:p-3 mb-2 sm:mb-2 rounded-2xl sm:rounded-xl text-sm border transition cursor-pointer flex gap-3 ${n.lida ? 'bg-transparent border-transparent opacity-60 hover:bg-slate-100' : 'bg-white border-blue-200 shadow-sm hover:border-blue-300'}`}>
-                                             <div className="mt-1 shrink-0">
-                                                 {n.lida ? <CheckCircle2 size={18} className="text-slate-300"/> : <div className="w-2.5 h-2.5 rounded-full bg-blue-500 mt-1 shadow-sm shadow-blue-200"></div>}
-                                             </div>
-                                             <div>
+                                         <div key={n.id} onClick={() => clicarNotificacao(n.id, n.link)} className={`p-3 mb-2 rounded-xl text-sm border transition cursor-pointer flex gap-3 ${n.lida ? 'bg-slate-100 border-transparent opacity-75 hover:bg-slate-200' : 'bg-white border-blue-200 shadow-sm hover:border-blue-400'}`}>
+                                             <button 
+                                                onClick={(e) => toggleLida(e, n.id, n.lida)} 
+                                                className="mt-1 shrink-0 transition-transform hover:scale-110"
+                                                title={n.lida ? "Marcar como não lida" : "Marcar como lida"}
+                                             >
+                                                 {n.lida ? <CheckCircle2 size={20} className="text-slate-400"/> : <div className="w-4 h-4 rounded-full bg-blue-500 shadow-sm shadow-blue-200 flex items-center justify-center border-2 border-white ml-0.5 mt-0.5"></div>}
+                                             </button>
+                                             <div className="flex-1">
                                                  <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-0.5">{n.remetente || 'Sistema'}</p>
-                                                 <p className={`text-sm sm:text-xs leading-tight ${n.lida ? 'text-slate-500' : 'text-slate-800 font-bold'}`}>{n.mensagem}</p>
-                                                 <span className="text-[10px] sm:text-[9px] text-slate-400 font-medium block mt-1.5 sm:mt-1">{new Date(n.created_at).toLocaleString('pt-BR')}</span>
+                                                 <p className={`text-xs leading-tight ${n.lida ? 'text-slate-600' : 'text-slate-800 font-bold'}`}>{n.mensagem}</p>
+                                                 <span className="text-[9px] text-slate-400 font-medium block mt-1.5">{new Date(n.created_at).toLocaleString('pt-BR')}</span>
                                              </div>
                                          </div>
                                      ))
