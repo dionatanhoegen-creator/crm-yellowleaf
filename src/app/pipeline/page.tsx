@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { createPortal } from 'react-dom'; 
+import { useSearchParams, useRouter } from 'next/navigation';
 import { 
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
@@ -35,8 +36,11 @@ const STAGE_COLORS: any = {
 
 const CANAIS_CONTATO = ['WhatsApp', 'Ligação', 'E-mail', 'Visita Presencial', 'Instagram'];
 
-export default function PipelinePage() {
+// Componente principal contendo a lógica
+function PipelineContent() {
   const supabase = createClientComponentClient();
+  const searchParams = useSearchParams();
+  const router = useRouter();
   
   const [oportunidades, setOportunidades] = useState<any[]>([]);
   const [produtosApi, setProdutosApi] = useState<any[]>([]); 
@@ -85,23 +89,22 @@ export default function PipelinePage() {
     inicializarDados();
   }, []);
 
+  // NOVO OLHEIRO DE LINK (Abre a oportunidade se vier pela notificação)
+  const opIdUrl = searchParams.get('op_id');
   useEffect(() => {
-      if (oportunidades.length > 0) {
-          const searchParams = new URLSearchParams(window.location.search);
-          const opId = searchParams.get('op_id');
-          if (opId && !modalOpen) {
-              const opEncontrada = oportunidades.find(o => String(o.id) === opId);
-              if (opEncontrada) {
-                  setEditingOp(opEncontrada);
-                  setFormData({...formData, ...opEncontrada, custo_fixo_operacional: opEncontrada.custo_fixo_operacional || '0'});
-                  setIsRepLocked(false);
-                  setNovaNotaInput("");
-                  setModalOpen(true);
-                  window.history.replaceState({}, '', '/pipeline');
-              }
+      if (opIdUrl && oportunidades.length > 0 && !modalOpen) {
+          const opEncontrada = oportunidades.find(o => String(o.id) === opIdUrl);
+          if (opEncontrada) {
+              setEditingOp(opEncontrada);
+              setFormData(prev => ({...prev, ...opEncontrada, custo_fixo_operacional: opEncontrada.custo_fixo_operacional || '0'}));
+              setIsRepLocked(false);
+              setNovaNotaInput("");
+              setModalOpen(true);
+              // Limpa o link na barra de endereços silenciosamente para não ficar reabrindo
+              router.replace('/pipeline', { scroll: false });
           }
       }
-  }, [oportunidades]);
+  }, [opIdUrl, oportunidades, router, modalOpen]);
 
   const inicializarDados = async () => {
     setLoading(true);
@@ -887,5 +890,14 @@ export default function PipelinePage() {
         </div>, document.body
       )}
     </div>
+  );
+}
+
+// O componente Exportado que cria a "bolha de segurança" para a Vercel
+export default function PipelinePage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-slate-500 font-bold">Carregando Pipeline...</div>}>
+      <PipelineContent />
+    </Suspense>
   );
 }
