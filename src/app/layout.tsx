@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import { Outfit } from "next/font/google";
 import "./globals.css";
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -10,6 +11,8 @@ import {
   BarChart3, LogOut, Menu, X, ChevronRight,
   FileText, Shield, ChevronDown, Stethoscope, Lightbulb, CalendarCheck, Target, TrendingUp, Bell, CheckCircle2
 } from 'lucide-react';
+
+const outfit = Outfit({ subsets: ["latin"] });
 
 const MENU_BASE = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard, key: 'faturamento', section: 'Visão Geral' },
@@ -44,7 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
   const tocarSom = () => {
       try {
-         const audio = new Audio('[https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3](https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3)');
+         const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
          audio.play().catch(() => {});
       } catch(e) {}
   };
@@ -59,15 +62,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       
       if (user) {
         setUserEmail(user.email || "Usuário");
+        
         const { data: perfil } = await supabase.from('perfis').select('acessos').eq('id', user.id).single();
+        
         if (perfil && perfil.acessos) {
             const menuFiltrado = MENU_BASE.filter(item => perfil.acessos[item.key] === true);
             setMenuPermitido(menuFiltrado);
         } else {
             setMenuPermitido([]);
         }
+
         buscarNotificacoes(user.id);
         intervalId = setInterval(() => buscarNotificacoes(user.id), 15000);
+
       } else {
         setUserEmail("Visitante");
         setMenuPermitido([]);
@@ -76,11 +83,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
     carregarAcessos();
 
-    return () => { if (intervalId) clearInterval(intervalId); };
+    return () => {
+        if (intervalId) clearInterval(intervalId);
+    };
   }, [supabase, isLoginPage]);
 
   const buscarNotificacoes = async (userId: string) => {
-      const { data } = await supabase.from('notificacoes').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(20);
+      const { data } = await supabase
+          .from('notificacoes')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(20);
+
       if (data) {
           setNotificacoes(prev => {
               const novasNaoLidas = data.filter(d => !d.lida).length;
@@ -94,7 +109,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const marcarComoLida = async (id: string, link?: string) => {
       setNotificacoes(prev => prev.map(n => n.id === id ? { ...n, lida: true } : n));
       await supabase.from('notificacoes').update({ lida: true }).eq('id', id);
-      if (link) { setIsNotifOpen(false); router.push(link); }
+      
+      if (link) {
+          setIsNotifOpen(false);
+          router.push(link);
+      }
   };
 
   const handleLogout = async () => {
@@ -107,7 +126,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   if (isLoginPage) {
     return (
       <html lang="pt-br">
-        <body className="bg-slate-50 text-slate-700">
+        <body className={`${outfit.className} bg-slate-50 text-slate-700`}>
           {children}
         </body>
       </html>
@@ -115,6 +134,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   }
 
   const notificacoesNaoLidas = notificacoes.filter(n => !n.lida).length;
+
   const groupedMenu = menuPermitido.reduce((acc, item) => {
       if (!acc[item.section]) acc[item.section] = [];
       acc[item.section].push(item);
@@ -123,7 +143,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <html lang="pt-br">
-      <body className="bg-slate-50 text-slate-700 overflow-x-hidden">
+      <body className={`${outfit.className} bg-slate-50 text-slate-700 overflow-x-hidden`}>
+        
         <header className="fixed top-0 left-0 right-0 h-16 bg-white border-b border-slate-200 z-[40] flex items-center px-4 justify-between shadow-sm">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-3">
@@ -135,6 +156,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest hidden sm:block">CRM System</span>
               </div>
             </div>
+
             <div className="hidden lg:flex items-center gap-2 pl-6 border-l border-slate-200 h-8 overflow-hidden max-w-2xl">
                {menuPermitido.slice(0, 5).map((item) => {
                  const active = pathname === item.path;
@@ -157,6 +179,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                          </span>
                      )}
                  </button>
+
                  {isNotifOpen && (
                      <>
                          <div className="fixed inset-0 z-[50] bg-black/50 sm:bg-transparent transition-all" onClick={() => setIsNotifOpen(false)}></div>
@@ -190,7 +213,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                      </>
                  )}
              </div>
+
              <div className="w-px h-6 bg-slate-200 hidden sm:block"></div>
+
              <div className="relative shrink-0">
                 <button onClick={() => { setIsProfileOpen(!isProfileOpen); setIsNotifOpen(false); }} className="flex items-center gap-2 sm:gap-3 hover:bg-slate-50 p-1.5 sm:p-2 rounded-xl transition">
                     <div className="text-right hidden sm:block">
@@ -202,6 +227,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     </div>
                     <ChevronDown size={16} className={`text-slate-400 transition-transform hidden sm:block ${isProfileOpen ? 'rotate-180' : ''}`}/>
                 </button>
+
                 {isProfileOpen && (
                   <>
                     <div className="fixed inset-0 z-[50] bg-black/50 sm:bg-transparent transition-all" onClick={() => setIsProfileOpen(false)}></div> 
@@ -213,6 +239,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                           </div>
                           <button onClick={() => setIsProfileOpen(false)} className="sm:hidden p-2 text-slate-400 hover:bg-slate-100 rounded-full"><X size={20}/></button>
                        </div>
+                       
                        {menuPermitido.some(m => m.key === 'admin') && (
                            <Link href="/equipe" onClick={() => setIsProfileOpen(false)} className="flex items-center gap-3 sm:gap-2 w-full text-left px-4 sm:px-3 py-4 sm:py-2 text-base sm:text-sm text-slate-700 hover:bg-slate-50 rounded-xl sm:rounded-lg transition font-medium">
                               <Shield size={18} className="sm:w-4 sm:h-4"/> Gestão de Acessos
@@ -229,12 +256,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </header>
 
         <div className={`fixed inset-0 bg-black/60 z-[50] backdrop-blur-sm transition-opacity duration-300 ${isOpen ? 'opacity-100 visible' : 'opacity-0 invisible pointer-events-none'}`} onClick={() => setIsOpen(false)}/>
-        
+
         <aside className={`fixed top-0 left-0 h-full w-[80vw] max-w-[300px] sm:w-72 bg-[#0f392b] text-white z-[60] shadow-2xl transform transition-transform duration-300 ease-out ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           <div className="p-6 flex justify-between items-center border-b border-white/10 h-16 shrink-0">
             <span className="font-bold text-lg text-white tracking-wide">Módulos</span>
             <button onClick={() => setIsOpen(false)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 text-white transition"><X size={20} /></button>
           </div>
+
           <nav className="p-4 overflow-y-auto h-[calc(100vh-140px)] custom-scrollbar">
             {Object.keys(groupedMenu).map((section) => (
                <div key={section} className="mb-4">
@@ -257,6 +285,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             ))}
             {menuPermitido.length === 0 && <p className="text-center text-xs text-slate-500 mt-10 px-4 leading-relaxed">Seu usuário não possui módulos liberados.<br/>Fale com o Administrador.</p>}
           </nav>
+
           <div className="absolute bottom-0 left-0 right-0 p-6 bg-[#0a261d] border-t border-white/5">
             <button onClick={handleLogout} className="flex items-center justify-center gap-3 text-red-400 hover:text-red-300 text-sm font-bold w-full p-3 rounded-xl border border-red-500/20 hover:bg-white/5 transition">
               <LogOut size={18} /> Encerrar Sessão
