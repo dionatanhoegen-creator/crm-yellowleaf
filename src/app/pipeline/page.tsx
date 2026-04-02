@@ -7,7 +7,7 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users, Building2
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users, Building2, UserPlus
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -74,8 +74,11 @@ function PipelineContent() {
     return new Date(now.getTime() - offset).toISOString().split('T')[0];
   };
 
+  // ESTADO DOS CONTATOS DA FARMÁCIA (Dinâmico)
+  const [contatosList, setContatosList] = useState([{ nome: '', cargo: 'Comprador(a)', telefone: '', email: '' }]);
+
   const [formData, setFormData] = useState({
-    cnpj: '', nome_cliente: '', contato: '', cargo_contato: 'Comprador(a)', telefone: '', email: '', produto: '', validade_produto: '',
+    cnpj: '', nome_cliente: '', produto: '', validade_produto: '',
     aplicacao: '', valor: '', data_entrada: getLocalData(), data_lembrete: '', data_lembrete_sdr: '', 
     canal_contato: 'WhatsApp', observacoes: '', observacoes_proposta: '', 
     status: 'prospeccao', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45',
@@ -84,7 +87,6 @@ function PipelineContent() {
     user_id: '' 
   });
 
-  // Checa se o usuário tem permissão de SDR
   const isSDRUser = usuarioLogado?.cargo?.toLowerCase().includes('p&d') || usuarioLogado?.cargo?.toLowerCase().includes('sdr') || usuarioLogado?.nome?.toLowerCase().includes('jaque');
 
   useEffect(() => { 
@@ -92,7 +94,6 @@ function PipelineContent() {
     inicializarDados();
   }, []);
 
-  // SISTEMA DE ALERTA DE LEMBRETES DIÁRIOS
   useEffect(() => {
     if (oportunidades.length === 0 || !usuarioLogado) return;
     const hoje = getLocalData();
@@ -100,12 +101,10 @@ function PipelineContent() {
     let clientesAvisar: string[] = [];
 
     oportunidades.forEach(op => {
-        // Se eu sou o vendedor e o lembrete é hoje
         if (op.user_id === usuarioLogado.id && op.data_lembrete === hoje && !['fechado', 'perdido'].includes(op.status)) {
             temLembreteHoje = true;
             clientesAvisar.push(`${op.nome_cliente} (Seu Contato)`);
         }
-        // Se eu sou SDR e o lembrete de acompanhamento SDR é hoje
         if (isSDRUser && op.data_lembrete_sdr === hoje && !['fechado', 'perdido'].includes(op.status)) {
             temLembreteHoje = true;
             clientesAvisar.push(`${op.nome_cliente} (Cobrar Closer)`);
@@ -118,7 +117,7 @@ function PipelineContent() {
             const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
             audio.play().catch(() => {});
             alert(`🔔 LEMBRETES DE HOJE!\n\nVocê precisa atuar nestas oportunidades hoje:\n\n- ${clientesAvisar.join('\n- ')}`);
-            sessionStorage.setItem('alarme_pipeline_tocado_' + hoje, 'true'); // Evita tocar toda hora que recarregar
+            sessionStorage.setItem('alarme_pipeline_tocado_' + hoje, 'true');
         }
     }
   }, [oportunidades, usuarioLogado]);
@@ -129,7 +128,23 @@ function PipelineContent() {
           const opEncontrada = oportunidades.find(o => String(o.id) === opIdUrl);
           if (opEncontrada) {
               setEditingOp(opEncontrada);
-              setFormData(prev => ({...prev, ...opEncontrada, custo_fixo_operacional: opEncontrada.custo_fixo_operacional || '0', cargo_contato: opEncontrada.cargo_contato || 'Comprador(a)'}));
+              setFormData(prev => ({...prev, ...opEncontrada, custo_fixo_operacional: opEncontrada.custo_fixo_operacional || '0'}));
+              
+              // Carregar lista de contatos do banco
+              let contatosCarregados = [{
+                  nome: opEncontrada.contato || '',
+                  cargo: opEncontrada.cargo_contato || 'Comprador(a)',
+                  telefone: opEncontrada.telefone || '',
+                  email: opEncontrada.email || ''
+              }];
+              if (opEncontrada.contatos_adicionais) {
+                  try {
+                      const adicionaisParsed = typeof opEncontrada.contatos_adicionais === 'string' ? JSON.parse(opEncontrada.contatos_adicionais) : opEncontrada.contatos_adicionais;
+                      contatosCarregados = [...contatosCarregados, ...adicionaisParsed];
+                  } catch (e) {}
+              }
+              setContatosList(contatosCarregados);
+
               setIsRepLocked(false);
               setNovaNotaInput("");
               setModalOpen(true);
@@ -362,9 +377,18 @@ function PipelineContent() {
             endereco: enderecoFormatado.toUpperCase(),
             cidade_exclusividade: (data.municipio || chavesERP?.cidade || '').toUpperCase(),
             uf_exclusividade: (data.uf || chavesERP?.uf || '').toUpperCase(),
-            telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : (chavesERP?.telefone || prev.telefone),
-            email: data.email || chavesERP?.email || prev.email || ''
           }));
+
+          // Atualiza o contato principal (se vazio) mantendo o estado
+          setContatosList(prev => {
+              const novos = [...prev];
+              novos[0] = {
+                  ...novos[0],
+                  telefone: data.ddd_telefone_1 && data.telefone1 ? `(${data.ddd_telefone_1}) ${data.telefone1}` : (chavesERP?.telefone || prev[0].telefone),
+                  email: data.email || chavesERP?.email || prev[0].email || ''
+              };
+              return novos;
+          });
       }
     } catch (e) {
        if (chavesERP) {
@@ -374,12 +398,37 @@ function PipelineContent() {
               endereco: (chavesERP.endereco || chavesERP.logradouro || '').toUpperCase(),
               cidade_exclusividade: (chavesERP.cidade || '').toUpperCase(), 
               uf_exclusividade: (chavesERP.uf || '').toUpperCase(), 
-              telefone: chavesERP.telefone || prev.telefone,
-              email: chavesERP.email || prev.email || ''
           }));
+          
+          setContatosList(prev => {
+              const novos = [...prev];
+              novos[0] = {
+                  ...novos[0],
+                  telefone: chavesERP.telefone || prev[0].telefone,
+                  email: chavesERP.email || prev[0].email || ''
+              };
+              return novos;
+          });
        }
     }
     setLoadingCNPJ(false);
+  };
+
+  // Funções para gerenciar múltiplos contatos
+  const addContato = () => {
+      setContatosList([...contatosList, { nome: '', cargo: 'Comprador(a)', telefone: '', email: '' }]);
+  };
+
+  const removeContato = (index: number) => {
+      const novos = [...contatosList];
+      novos.splice(index, 1);
+      setContatosList(novos);
+  };
+
+  const updateContato = (index: number, campo: string, valor: string) => {
+      const novos = [...contatosList];
+      novos[index] = { ...novos[index], [campo]: valor };
+      setContatosList(novos);
   };
 
   const adicionarNotaAoHistorico = () => {
@@ -420,9 +469,12 @@ function PipelineContent() {
     doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
     doc.text("DADOS DO CLIENTE", 18, 41);
 
+    // PDF ignora o cargo e contatos adicionais. Imprime apenas Nome e Tel do Contato Principal
+    const contatoPrincipal = contatosList[0] || { nome: '', telefone: '' };
+
     doc.setFontSize(9); doc.setTextColor(80, 80, 80); doc.setFont("helvetica", "normal");
     doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 18, 47);
-    doc.text(`Contato: ${formData.contato || 'N/D'}   |   Tel: ${formData.telefone || 'N/D'}`, 18, 52);
+    doc.text(`Contato: ${contatoPrincipal.nome || 'N/D'}   |   Tel: ${contatoPrincipal.telefone || 'N/D'}`, 18, 52);
     doc.text(`Cidade/UF: ${formData.cidade_exclusividade || '-'} / ${formData.uf_exclusividade || '-'}`, 18, 57);
 
     const precoGrama = parseMoney(formData.valor_g_tabela);
@@ -595,6 +647,10 @@ function PipelineContent() {
     }
 
     const isRepasse = formData.user_id !== usuarioLogado?.id;
+    
+    // Tratamento dos múltiplos contatos para salvar
+    const contatoPrincipal = contatosList[0] || { nome: '', cargo: 'Comprador(a)', telefone: '', email: '' };
+    const contatosExtras = contatosList.slice(1);
 
     const dadosSalvar = {
         ...formData, 
@@ -603,9 +659,11 @@ function PipelineContent() {
         numero_proposta: numeroFinal, 
         nome_cliente: formData.nome_cliente.toUpperCase(), 
         endereco: formData.endereco ? formData.endereco.toUpperCase() : '',
-        contato: formData.contato ? formData.contato.toUpperCase() : '', 
-        cargo_contato: formData.cargo_contato || 'Comprador(a)',
-        email: formData.email ? formData.email.toLowerCase() : '', 
+        contato: contatoPrincipal.nome.toUpperCase(), 
+        cargo_contato: contatoPrincipal.cargo,
+        telefone: contatoPrincipal.telefone, 
+        email: contatoPrincipal.email.toLowerCase(), 
+        contatos_adicionais: JSON.stringify(contatosExtras), // Salva os extras no banco
         cidade_exclusividade: formData.cidade_exclusividade ? formData.cidade_exclusividade.toUpperCase() : '', 
         uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '', 
         valor: valorFinal, 
@@ -684,7 +742,26 @@ function PipelineContent() {
     const nomeResponsavel = equipe.find(u => u.id === op.user_id)?.nome || 'N/A';
     
     return (
-        <div key={op.id} onClick={() => { setEditingOp(op); setFormData({...formData, ...op, custo_fixo_operacional: op.custo_fixo_operacional || '0', cargo_contato: op.cargo_contato || 'Comprador(a)'}); setIsRepLocked(false); setNovaNotaInput(""); setModalOpen(true); }} className={`p-4 rounded-2xl border-2 cursor-pointer shadow-sm transition hover:shadow-md ${bgClass} ${borderClass}`}>
+        <div key={op.id} onClick={() => { 
+            setEditingOp(op); 
+            setFormData({...formData, ...op, custo_fixo_operacional: op.custo_fixo_operacional || '0'});
+            
+            let contatosCarregados = [{
+                nome: op.contato || '',
+                cargo: op.cargo_contato || 'Comprador(a)',
+                telefone: op.telefone || '',
+                email: op.email || ''
+            }];
+            if (op.contatos_adicionais) {
+                try {
+                    const adicionaisParsed = typeof op.contatos_adicionais === 'string' ? JSON.parse(op.contatos_adicionais) : op.contatos_adicionais;
+                    contatosCarregados = [...contatosCarregados, ...adicionaisParsed];
+                } catch (e) {}
+            }
+            setContatosList(contatosCarregados);
+
+            setIsRepLocked(false); setNovaNotaInput(""); setModalOpen(true); 
+        }} className={`p-4 rounded-2xl border-2 cursor-pointer shadow-sm transition hover:shadow-md ${bgClass} ${borderClass}`}>
             <div className="flex justify-between items-start mb-2">
                 <div className="max-w-[80%]">
                     <span className="text-[10px] font-black tracking-widest text-slate-400 block mb-0.5">#{formatPropostaId(op.numero_proposta)}</span>
@@ -782,7 +859,14 @@ function PipelineContent() {
                 <button onClick={gerarRelatorioGeral} className="flex-1 sm:flex-none bg-slate-800 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 flex items-center justify-center gap-2 whitespace-nowrap text-xs md:text-sm hover:bg-slate-900">
                     <Printer size={16} /> <span className="hidden sm:inline">Relatório</span>
                 </button>
-                <button onClick={() => { setEditingOp(null); setIsRepLocked(false); setFormData({cnpj: '', nome_cliente: '', contato: '', cargo_contato: 'Comprador(a)', telefone: '', email: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', data_lembrete_sdr: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', endereco: '', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); setNovaNotaInput(""); setModalOpen(true); }} className="flex-1 sm:flex-none bg-blue-600 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-xs md:text-sm flex items-center justify-center gap-2 hover:bg-blue-700">
+                <button onClick={() => { 
+                    setEditingOp(null); 
+                    setIsRepLocked(false); 
+                    setFormData({cnpj: '', nome_cliente: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', data_lembrete_sdr: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', endereco: '', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); 
+                    setContatosList([{ nome: '', cargo: 'Comprador(a)', telefone: '', email: '' }]); // Reseta a lista de contatos
+                    setNovaNotaInput(""); 
+                    setModalOpen(true); 
+                }} className="flex-1 sm:flex-none bg-blue-600 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-xs md:text-sm flex items-center justify-center gap-2 hover:bg-blue-700">
                     <Plus size={16} /> Nova Op.
                 </button>
             </div>
@@ -861,26 +945,48 @@ function PipelineContent() {
                   <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm text-center" value={formData.uf_exclusividade} onChange={e => setFormData({...formData, uf_exclusividade: e.target.value.toUpperCase()})} placeholder="SP" maxLength={2}/>
               </div>
               
-              <div className="md:col-span-2">
-                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Nome do Contato</label>
-                  <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value.toUpperCase()})} placeholder="EX: DRA. JULIA"/>
-              </div>
-              
-              {/* CLASSIFICAÇÃO DO CONTATO */}
-              <div className="md:col-span-2">
-                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Cargo / Papel do Contato</label>
-                  <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.cargo_contato} onChange={e => setFormData({...formData, cargo_contato: e.target.value})}>
-                      {OPCOES_CARGO_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-              </div>
-
-              <div className="md:col-span-2">
-                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">WhatsApp / Tel</label>
-                  <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})} placeholder="(11) 99999-9999"/>
-              </div>
-              <div className="md:col-span-2">
-                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">E-mail</label>
-                  <input type="email" className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-medium outline-none shadow-sm" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value.toLowerCase()})} placeholder="email@farmacia.com"/>
+              {/* LISTA DINÂMICA DE CONTATOS */}
+              <div className="md:col-span-4 mt-2">
+                  <div className="flex items-center justify-between mb-3 border-b border-slate-200 pb-2">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1"><Users size={14}/> Contatos da Farmácia</label>
+                  </div>
+                  
+                  {contatosList.map((contato, idx) => (
+                      <div key={idx} className="p-4 bg-white border border-slate-200 rounded-xl mb-3 relative shadow-sm hover:border-blue-300 transition-colors">
+                          {idx > 0 && (
+                              <button type="button" onClick={() => removeContato(idx)} className="absolute top-2 right-2 text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 p-2 rounded-lg transition" title="Remover Contato">
+                                  <Trash2 size={16}/>
+                              </button>
+                          )}
+                          <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-4">
+                              {idx === 0 ? '⭐ Contato Principal (Aparece no PDF)' : `👤 Contato Adicional ${idx + 1}`}
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Nome do Contato</label>
+                                  <input className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm transition" value={contato.nome} onChange={e => updateContato(idx, 'nome', e.target.value.toUpperCase())} placeholder="EX: DRA. JULIA"/>
+                              </div>
+                              <div>
+                                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Cargo / Papel</label>
+                                  <select className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer transition" value={contato.cargo} onChange={e => updateContato(idx, 'cargo', e.target.value)}>
+                                      {OPCOES_CARGO_CONTATO.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                  </select>
+                              </div>
+                              <div>
+                                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">WhatsApp / Tel</label>
+                                  <input className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-bold outline-none shadow-sm transition" value={contato.telefone} onChange={e => updateContato(idx, 'telefone', e.target.value)} placeholder="(11) 99999-9999"/>
+                              </div>
+                              <div>
+                                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">E-mail</label>
+                                  <input type="email" className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-medium outline-none shadow-sm transition" value={contato.email} onChange={e => updateContato(idx, 'email', e.target.value.toLowerCase())} placeholder="email@farmacia.com"/>
+                              </div>
+                          </div>
+                      </div>
+                  ))}
+                  
+                  <button type="button" onClick={addContato} className="mt-1 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-4 py-2.5 rounded-xl transition flex items-center gap-2 active:scale-95">
+                      <UserPlus size={14}/> Adicionar Outro Contato
+                  </button>
               </div>
 
               <div className="md:col-span-2 bg-blue-50 border border-blue-200 p-4 rounded-xl shadow-sm relative mt-2">
@@ -957,7 +1063,6 @@ function PipelineContent() {
                       <MessageSquare size={14}/> Nova Anotação
                   </label>
                   
-                  {/* Caixa para escrever a nota (Permite Enter) */}
                   <div className="flex flex-col gap-2 bg-blue-50/50 p-3 border border-blue-100 rounded-2xl">
                       <textarea 
                           className="w-full bg-white border border-slate-200 focus:border-blue-500 rounded-xl p-3 outline-none text-sm text-slate-700 font-medium shadow-sm transition resize-none min-h-[80px] custom-scrollbar" 
@@ -970,7 +1075,6 @@ function PipelineContent() {
                       </button>
                   </div>
 
-                  {/* Histórico Bloqueado (Read-Only) */}
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mt-4 mb-2">
                       <History size={14}/> Histórico Imutável
                   </label>
