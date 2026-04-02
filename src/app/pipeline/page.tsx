@@ -7,7 +7,7 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users, Building2, UserPlus
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users, Building2, UserPlus, Bell
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -63,6 +63,9 @@ function PipelineContent() {
       open: false, title: 'AVISO IMPORTANTE', message: '', onConfirm: () => {}, onCancel: () => {}
   });
 
+  // NOVO ESTADO: Modal de Lembrete bonito
+  const [lembreteModal, setLembreteModal] = useState({ open: false, clientes: [] as string[] });
+
   const [novaNotaInput, setNovaNotaInput] = useState("");
   const [isRepLocked, setIsRepLocked] = useState(false); 
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
@@ -74,7 +77,6 @@ function PipelineContent() {
     return new Date(now.getTime() - offset).toISOString().split('T')[0];
   };
 
-  // ESTADO DOS CONTATOS DA FARMÁCIA (Dinâmico)
   const [contatosList, setContatosList] = useState([{ nome: '', cargo: 'Comprador(a)', telefone: '', email: '' }]);
 
   const [formData, setFormData] = useState({
@@ -116,7 +118,7 @@ function PipelineContent() {
         if (!checkAlarme) {
             const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
             audio.play().catch(() => {});
-            alert(`🔔 LEMBRETES DE HOJE!\n\nVocê precisa atuar nestas oportunidades hoje:\n\n- ${clientesAvisar.join('\n- ')}`);
+            setLembreteModal({ open: true, clientes: clientesAvisar });
             sessionStorage.setItem('alarme_pipeline_tocado_' + hoje, 'true');
         }
     }
@@ -130,7 +132,6 @@ function PipelineContent() {
               setEditingOp(opEncontrada);
               setFormData(prev => ({...prev, ...opEncontrada, custo_fixo_operacional: opEncontrada.custo_fixo_operacional || '0'}));
               
-              // Carregar lista de contatos do banco
               let contatosCarregados = [{
                   nome: opEncontrada.contato || '',
                   cargo: opEncontrada.cargo_contato || 'Comprador(a)',
@@ -379,7 +380,6 @@ function PipelineContent() {
             uf_exclusividade: (data.uf || chavesERP?.uf || '').toUpperCase(),
           }));
 
-          // Atualiza o contato principal (se vazio) mantendo o estado
           setContatosList(prev => {
               const novos = [...prev];
               novos[0] = {
@@ -414,7 +414,6 @@ function PipelineContent() {
     setLoadingCNPJ(false);
   };
 
-  // Funções para gerenciar múltiplos contatos
   const addContato = () => {
       setContatosList([...contatosList, { nome: '', cargo: 'Comprador(a)', telefone: '', email: '' }]);
   };
@@ -469,7 +468,6 @@ function PipelineContent() {
     doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
     doc.text("DADOS DO CLIENTE", 18, 41);
 
-    // PDF ignora o cargo e contatos adicionais. Imprime apenas Nome e Tel do Contato Principal
     const contatoPrincipal = contatosList[0] || { nome: '', telefone: '' };
 
     doc.setFontSize(9); doc.setTextColor(80, 80, 80); doc.setFont("helvetica", "normal");
@@ -648,7 +646,6 @@ function PipelineContent() {
 
     const isRepasse = formData.user_id !== usuarioLogado?.id;
     
-    // Tratamento dos múltiplos contatos para salvar
     const contatoPrincipal = contatosList[0] || { nome: '', cargo: 'Comprador(a)', telefone: '', email: '' };
     const contatosExtras = contatosList.slice(1);
 
@@ -663,7 +660,7 @@ function PipelineContent() {
         cargo_contato: contatoPrincipal.cargo,
         telefone: contatoPrincipal.telefone, 
         email: contatoPrincipal.email.toLowerCase(), 
-        contatos_adicionais: JSON.stringify(contatosExtras), // Salva os extras no banco
+        contatos_adicionais: JSON.stringify(contatosExtras),
         cidade_exclusividade: formData.cidade_exclusividade ? formData.cidade_exclusividade.toUpperCase() : '', 
         uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '', 
         valor: valorFinal, 
@@ -863,7 +860,7 @@ function PipelineContent() {
                     setEditingOp(null); 
                     setIsRepLocked(false); 
                     setFormData({cnpj: '', nome_cliente: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', data_lembrete_sdr: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', endereco: '', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); 
-                    setContatosList([{ nome: '', cargo: 'Comprador(a)', telefone: '', email: '' }]); // Reseta a lista de contatos
+                    setContatosList([{ nome: '', cargo: 'Comprador(a)', telefone: '', email: '' }]); 
                     setNovaNotaInput(""); 
                     setModalOpen(true); 
                 }} className="flex-1 sm:flex-none bg-blue-600 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-xs md:text-sm flex items-center justify-center gap-2 hover:bg-blue-700">
@@ -924,7 +921,6 @@ function PipelineContent() {
                   </div>
               </div>
 
-              {/* FARMÁCIA DESTAQUE E ENDEREÇO */}
               <div className="md:col-span-2">
                   <label className="text-xs font-black text-green-700 mb-1.5 block uppercase tracking-widest">Farmácia (Nome Fantasia)</label>
                   <input className="w-full bg-green-50 border-2 border-green-400 focus:border-green-600 rounded-xl p-3 text-sm font-black text-green-900 uppercase outline-none shadow-sm transition-colors" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})} placeholder="NOME DA FARMÁCIA"/>
@@ -945,7 +941,6 @@ function PipelineContent() {
                   <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm text-center" value={formData.uf_exclusividade} onChange={e => setFormData({...formData, uf_exclusividade: e.target.value.toUpperCase()})} placeholder="SP" maxLength={2}/>
               </div>
               
-              {/* LISTA DINÂMICA DE CONTATOS */}
               <div className="md:col-span-4 mt-2">
                   <div className="flex items-center justify-between mb-3 border-b border-slate-200 pb-2">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1"><Users size={14}/> Contatos da Farmácia</label>
@@ -1045,7 +1040,6 @@ function PipelineContent() {
                   <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Follow-up e Histórico</h3>
               </div>
               
-              {/* DATAS SEPARADAS */}
               <div className="md:col-span-1">
                   <label className="text-[10px] font-black text-red-600 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Clock size={12}/> Próx. Contato (Closer)</label>
                   <input type="date" className="w-full bg-white border border-red-200 focus:border-red-500 rounded-xl p-3 text-sm font-bold text-red-900 outline-none shadow-sm cursor-pointer" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} />
@@ -1057,7 +1051,6 @@ function PipelineContent() {
 
               <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-700 uppercase tracking-widest mb-1.5 block">Canal de Contato</label><select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
               
-              {/* DIÁRIO DE BORDO - AUDITORIA E NOTAS */}
               <div className="md:col-span-4 space-y-3 mt-4">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2">
                       <MessageSquare size={14}/> Nova Anotação
@@ -1128,6 +1121,36 @@ function PipelineContent() {
            </div>
         </div>, document.body
       )}
+
+      {/* NOVO MODAL: Lembretes Bonito */}
+      {lembreteModal.open && mounted && createPortal(
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
+           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
+              <div className="bg-blue-600 p-6 flex flex-col items-center justify-center text-white">
+                 <Bell size={40} className="mb-3 animate-bounce"/>
+                 <h2 className="text-xl font-black uppercase tracking-tight text-center">Lembretes de Hoje!</h2>
+              </div>
+              <div className="p-6 bg-white">
+                 <p className="text-slate-700 font-bold mb-4 text-center text-sm">Você precisa atuar nestas oportunidades hoje:</p>
+                 <div className="max-h-48 overflow-y-auto custom-scrollbar">
+                     <ul className="space-y-2 mb-2 pr-2">
+                       {lembreteModal.clientes.map((cliente, i) => (
+                         <li key={i} className="flex items-start gap-2 text-sm font-medium text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100 shadow-sm">
+                           <span className="text-blue-500 font-black mt-0.5">•</span> {cliente}
+                         </li>
+                       ))}
+                     </ul>
+                 </div>
+              </div>
+              <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-center">
+                 <button onClick={() => setLembreteModal({ open: false, clientes: [] })} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl transition shadow-lg active:scale-95">
+                   Ciente, vamos lá!
+                 </button>
+              </div>
+           </div>
+        </div>, document.body
+      )}
+
     </div>
   );
 }
