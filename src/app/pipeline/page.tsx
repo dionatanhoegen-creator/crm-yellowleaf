@@ -63,8 +63,7 @@ function PipelineContent() {
       open: false, title: 'AVISO IMPORTANTE', message: '', onConfirm: () => {}, onCancel: () => {}
   });
 
-  // ESTADO DE LEMBRETE MANTIDO COMO FOI SOLICITADO NA ÚLTIMA APROVAÇÃO
-  const [lembreteModal, setLembreteModal] = useState({ open: false, clientes: [] as string[] });
+  const [lembreteModal, setLembreteModal] = useState({ open: false, clientes: [] as any[] });
 
   const [novaNotaInput, setNovaNotaInput] = useState("");
   const [isRepLocked, setIsRepLocked] = useState(false); 
@@ -100,16 +99,16 @@ function PipelineContent() {
     if (oportunidades.length === 0 || !usuarioLogado) return;
     const hoje = getLocalData();
     let temLembreteHoje = false;
-    let clientesAvisar: string[] = [];
+    let clientesAvisar: any[] = [];
 
     oportunidades.forEach(op => {
         if (op.user_id === usuarioLogado.id && op.data_lembrete === hoje && !['fechado', 'perdido'].includes(op.status)) {
             temLembreteHoje = true;
-            clientesAvisar.push(`${op.nome_cliente} (Seu Contato)`);
+            clientesAvisar.push({ id: op.id, nome: op.nome_cliente, tipo: 'Seu Contato' });
         }
         if (isSDRUser && op.data_lembrete_sdr === hoje && !['fechado', 'perdido'].includes(op.status)) {
             temLembreteHoje = true;
-            clientesAvisar.push(`${op.nome_cliente} (Cobrar Closer)`);
+            clientesAvisar.push({ id: op.id, nome: op.nome_cliente, tipo: 'Cobrar Closer' });
         }
     });
 
@@ -149,10 +148,15 @@ function PipelineContent() {
               setIsRepLocked(false);
               setNovaNotaInput("");
               setModalOpen(true);
-              router.replace('/pipeline', { scroll: false });
+              // RETIRADO o router.replace daqui para não interromper a abertura do modal
           }
       }
-  }, [opIdUrl, oportunidades, router, modalOpen]);
+  }, [opIdUrl, oportunidades, modalOpen]);
+
+  const fecharModalE LimparURL = () => {
+      setModalOpen(false);
+      router.replace('/pipeline', { scroll: false });
+  };
 
   const inicializarDados = async () => {
     setLoading(true);
@@ -321,7 +325,6 @@ function PipelineContent() {
         }
 
         if (vendedorERP !== "") {
-            // "Vacina" para ignorar acentos ao buscar o nome na base de usuários
             const normalizeStr = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
             const vendedorNorm = normalizeStr(vendedorERP);
 
@@ -712,7 +715,9 @@ function PipelineContent() {
           });
       }
 
-      setModalOpen(false); setNovaNotaInput(""); carregarOportunidades(usuarioLogado); 
+      fecharModalELimparURL();
+      setNovaNotaInput(""); 
+      carregarOportunidades(usuarioLogado); 
     } else { 
       alert(`Erro ao salvar: ${error.message}`); 
     }
@@ -721,7 +726,10 @@ function PipelineContent() {
   const handleDelete = async () => {
     if (confirm('Deseja excluir este registro permanentemente?')) {
         const { error } = await supabase.from('pipeline').delete().eq('id', editingOp.id);
-        if (!error) { carregarOportunidades(usuarioLogado); setModalOpen(false); } 
+        if (!error) { 
+           carregarOportunidades(usuarioLogado); 
+           fecharModalELimparURL();
+        } 
     }
   };
 
@@ -911,7 +919,7 @@ function PipelineContent() {
                         <FileText size={16}/> <span className="hidden sm:inline">Gerar PDF</span>
                     </button>
                 )}
-                <button onClick={() => setModalOpen(false)} className="hover:bg-white/20 p-2 rounded-full transition bg-white/10 text-white"><X size={20}/></button>
+                <button onClick={fecharModalELimparURL} className="hover:bg-white/20 p-2 rounded-full transition bg-white/10 text-white"><X size={20}/></button>
               </div>
             </div>
 
@@ -1094,7 +1102,7 @@ function PipelineContent() {
               {editingOp ? <button onClick={handleDelete} className="w-full md:w-auto text-red-500 font-bold text-xs uppercase px-4 py-3 md:py-2 border border-red-100 md:border-none hover:bg-red-50 rounded-xl md:rounded-lg transition flex items-center justify-center gap-2"><Trash2 size={16}/> Excluir Registro</button> : <div className="hidden md:block"></div>}
               
               <div className="flex flex-col-reverse md:flex-row gap-3 w-full md:w-auto">
-                  <button onClick={() => setModalOpen(false)} className="w-full md:w-auto px-6 py-3.5 md:py-3 font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition text-sm">Cancelar</button>
+                  <button onClick={fecharModalELimparURL} className="w-full md:w-auto px-6 py-3.5 md:py-3 font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition text-sm">Cancelar</button>
                   <button onClick={handleSave} className="w-full md:w-auto bg-blue-600 text-white px-8 py-3.5 md:py-3 rounded-xl font-black shadow-lg shadow-blue-200 transition transform active:scale-95 hover:bg-blue-700 text-sm flex items-center justify-center gap-2"><Save size={18}/> Salvar Oportunidade</button>
               </div>
             </div>
@@ -1103,7 +1111,6 @@ function PipelineContent() {
         </div>, document.body
       )}
 
-      {/* MODAL PADRÃO DE ERRO / AVISO */}
       {confirmModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
@@ -1120,7 +1127,6 @@ function PipelineContent() {
         </div>, document.body
       )}
 
-      {/* MODAL DE BLOQUEIO */}
       {blockModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in duration-300">
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
@@ -1134,7 +1140,6 @@ function PipelineContent() {
         </div>, document.body
       )}
 
-      {/* NOVO MODAL: Lembretes Bonito */}
       {lembreteModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
@@ -1147,8 +1152,16 @@ function PipelineContent() {
                  <div className="max-h-48 overflow-y-auto custom-scrollbar">
                      <ul className="space-y-2 mb-2 pr-2">
                        {lembreteModal.clientes.map((cliente, i) => (
-                         <li key={i} className="flex items-start gap-2 text-sm font-medium text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100 shadow-sm">
-                           <span className="text-blue-500 font-black mt-0.5">•</span> {cliente}
+                         <li 
+                            key={i} 
+                            onClick={() => {
+                                setLembreteModal(prev => ({...prev, open: false}));
+                                router.push(`/pipeline?op_id=${cliente.id}`);
+                            }} 
+                            className="flex items-start gap-2 text-sm font-medium text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100 shadow-sm cursor-pointer hover:bg-blue-50 transition hover:border-blue-200"
+                         >
+                           <span className="text-blue-500 font-black mt-0.5">•</span> 
+                           {cliente.nome} <span className="text-slate-400 text-xs ml-1">({cliente.tipo})</span>
                          </li>
                        ))}
                      </ul>
@@ -1167,7 +1180,6 @@ function PipelineContent() {
   );
 }
 
-// O componente Exportado que cria a "bolha de segurança" para a Vercel
 export default function PipelinePage() {
   return (
     <Suspense fallback={<div className="p-8 text-center text-slate-500 font-bold">Carregando Pipeline...</div>}>
