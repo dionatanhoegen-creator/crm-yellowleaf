@@ -63,7 +63,7 @@ function PipelineContent() {
       open: false, title: 'AVISO IMPORTANTE', message: '', onConfirm: () => {}, onCancel: () => {}
   });
 
-  // NOVO ESTADO: Modal de Lembrete bonito
+  // ESTADO DE LEMBRETE MANTIDO COMO FOI SOLICITADO NA ÚLTIMA APROVAÇÃO
   const [lembreteModal, setLembreteModal] = useState({ open: false, clientes: [] as string[] });
 
   const [novaNotaInput, setNovaNotaInput] = useState("");
@@ -321,7 +321,15 @@ function PipelineContent() {
         }
 
         if (vendedorERP !== "") {
-            const repEncontrado = equipe.find(u => vendedorERP.toLowerCase().includes(u.nome.toLowerCase()) || u.nome.toLowerCase().includes(vendedorERP.toLowerCase()));
+            // "Vacina" para ignorar acentos ao buscar o nome na base de usuários
+            const normalizeStr = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+            const vendedorNorm = normalizeStr(vendedorERP);
+
+            const repEncontrado = equipe.find(u => {
+                const nomeNorm = normalizeStr(u.nome);
+                return vendedorNorm.includes(nomeNorm) || nomeNorm.includes(vendedorNorm);
+            });
+
             if (repEncontrado) {
                 if (isSDRUser) {
                     setIsRepLocked(false); 
@@ -921,6 +929,7 @@ function PipelineContent() {
                   </div>
               </div>
 
+              {/* FARMÁCIA DESTAQUE E ENDEREÇO */}
               <div className="md:col-span-2">
                   <label className="text-xs font-black text-green-700 mb-1.5 block uppercase tracking-widest">Farmácia (Nome Fantasia)</label>
                   <input className="w-full bg-green-50 border-2 border-green-400 focus:border-green-600 rounded-xl p-3 text-sm font-black text-green-900 uppercase outline-none shadow-sm transition-colors" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})} placeholder="NOME DA FARMÁCIA"/>
@@ -941,6 +950,7 @@ function PipelineContent() {
                   <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm text-center" value={formData.uf_exclusividade} onChange={e => setFormData({...formData, uf_exclusividade: e.target.value.toUpperCase()})} placeholder="SP" maxLength={2}/>
               </div>
               
+              {/* LISTA DINÂMICA DE CONTATOS */}
               <div className="md:col-span-4 mt-2">
                   <div className="flex items-center justify-between mb-3 border-b border-slate-200 pb-2">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1"><Users size={14}/> Contatos da Farmácia</label>
@@ -1093,6 +1103,7 @@ function PipelineContent() {
         </div>, document.body
       )}
 
+      {/* MODAL PADRÃO DE ERRO / AVISO */}
       {confirmModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
@@ -1109,6 +1120,7 @@ function PipelineContent() {
         </div>, document.body
       )}
 
+      {/* MODAL DE BLOQUEIO */}
       {blockModal.open && mounted && createPortal(
         <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in duration-300">
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
