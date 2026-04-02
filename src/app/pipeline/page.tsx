@@ -35,6 +35,7 @@ const STAGE_COLORS: any = {
 };
 
 const CANAIS_CONTATO = ['WhatsApp', 'Ligação', 'E-mail', 'Visita Presencial', 'Instagram'];
+const OPCOES_CARGO_CONTATO = ['Comprador(a)', 'Proprietário(a)', 'Sócio(a)', 'Representante Médico(a)', 'Farmacêutico(a) Responsável', 'Gerente', 'Outros'];
 
 function PipelineContent() {
   const supabase = createClientComponentClient();
@@ -74,8 +75,8 @@ function PipelineContent() {
   };
 
   const [formData, setFormData] = useState({
-    cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', validade_produto: '',
-    aplicacao: '', valor: '', data_entrada: getLocalData(), data_lembrete: '', 
+    cnpj: '', nome_cliente: '', contato: '', cargo_contato: 'Comprador(a)', telefone: '', email: '', produto: '', validade_produto: '',
+    aplicacao: '', valor: '', data_entrada: getLocalData(), data_lembrete: '', data_lembrete_sdr: '', 
     canal_contato: 'WhatsApp', observacoes: '', observacoes_proposta: '', 
     status: 'prospeccao', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45',
     peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', 
@@ -83,10 +84,44 @@ function PipelineContent() {
     user_id: '' 
   });
 
+  // Checa se o usuário tem permissão de SDR
+  const isSDRUser = usuarioLogado?.cargo?.toLowerCase().includes('p&d') || usuarioLogado?.cargo?.toLowerCase().includes('sdr') || usuarioLogado?.nome?.toLowerCase().includes('jaque');
+
   useEffect(() => { 
     setMounted(true); 
     inicializarDados();
   }, []);
+
+  // SISTEMA DE ALERTA DE LEMBRETES DIÁRIOS
+  useEffect(() => {
+    if (oportunidades.length === 0 || !usuarioLogado) return;
+    const hoje = getLocalData();
+    let temLembreteHoje = false;
+    let clientesAvisar: string[] = [];
+
+    oportunidades.forEach(op => {
+        // Se eu sou o vendedor e o lembrete é hoje
+        if (op.user_id === usuarioLogado.id && op.data_lembrete === hoje && !['fechado', 'perdido'].includes(op.status)) {
+            temLembreteHoje = true;
+            clientesAvisar.push(`${op.nome_cliente} (Seu Contato)`);
+        }
+        // Se eu sou SDR e o lembrete de acompanhamento SDR é hoje
+        if (isSDRUser && op.data_lembrete_sdr === hoje && !['fechado', 'perdido'].includes(op.status)) {
+            temLembreteHoje = true;
+            clientesAvisar.push(`${op.nome_cliente} (Cobrar Closer)`);
+        }
+    });
+
+    if (temLembreteHoje) {
+        const checkAlarme = sessionStorage.getItem('alarme_pipeline_tocado_' + hoje);
+        if (!checkAlarme) {
+            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+            audio.play().catch(() => {});
+            alert(`🔔 LEMBRETES DE HOJE!\n\nVocê precisa atuar nestas oportunidades hoje:\n\n- ${clientesAvisar.join('\n- ')}`);
+            sessionStorage.setItem('alarme_pipeline_tocado_' + hoje, 'true'); // Evita tocar toda hora que recarregar
+        }
+    }
+  }, [oportunidades, usuarioLogado]);
 
   const opIdUrl = searchParams.get('op_id');
   useEffect(() => {
@@ -94,7 +129,7 @@ function PipelineContent() {
           const opEncontrada = oportunidades.find(o => String(o.id) === opIdUrl);
           if (opEncontrada) {
               setEditingOp(opEncontrada);
-              setFormData(prev => ({...prev, ...opEncontrada, custo_fixo_operacional: opEncontrada.custo_fixo_operacional || '0'}));
+              setFormData(prev => ({...prev, ...opEncontrada, custo_fixo_operacional: opEncontrada.custo_fixo_operacional || '0', cargo_contato: opEncontrada.cargo_contato || 'Comprador(a)'}));
               setIsRepLocked(false);
               setNovaNotaInput("");
               setModalOpen(true);
@@ -272,9 +307,7 @@ function PipelineContent() {
         if (vendedorERP !== "") {
             const repEncontrado = equipe.find(u => vendedorERP.toLowerCase().includes(u.nome.toLowerCase()) || u.nome.toLowerCase().includes(vendedorERP.toLowerCase()));
             if (repEncontrado) {
-                const isSDR = usuarioLogado?.cargo?.toLowerCase().includes('p&d') || usuarioLogado?.cargo?.toLowerCase().includes('sdr') || usuarioLogado?.nome?.toLowerCase().includes('jaque');
-                
-                if (isSDR) {
+                if (isSDRUser) {
                     setIsRepLocked(false); 
                     setConfirmModal({
                         open: true,
@@ -349,7 +382,6 @@ function PipelineContent() {
     setLoadingCNPJ(false);
   };
 
-  // NOVA FUNÇÃO DO DIÁRIO DE BORDO
   const adicionarNotaAoHistorico = () => {
     if (!novaNotaInput.trim()) return;
     const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -548,7 +580,6 @@ function PipelineContent() {
     if ((!formData.observacoes || formData.observacoes.trim() === "") && !novaNotaInput.trim()) return alert("O campo 'Diário de Bordo' é obrigatório. Registre o andamento da negociação.");
     if (!formData.data_lembrete || formData.data_lembrete.trim() === "") return alert("Por favor, selecione uma data para 'Próximo Contato'. É obrigatório definir um retorno.");
     
-    // Auto-salva a nota se ele esqueceu de apertar o botão registrar
     let obsFinal = formData.observacoes || "";
     if (novaNotaInput.trim()) {
         const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -573,6 +604,7 @@ function PipelineContent() {
         nome_cliente: formData.nome_cliente.toUpperCase(), 
         endereco: formData.endereco ? formData.endereco.toUpperCase() : '',
         contato: formData.contato ? formData.contato.toUpperCase() : '', 
+        cargo_contato: formData.cargo_contato || 'Comprador(a)',
         email: formData.email ? formData.email.toLowerCase() : '', 
         cidade_exclusividade: formData.cidade_exclusividade ? formData.cidade_exclusividade.toUpperCase() : '', 
         uf_exclusividade: formData.uf_exclusividade ? formData.uf_exclusividade.toUpperCase() : '', 
@@ -587,6 +619,7 @@ function PipelineContent() {
         fator_lucro: String(parseMoney(formData.fator_lucro)), 
         custo_fixo_operacional: parseMoney(formData.custo_fixo_operacional), 
         data_lembrete: (formData.data_lembrete && formData.data_lembrete.trim() !== "") ? formData.data_lembrete : null, 
+        data_lembrete_sdr: (formData.data_lembrete_sdr && formData.data_lembrete_sdr.trim() !== "") ? formData.data_lembrete_sdr : null,
         data_entrada: formData.data_entrada || getLocalData(), 
         canal_contato: formData.canal_contato, 
         observacoes: obsFinal, 
@@ -598,7 +631,6 @@ function PipelineContent() {
         : await supabase.from('pipeline').insert(dadosSalvar).select();
     
     if (!error) { 
-      // Notificação 1: Se for repasse novo
       if (isRepasse && !editingOp && savedOpData && savedOpData.length > 0) {
           await supabase.from('notificacoes').insert({
               user_id: formData.user_id,
@@ -608,7 +640,6 @@ function PipelineContent() {
           });
       }
 
-      // NOVA Notificação 2: Feedback para o SDR
       if (editingOp && editingOp.sdr_id && editingOp.sdr_id !== usuarioLogado?.id) {
           await supabase.from('notificacoes').insert({
               user_id: editingOp.sdr_id,
@@ -633,10 +664,9 @@ function PipelineContent() {
 
   const renderCard = (op: any) => {
     const hoje = getLocalData(); 
-    const dataLembrete = op.data_lembrete; 
     const isPerdido = op.status === 'perdido';
-    const isAtrasado = dataLembrete && dataLembrete < hoje;
-    const isHoje = dataLembrete === hoje; 
+    const isAtrasado = op.data_lembrete && op.data_lembrete < hoje;
+    const isHoje = op.data_lembrete === hoje; 
     
     let borderClass = 'border-slate-200 hover:border-blue-400';
     let bgClass = 'bg-white';
@@ -654,7 +684,7 @@ function PipelineContent() {
     const nomeResponsavel = equipe.find(u => u.id === op.user_id)?.nome || 'N/A';
     
     return (
-        <div key={op.id} onClick={() => { setEditingOp(op); setFormData({...formData, ...op, custo_fixo_operacional: op.custo_fixo_operacional || '0'}); setIsRepLocked(false); setNovaNotaInput(""); setModalOpen(true); }} className={`p-4 rounded-2xl border-2 cursor-pointer shadow-sm transition hover:shadow-md ${bgClass} ${borderClass}`}>
+        <div key={op.id} onClick={() => { setEditingOp(op); setFormData({...formData, ...op, custo_fixo_operacional: op.custo_fixo_operacional || '0', cargo_contato: op.cargo_contato || 'Comprador(a)'}); setIsRepLocked(false); setNovaNotaInput(""); setModalOpen(true); }} className={`p-4 rounded-2xl border-2 cursor-pointer shadow-sm transition hover:shadow-md ${bgClass} ${borderClass}`}>
             <div className="flex justify-between items-start mb-2">
                 <div className="max-w-[80%]">
                     <span className="text-[10px] font-black tracking-widest text-slate-400 block mb-0.5">#{formatPropostaId(op.numero_proposta)}</span>
@@ -752,7 +782,7 @@ function PipelineContent() {
                 <button onClick={gerarRelatorioGeral} className="flex-1 sm:flex-none bg-slate-800 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 flex items-center justify-center gap-2 whitespace-nowrap text-xs md:text-sm hover:bg-slate-900">
                     <Printer size={16} /> <span className="hidden sm:inline">Relatório</span>
                 </button>
-                <button onClick={() => { setEditingOp(null); setIsRepLocked(false); setFormData({cnpj: '', nome_cliente: '', contato: '', telefone: '', email: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', endereco: '', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); setNovaNotaInput(""); setModalOpen(true); }} className="flex-1 sm:flex-none bg-blue-600 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-xs md:text-sm flex items-center justify-center gap-2 hover:bg-blue-700">
+                <button onClick={() => { setEditingOp(null); setIsRepLocked(false); setFormData({cnpj: '', nome_cliente: '', contato: '', cargo_contato: 'Comprador(a)', telefone: '', email: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', data_lembrete_sdr: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', endereco: '', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); setNovaNotaInput(""); setModalOpen(true); }} className="flex-1 sm:flex-none bg-blue-600 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-xs md:text-sm flex items-center justify-center gap-2 hover:bg-blue-700">
                     <Plus size={16} /> Nova Op.
                 </button>
             </div>
@@ -835,16 +865,25 @@ function PipelineContent() {
                   <label className="text-xs font-bold text-slate-700 mb-1.5 block">Nome do Contato</label>
                   <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm" value={formData.contato} onChange={e => setFormData({...formData, contato: e.target.value.toUpperCase()})} placeholder="EX: DRA. JULIA"/>
               </div>
-              <div className="md:col-span-1">
+              
+              {/* CLASSIFICAÇÃO DO CONTATO */}
+              <div className="md:col-span-2">
+                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Cargo / Papel do Contato</label>
+                  <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.cargo_contato} onChange={e => setFormData({...formData, cargo_contato: e.target.value})}>
+                      {OPCOES_CARGO_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+              </div>
+
+              <div className="md:col-span-2">
                   <label className="text-xs font-bold text-slate-700 mb-1.5 block">WhatsApp / Tel</label>
                   <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.telefone} onChange={e => setFormData({...formData, telefone: e.target.value})} placeholder="(11) 99999-9999"/>
               </div>
-              <div className="md:col-span-1">
+              <div className="md:col-span-2">
                   <label className="text-xs font-bold text-slate-700 mb-1.5 block">E-mail</label>
                   <input type="email" className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-medium outline-none shadow-sm" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value.toLowerCase()})} placeholder="email@farmacia.com"/>
               </div>
 
-              <div className="md:col-span-2 bg-blue-50 border border-blue-200 p-4 rounded-xl shadow-sm relative">
+              <div className="md:col-span-2 bg-blue-50 border border-blue-200 p-4 rounded-xl shadow-sm relative mt-2">
                   <div className="absolute right-0 top-0 w-16 h-16 bg-blue-500 rounded-bl-full opacity-10 pointer-events-none"></div>
                   <label className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-2 flex items-center gap-1 relative z-10"><Briefcase size={12}/> Vendedor Responsável (Hand-off)</label>
                   <select value={formData.user_id} onChange={e => setFormData({...formData, user_id: e.target.value})} disabled={isRepLocked} className="w-full relative z-10 bg-white border border-blue-200 rounded-lg p-2.5 text-sm font-bold text-slate-800 outline-none shadow-sm cursor-pointer disabled:bg-slate-100 disabled:text-slate-500">
@@ -853,7 +892,7 @@ function PipelineContent() {
                   </select>
                   {isRepLocked && <p className="text-[9px] font-bold text-red-500 mt-1 uppercase relative z-10">Bloqueado pela regra de carteira ERP</p>}
               </div>
-              <div className="md:col-span-2">
+              <div className="md:col-span-2 mt-2">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Status no Funil</label>
                   <select className="w-full bg-white border border-slate-300 text-blue-700 text-sm font-bold p-3 rounded-xl outline-none shadow-sm cursor-pointer" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
                       {ESTAGIOS.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
@@ -899,11 +938,21 @@ function PipelineContent() {
                   <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-black text-xs md:text-sm">3</div>
                   <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Follow-up e Histórico</h3>
               </div>
-              <div className="md:col-span-2"><label className="text-xs font-black text-red-600 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Clock size={14}/> Próximo Contato</label><input type="date" className="w-full bg-white border border-red-200 focus:border-red-500 rounded-xl p-3 text-sm font-bold text-red-900 outline-none shadow-sm cursor-pointer" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} /></div>
-              <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Canal de Contato</label><select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+              
+              {/* DATAS SEPARADAS */}
+              <div className="md:col-span-1">
+                  <label className="text-[10px] font-black text-red-600 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Clock size={12}/> Próx. Contato (Closer)</label>
+                  <input type="date" className="w-full bg-white border border-red-200 focus:border-red-500 rounded-xl p-3 text-sm font-bold text-red-900 outline-none shadow-sm cursor-pointer" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} />
+              </div>
+              <div className="md:col-span-1">
+                  <label className="text-[10px] font-black text-purple-600 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Clock size={12}/> Acompanhar (SDR)</label>
+                  <input type="date" className="w-full bg-white border border-purple-200 focus:border-purple-500 rounded-xl p-3 text-sm font-bold text-purple-900 outline-none shadow-sm cursor-pointer disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200" value={formData.data_lembrete_sdr} onChange={e => setFormData({...formData, data_lembrete_sdr: e.target.value})} disabled={!isSDRUser} title={!isSDRUser ? "Apenas a equipe de SDR/P&D pode alterar esta data." : "Defina a data para cobrar o vendedor"}/>
+              </div>
+
+              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-700 uppercase tracking-widest mb-1.5 block">Canal de Contato</label><select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
               
               {/* DIÁRIO DE BORDO - AUDITORIA E NOTAS */}
-              <div className="md:col-span-4 space-y-3">
+              <div className="md:col-span-4 space-y-3 mt-4">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2">
                       <MessageSquare size={14}/> Nova Anotação
                   </label>
