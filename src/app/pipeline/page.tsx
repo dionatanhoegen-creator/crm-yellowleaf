@@ -148,12 +148,12 @@ function PipelineContent() {
               setIsRepLocked(false);
               setNovaNotaInput("");
               setModalOpen(true);
-              // RETIRADO o router.replace daqui para não interromper a abertura do modal
           }
       }
   }, [opIdUrl, oportunidades, modalOpen]);
 
-  const fecharModalE LimparURL = () => {
+  // FUNÇÃO CORRIGIDA SEM ESPAÇO
+  const fecharModalELimparURL = () => {
       setModalOpen(false);
       router.replace('/pipeline', { scroll: false });
   };
@@ -937,7 +937,6 @@ function PipelineContent() {
                   </div>
               </div>
 
-              {/* FARMÁCIA DESTAQUE E ENDEREÇO */}
               <div className="md:col-span-2">
                   <label className="text-xs font-black text-green-700 mb-1.5 block uppercase tracking-widest">Farmácia (Nome Fantasia)</label>
                   <input className="w-full bg-green-50 border-2 border-green-400 focus:border-green-600 rounded-xl p-3 text-sm font-black text-green-900 uppercase outline-none shadow-sm transition-colors" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})} placeholder="NOME DA FARMÁCIA"/>
@@ -958,7 +957,6 @@ function PipelineContent() {
                   <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm text-center" value={formData.uf_exclusividade} onChange={e => setFormData({...formData, uf_exclusividade: e.target.value.toUpperCase()})} placeholder="SP" maxLength={2}/>
               </div>
               
-              {/* LISTA DINÂMICA DE CONTATOS */}
               <div className="md:col-span-4 mt-2">
                   <div className="flex items-center justify-between mb-3 border-b border-slate-200 pb-2">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1"><Users size={14}/> Contatos da Farmácia</label>
