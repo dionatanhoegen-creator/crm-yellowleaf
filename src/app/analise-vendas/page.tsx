@@ -42,7 +42,6 @@ export default function AnaliseVendasPage() {
     setLoading(true);
     let logMsg = "Iniciando Varredura Completa da API...\n";
     
-    // 1. Identifica o usuário para a segurança
     const { data: { user } } = await supabase.auth.getUser();
     let perfilUsuario = null;
     let master = false;
@@ -55,7 +54,7 @@ export default function AnaliseVendasPage() {
         const cargoStr = String(perfil?.cargo || "").toLowerCase();
         master = ['admin', 'diretor', 'master'].includes(cargoStr) || cargoStr.includes('sdr') || cargoStr.includes('p&d');
         setIsMaster(master);
-        logMsg += `Usuário Logado: ${perfil?.nome} | Cargo: ${perfil?.cargo} | Master: ${master}\n`;
+        logMsg += `Usuário Logado: ${perfil?.nome} | Master: ${master}\n`;
     }
 
     let dadosExtraidos: any[] = [];
@@ -68,25 +67,28 @@ export default function AnaliseVendasPage() {
         return [];
     };
 
-    // 2. A REDE DE ARRASTO: Puxa Vendas, Faturamento e Histórico de Clientes de uma vez
+    // 2. A REDE DE ARRASTO CORRIGIDA: Agora pedindo a rota exata que está no Apps Script!
     try {
         const cacheBuster = new Date().getTime();
         
-        const [resVendas, resFaturamento, resClientes] = await Promise.all([
+        const [resDash, resVen, resFat, resCli] = await Promise.all([
+            fetch(`${API_CLIENTES_URL}?path=dashboard/faturamento&t=${cacheBuster}`).then(r => r.json()).catch(() => null),
             fetch(`${API_CLIENTES_URL}?path=vendas&t=${cacheBuster}`).then(r => r.json()).catch(() => null),
             fetch(`${API_CLIENTES_URL}?path=faturamento&t=${cacheBuster}`).then(r => r.json()).catch(() => null),
             fetch(`${API_CLIENTES_URL}?path=clientes&t=${cacheBuster}`).then(r => r.json()).catch(() => null)
         ]);
 
-        const dataVen = extractArray(resVendas);
-        const dataFat = extractArray(resFaturamento);
-        const dataCli = extractArray(resClientes);
+        const dataDash = extractArray(resDash);
+        const dataVen = extractArray(resVen);
+        const dataFat = extractArray(resFat);
+        const dataCli = extractArray(resCli);
         
-        logMsg += `Resposta API -> Vendas: ${dataVen.length} | Faturamento: ${dataFat.length} | Clientes: ${dataCli.length}\n`;
+        logMsg += `Resposta API -> Dashboard/Fat: ${dataDash.length} | Vendas: ${dataVen.length} | Clientes: ${dataCli.length}\n`;
 
-        dadosExtraidos = [...dataVen, ...dataFat];
+        // Junta tudo que achou
+        dadosExtraidos = [...dataDash, ...dataVen, ...dataFat];
 
-        // Se vendas diretas falharem, escava o histórico dentro do array de clientes
+        // Fallback: Se não achou vendas diretas, caça no histórico de clientes
         let countHist = 0;
         dataCli.forEach((c: any) => {
             const hist = c.historico || c.vendas || c.compras || c.faturamento || [];
@@ -116,7 +118,7 @@ export default function AnaliseVendasPage() {
 
     const colunasExemplo = dadosExtraidos.length > 0 ? Object.keys(dadosExtraidos[0]).join(' | ') : 'Nenhuma';
 
-    // 3. Mapeia e Normaliza as Colunas (Inteligência Híbrida)
+    // 3. Mapeia e Normaliza as Colunas
     const vendasFormatadas = dadosExtraidos.map(v => {
         const objNorm: any = {};
         Object.keys(v).forEach(k => {
@@ -127,13 +129,11 @@ export default function AnaliseVendasPage() {
         let mesCalculado = '01';
         let timestamp = 0;
 
-        // Se a planilha tiver a coluna Ano e Mês prontas (sua foto do Sheets)
         if (objNorm.ano && objNorm.mes) {
             anoCalculado = String(objNorm.ano).trim();
             mesCalculado = String(objNorm.mes).trim().padStart(2, '0');
             timestamp = new Date(parseInt(anoCalculado), parseInt(mesCalculado) - 1, 15).getTime();
         } 
-        // Se vier de um campo de Data (Histórico antigo)
         else {
             const dataBruta = String(objNorm.data || objNorm.datavenda || objNorm.criadoem || new Date().toISOString());
             if (dataBruta.match(/^\d{2}\/\d{2}\/\d{4}/)) {
@@ -276,7 +276,7 @@ export default function AnaliseVendasPage() {
           <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 text-slate-400">
               <Activity className="animate-spin text-emerald-500 mb-4" size={40}/>
               <h2 className="text-xl font-bold text-slate-600">Lendo API de Vendas...</h2>
-              <p className="text-sm mt-2">Buscando histórico na nuvem...</p>
+              <p className="text-sm mt-2">Sincronizando com a rota de dashboard do ERP...</p>
           </div>
       );
   }
