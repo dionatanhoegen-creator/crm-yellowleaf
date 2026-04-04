@@ -22,7 +22,7 @@ export default function AnaliseVendasPage() {
   const [usuarioLogado, setUsuarioLogado] = useState<any>(null);
   const [isMaster, setIsMaster] = useState(false);
 
-  // Filtros Globais (Padrão "todos")
+  // Filtros Globais
   const [anoSelecionado, setAnoSelecionado] = useState<string>("todos");
   const [mesSelecionado, setMesSelecionado] = useState<string>("todos");
   const [vendedorSelecionado, setVendedorSelecionado] = useState<string>("todos");
@@ -31,12 +31,16 @@ export default function AnaliseVendasPage() {
   const [anosDisponiveis, setAnosDisponiveis] = useState<string[]>([]);
   const [vendedoresDisponiveis, setVendedoresDisponiveis] = useState<string[]>([]);
 
+  // DEBUG & DIAGNÓSTICO
+  const [debugInfo, setDebugInfo] = useState({ linhasRecebidas: 0, linhasLimpas: 0, colunasVistas: '', log: '' });
+
   useEffect(() => {
     inicializarDados();
   }, []);
 
   const inicializarDados = async () => {
     setLoading(true);
+    let logMsg = "Iniciando...\n";
     
     // 1. Identifica o usuário para a segurança
     const { data: { user } } = await supabase.auth.getUser();
@@ -48,15 +52,14 @@ export default function AnaliseVendasPage() {
         perfilUsuario = perfil;
         setUsuarioLogado(perfil);
         
-        // Regra de Master: Admins, Diretores ou SDRs
         const cargoStr = String(perfil?.cargo || "").toLowerCase();
         master = ['admin', 'diretor', 'master'].includes(cargoStr) || cargoStr.includes('sdr') || cargoStr.includes('p&d');
         setIsMaster(master);
+        logMsg += `Usuário Logado: ${perfil?.nome} | Cargo: ${perfil?.cargo} | Master: ${master}\n`;
     }
 
     let dadosExtraidos: any[] = [];
 
-    // Função auxiliar robusta para garantir a extração do array
     const extractArray = (res: any) => {
         if (!res) return [];
         if (Array.isArray(res)) return res;
@@ -65,46 +68,66 @@ export default function AnaliseVendasPage() {
         return [];
     };
 
-    // 2. Busca APENAS da planilha do ERP (Aba Vendas)
+    // 2. Busca da planilha do ERP com QUEBRA DE CACHE (Evita fantasma do navegador)
     try {
-        const dataVen = extractArray(await fetch(`${API_CLIENTES_URL}?path=vendas`).then(r => r.json()).catch(() => null));
-        dadosExtraidos = [...dataVen];
+        const cacheBuster = new Date().getTime();
+        
+        // Puxa tanto a rota VENDAS quanto FATURAMENTO para garantir que pega a aba certa
+        const [resVendas, resFaturamento] = await Promise.all([
+            fetch(`${API_CLIENTES_URL}?path=vendas&t=${cacheBuster}`).then(r => r.json()).catch(() => null),
+            fetch(`${API_CLIENTES_URL}?path=faturamento&t=${cacheBuster}`).then(r => r.json()).catch(() => null)
+        ]);
+
+        const dataVen = extractArray(resVendas);
+        const dataFat = extractArray(resFaturamento);
+        
+        dadosExtraidos = [...dataVen, ...dataFat];
+        logMsg += `Linhas puxadas do ERP: ${dadosExtraidos.length}\n`;
     } catch (e) {
         console.error("Erro ao puxar dados da Planilha:", e);
+        logMsg += `ERRO API: ${String(e)}\n`;
     }
 
-    // Normalizador de Chaves (Garante que vai ler a coluna independente de acentos ou espaços que a API coloque)
     const normalizeKey = (key: string) => {
         return key.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, '');
     };
 
-    // 3. Mapeia as colunas extraindo dados da API de forma infalível
+    // Pegamos a primeira linha só para imprimir no painel de diagnóstico
+    const colunasExemplo = dadosExtraidos.length > 0 ? Object.keys(dadosExtraidos[0]).join(' | ') : 'Nenhuma';
+
+    // 3. Mapeia as colunas extraídas
     const vendasFormatadas = dadosExtraidos.map(v => {
         const objNorm: any = {};
         Object.keys(v).forEach(k => {
             objNorm[normalizeKey(k)] = v[k];
         });
 
-        // Pega as informações baseadas nas chaves normalizadas
         const anoSheet = String(objNorm.ano || '2024').trim();
         const mesSheet = String(objNorm.mes || '01').trim().padStart(2, '0');
-        
         const timestamp = new Date(parseInt(anoSheet), parseInt(mesSheet) - 1, 15).getTime();
 
         return {
             id: Math.random().toString(36).substr(2, 9),
-            cliente: String(objNorm.nomefantasia || objNorm.razaosocial || objNorm.cliente || 'CLIENTE NÃO IDENTIFICADO').trim().toUpperCase(),
-            produto: String(objNorm.ativo || objNorm.produto || objNorm.item || 'PRODUTO NÃO IDENTIFICADO').trim().toUpperCase(),
-            valor: parseBRNumber(objNorm.valorcontabil || objNorm.valor || objNorm.total || 0),
-            kg: parseBRNumber(objNorm.qtde || objNorm.quantidade || objNorm.kg || 0),
-            vendedor: String(objNorm.vendedor || objNorm.representante || 'SEM VENDEDOR').trim().toUpperCase(),
+            cliente: String(objNorm.nomefantasia || objNorm.razaosocial || objNorm.cliente || 'N/D').trim().toUpperCase(),
+            produto: String(objNorm.ativo || objNorm.produto || objNorm.item || 'N/D').trim().toUpperCase(),
+            valor: parseBRNumber(objNorm.valorcontabil || objNorm.valor || objNorm.total || objNorm.faturamento || 0),
+            kg: parseBRNumber(objNorm.qtde || objNorm.quantidade || objNorm.kg || objNorm.peso || 0),
+            vendedor: String(objNorm.vendedor || objNorm.representante || objNorm.consultor || 'SEM VENDEDOR').trim().toUpperCase(),
             timestamp,
             ano: anoSheet,
             mes: mesSheet
         };
-    }).filter(v => v.valor > 0 || v.kg > 0); // Só aceita linha que tem venda
+    }).filter(v => v.valor > 0 || v.kg > 0); 
 
-    // Preenche as opções de filtros
+    logMsg += `Linhas válidas (>0 kg/valor): ${vendasFormatadas.length}\n`;
+
+    setDebugInfo({
+        linhasRecebidas: dadosExtraidos.length,
+        linhasLimpas: vendasFormatadas.length,
+        colunasVistas: colunasExemplo,
+        log: logMsg
+    });
+
     const anosSet = new Set<string>();
     const vendSet = new Set<string>();
     vendasFormatadas.forEach(v => {
@@ -119,7 +142,7 @@ export default function AnaliseVendasPage() {
   };
 
   const parseBRNumber = (val: any) => {
-      if (val === null || val === undefined) return 0;
+      if (val === null || val === undefined || val === '') return 0;
       if (typeof val === 'number') return val;
       let str = String(val).replace(/[^\d.,-]/g, '').trim();
       if (!str) return 0;
@@ -129,14 +152,12 @@ export default function AnaliseVendasPage() {
       return isNaN(num) ? 0 : num;
   };
 
-  // --- MOTOR DE FILTROS E SEGURANÇA (RLS Front-end) ---
   const dadosFiltrados = useMemo(() => {
       return vendasBrutas.filter(v => {
           const matchAno = anoSelecionado === "todos" ? true : v.ano === anoSelecionado;
           const matchMes = mesSelecionado === "todos" ? true : v.mes === mesSelecionado;
           
           let matchVend = true;
-          // Se não for Master, aplica a trava pelo nome do Vendedor Logado
           if (!isMaster && usuarioLogado) {
               const nomeUser = usuarioLogado.nome ? usuarioLogado.nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : "";
               const nomeVend = v.vendedor ? v.vendedor.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : "";
@@ -146,7 +167,6 @@ export default function AnaliseVendasPage() {
                   matchVend = nomeVend.includes(nomeUser) || nomeUser.includes(nomeVend);
               }
           } else {
-              // Se for Master, respeita a caixinha de seleção
               matchVend = vendedorSelecionado === "todos" ? true : v.vendedor === vendedorSelecionado;
           }
           
@@ -212,7 +232,7 @@ export default function AnaliseVendasPage() {
           <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 text-slate-400">
               <Activity className="animate-spin text-emerald-500 mb-4" size={40}/>
               <h2 className="text-xl font-bold text-slate-600">Lendo Planilha do ERP...</h2>
-              <p className="text-sm mt-2">Normalizando colunas e carregando faturamento.</p>
+              <p className="text-sm mt-2">Buscando dados frescos (limpando cache)...</p>
           </div>
       );
   }
@@ -221,13 +241,12 @@ export default function AnaliseVendasPage() {
     <div className="p-6 md:p-8 bg-slate-50 min-h-screen font-sans text-slate-800">
       <div className="max-w-[1400px] mx-auto space-y-8">
         
-        {/* HEADER & FILTROS */}
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
             <div>
                 <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
                     <BarChart3 className="text-emerald-600" size={28} /> BI Faturamento
                 </h1>
-                <p className="text-slate-500 text-sm font-medium mt-1">Análise baseada 100% na planilha de Vendas do ERP.</p>
+                <p className="text-slate-500 text-sm font-medium mt-1">Análise oficial integrada ao ERP (Live Data).</p>
             </div>
             
             <div className="flex flex-wrap items-center gap-3">
@@ -266,7 +285,6 @@ export default function AnaliseVendasPage() {
             </div>
         </div>
 
-        {/* KPI CARDS */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
             <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden group hover:border-emerald-300 transition">
                 <div className="absolute right-0 top-0 p-6 opacity-5 group-hover:opacity-10 transition transform group-hover:scale-110"><DollarSign size={80}/></div>
@@ -293,11 +311,9 @@ export default function AnaliseVendasPage() {
             </div>
         </div>
 
-        {/* ÁREA DE GRÁFICOS */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
-            {/* GRÁFICO PRINCIPAL */}
-            <div className="lg:col-span-2 bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+            <div className="lg:col-span-2 bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col">
                 <div className="flex justify-between items-center mb-8">
                     <div>
                         <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><TrendingUp className="text-blue-600"/> Curva de Crescimento</h3>
@@ -305,9 +321,20 @@ export default function AnaliseVendasPage() {
                     </div>
                 </div>
                 
-                <div className="h-[350px] w-full">
+                <div className="flex-1 w-full min-h-[350px]">
                     {dadosGrafico.length === 0 ? (
-                        <div className="flex items-center justify-center h-full text-slate-400 font-medium">Sem dados para o filtro selecionado.</div>
+                        <div className="flex flex-col items-center justify-center h-full w-full">
+                            <p className="text-slate-500 font-bold mb-4 text-center">Sem dados para exibir. Confira o painel de diagnóstico abaixo:</p>
+                            <div className="bg-slate-100 p-5 rounded-2xl w-full text-xs font-mono text-slate-600 space-y-2 border border-slate-200 shadow-inner">
+                                <p className="text-sm font-black text-slate-800 mb-2 border-b border-slate-200 pb-2">🛠 Raio-X do Sistema</p>
+                                <p><span className="font-bold">Total Recebido da API:</span> {debugInfo.linhasRecebidas} linhas.</p>
+                                <p><span className="font-bold">Total Válido (>0):</span> {debugInfo.linhasLimpas} linhas.</p>
+                                <p className="text-[10px] break-all mt-2 text-slate-500"><span className="font-bold text-slate-700">Colunas Encontradas na Planilha:</span> <br/>{debugInfo.colunasVistas}</p>
+                                <div className="mt-4 bg-slate-800 text-green-400 p-3 rounded-lg overflow-hidden text-[10px]">
+                                    {debugInfo.log.split('\n').map((line, i) => <div key={i}>{line}</div>)}
+                                </div>
+                            </div>
+                        </div>
                     ) : (
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={dadosGrafico} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -332,9 +359,7 @@ export default function AnaliseVendasPage() {
                 </div>
             </div>
 
-            {/* TOP PRODUTOS E CLIENTES */}
             <div className="space-y-8">
-                
                 <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
                     <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-5 flex items-center gap-2">
                         <Award className="text-amber-500" size={18}/> Top 5 Produtos
@@ -373,7 +398,6 @@ export default function AnaliseVendasPage() {
                         ))}
                     </div>
                 </div>
-
             </div>
         </div>
 
