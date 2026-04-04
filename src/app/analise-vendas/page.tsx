@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   TrendingUp, Users, Package, Calendar, DollarSign, 
   Activity, BarChart3, ShoppingCart, User, Award, 
-  Filter, Search, ArrowUpRight, ArrowDownRight, Database
+  Filter
 } from 'lucide-react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer
@@ -21,10 +21,9 @@ export default function AnaliseVendasPage() {
   // Segurança e Autenticação
   const [usuarioLogado, setUsuarioLogado] = useState<any>(null);
   const [isMaster, setIsMaster] = useState(false);
-  const [nomeVendedorErp, setNomeVendedorErp] = useState<string>("");
 
-  // Filtros Globais
-  const [anoSelecionado, setAnoSelecionado] = useState<string>(new Date().getFullYear().toString());
+  // Filtros Globais (Padrão "todos")
+  const [anoSelecionado, setAnoSelecionado] = useState<string>("todos");
   const [mesSelecionado, setMesSelecionado] = useState<string>("todos");
   const [vendedorSelecionado, setVendedorSelecionado] = useState<string>("todos");
   
@@ -39,7 +38,7 @@ export default function AnaliseVendasPage() {
   const inicializarDados = async () => {
     setLoading(true);
     
-    // 1. Puxa perfil do usuário logado para aplicar regras de segurança
+    // 1. Identifica o usuário para a segurança
     const { data: { user } } = await supabase.auth.getUser();
     let perfilUsuario = null;
     let master = false;
@@ -48,136 +47,104 @@ export default function AnaliseVendasPage() {
         const { data: perfil } = await supabase.from('perfis').select('*').eq('id', user.id).single();
         perfilUsuario = perfil;
         setUsuarioLogado(perfil);
-        master = ['admin', 'Admin', 'diretor', 'Diretor'].includes(perfil?.cargo);
+        
+        // Regra de Master: Admins, Diretores ou SDRs
+        const cargoStr = String(perfil?.cargo || "").toLowerCase();
+        master = ['admin', 'diretor', 'master'].includes(cargoStr) || cargoStr.includes('sdr') || cargoStr.includes('p&d');
         setIsMaster(master);
     }
 
-    // 2. Puxa dados brutos do ERP
+    let dadosExtraidos: any[] = [];
+
+    const extractArray = (res: any) => {
+        if (!res) return [];
+        if (Array.isArray(res)) return res;
+        if (res.data && Array.isArray(res.data)) return res.data;
+        if (res.items && Array.isArray(res.items)) return res.items;
+        return [];
+    };
+
+    // 2. Busca APENAS da planilha do ERP (Faturamento e Vendas)
     try {
-      const [resFaturamento, resVendas, resClientes] = await Promise.all([
-          fetch(`${API_CLIENTES_URL}?path=faturamento`).then(r => r.json()).catch(() => ({success: false, data: []})),
-          fetch(`${API_CLIENTES_URL}?path=vendas`).then(r => r.json()).catch(() => ({success: false, data: []})),
-          fetch(`${API_CLIENTES_URL}?path=clientes`).then(r => r.json()).catch(() => ({success: false, data: []}))
-      ]);
-
-      let dadosExtraidos: any[] = [];
-
-      if (resFaturamento.success && Array.isArray(resFaturamento.data) && resFaturamento.data.length > 0) {
-          dadosExtraidos = resFaturamento.data;
-      } else if (resVendas.success && Array.isArray(resVendas.data) && resVendas.data.length > 0) {
-          dadosExtraidos = resVendas.data;
-      } else if (resClientes.success && Array.isArray(resClientes.data)) {
-          resClientes.data.forEach((c: any) => {
-              const hist = c.historico || c.vendas || c.compras || [];
-              if (Array.isArray(hist)) {
-                  hist.forEach((compra: any) => {
-                      dadosExtraidos.push({
-                          ...compra,
-                          cliente_nome: c.fantasia || c.nome_fantasia || c.razao_social,
-                          vendedor_nome: c.vendedor || c.consultor
-                      });
-                  });
-              }
-          });
-      }
-
-      const vendasFormatadas = dadosExtraidos.map(v => {
-          const dataBruta = String(v.data || v.data_venda || v.criado_em || v.data_faturamento || new Date().toISOString());
-          let timestamp = 0;
-          let ano = '2000';
-          let mes = '01';
-
-          if (dataBruta.match(/^\d{2}\/\d{2}\/\d{4}/)) {
-              const p = dataBruta.substring(0,10).split('/');
-              ano = p[2]; mes = p[1];
-              timestamp = new Date(`${p[2]}-${p[1]}-${p[0]}T12:00:00Z`).getTime();
-          } else {
-              const d = new Date(dataBruta);
-              if (!isNaN(d.getTime())) {
-                  timestamp = d.getTime();
-                  ano = d.getFullYear().toString();
-                  mes = String(d.getMonth() + 1).padStart(2, '0');
-              }
-          }
-
-          return {
-              id: Math.random().toString(36).substr(2, 9),
-              cliente: String(v.cliente || v.razao_social || v.fantasia || v.cliente_nome || 'Consumidor Final').trim().toUpperCase(),
-              produto: String(v.produto || v.ativo || v.item || 'PRODUTO NÃO IDENTIFICADO').trim().toUpperCase(),
-              valor: parseBRNumber(v.valor || v.total || v.faturamento || v.preco),
-              kg: parseBRNumber(v.kg || v.quantidade || v.peso || v.qte),
-              vendedor: String(v.vendedor || v.representante || v.vendedor_nome || 'SEM VENDEDOR').trim().toUpperCase(),
-              timestamp,
-              ano,
-              mes,
-              dataCompleta: dataBruta
-          };
-      }).filter(v => v.valor > 0 || v.kg > 0); 
-
-      const anosSet = new Set<string>();
-      const vendSet = new Set<string>();
-      vendasFormatadas.forEach(v => {
-          if (v.ano && v.ano !== 'NaN') anosSet.add(v.ano);
-          if (v.vendedor && v.vendedor !== 'SEM VENDEDOR') vendSet.add(v.vendedor);
-      });
-
-      setAnosDisponiveis(Array.from(anosSet).sort().reverse());
-      const vendArr = Array.from(vendSet).sort();
-      setVendedoresDisponiveis(vendArr);
-      setVendasBrutas(vendasFormatadas);
-
-      // 3. Aplica regra de acesso e trava o filtro se não for Master
-      if (!master && perfilUsuario) {
-          const normalizeStr = (str: string) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : "";
-          const nomeUser = normalizeStr(perfilUsuario.nome);
-          
-          const match = vendArr.find(v => {
-              const vNorm = normalizeStr(v);
-              return vNorm.includes(nomeUser) || nomeUser.includes(vNorm);
-          });
-          
-          if (match) {
-              setVendedorSelecionado(match);
-              setNomeVendedorErp(match);
-          } else {
-              setVendedorSelecionado("NENHUM");
-              setNomeVendedorErp("NENHUM");
-          }
-      }
-
+        const dataFat = extractArray(await fetch(`${API_CLIENTES_URL}?path=faturamento`).then(r => r.json()).catch(() => null));
+        const dataVen = extractArray(await fetch(`${API_CLIENTES_URL}?path=vendas`).then(r => r.json()).catch(() => null));
+        
+        dadosExtraidos = [...dataFat, ...dataVen];
     } catch (e) {
-      console.error("Erro ao puxar dados do ERP:", e);
-    } finally {
-      setLoading(false);
+        console.error("Erro ao puxar dados da Planilha:", e);
     }
+
+    // 3. Mapeia as colunas exatas da Planilha (Ano, Mês, Valor Contábil, Qtde, etc)
+    const vendasFormatadas = dadosExtraidos.map(v => {
+        // Pega as colunas de Ano e Mês diretamente (protegendo contra letras minúsculas/maiúsculas da API)
+        const anoSheet = String(v.Ano || v.ano || '2024').trim();
+        const mesSheet = String(v.Mês || v.mês || v.Mes || v.mes || '01').trim().padStart(2, '0');
+        
+        // Cria um timestamp fictício para ordenar o gráfico de área (sempre dia 15 do mês/ano)
+        const timestamp = new Date(parseInt(anoSheet), parseInt(mesSheet) - 1, 15).getTime();
+
+        return {
+            id: Math.random().toString(36).substr(2, 9),
+            cliente: String(v['Nome Fantasia'] || v.nome_fantasia || v['Razão Social'] || v.razao_social || v.cliente || 'CLIENTE NÃO IDENTIFICADO').trim().toUpperCase(),
+            produto: String(v.Ativo || v.ativo || v.produto || v.item || 'PRODUTO NÃO IDENTIFICADO').trim().toUpperCase(),
+            valor: parseBRNumber(v['Valor Contábil'] || v.valor_contabil || v.valor || v.total || 0),
+            kg: parseBRNumber(v.Qtde || v.qtde || v.quantidade || v.kg || 0),
+            vendedor: String(v.Vendedor || v.vendedor || v.representante || 'SEM VENDEDOR').trim().toUpperCase(),
+            timestamp,
+            ano: anoSheet,
+            mes: mesSheet
+        };
+    }).filter(v => v.valor > 0 || v.kg > 0); // Só aceita linha que tem venda de verdade
+
+    // Preenche as opções de filtros
+    const anosSet = new Set<string>();
+    const vendSet = new Set<string>();
+    vendasFormatadas.forEach(v => {
+        if (v.ano && v.ano !== 'NaN') anosSet.add(v.ano);
+        if (v.vendedor && v.vendedor !== 'SEM VENDEDOR') vendSet.add(v.vendedor);
+    });
+
+    setAnosDisponiveis(Array.from(anosSet).sort().reverse());
+    setVendedoresDisponiveis(Array.from(vendSet).sort());
+    setVendasBrutas(vendasFormatadas);
+    setLoading(false);
   };
 
   const parseBRNumber = (val: any) => {
+      if (val === null || val === undefined) return 0;
       if (typeof val === 'number') return val;
-      if (!val) return 0;
       let str = String(val).replace(/[^\d.,-]/g, '').trim();
+      if (!str) return 0;
       if (str.includes('.') && str.includes(',')) str = str.replace(/\./g, '').replace(',', '.');
       else if (str.includes(',')) str = str.replace(',', '.');
       const num = parseFloat(str);
       return isNaN(num) ? 0 : num;
   };
 
-  // --- MOTOR DE INTELIGÊNCIA (Reativo aos filtros e segurança) ---
+  // --- MOTOR DE FILTROS E SEGURANÇA (RLS Front-end) ---
   const dadosFiltrados = useMemo(() => {
       return vendasBrutas.filter(v => {
           const matchAno = anoSelecionado === "todos" ? true : v.ano === anoSelecionado;
           const matchMes = mesSelecionado === "todos" ? true : v.mes === mesSelecionado;
           
-          // Trava de Segurança RLS Visual
-          let targetVendedor = vendedorSelecionado;
-          if (!isMaster) {
-              targetVendedor = nomeVendedorErp; // Vendedor só vê ele mesmo
+          let matchVend = true;
+          // Se não for Master, aplica a trava pelo nome do Vendedor Logado
+          if (!isMaster && usuarioLogado) {
+              const nomeUser = usuarioLogado.nome ? usuarioLogado.nome.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : "";
+              const nomeVend = v.vendedor ? v.vendedor.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : "";
+              if (!nomeUser) {
+                  matchVend = false;
+              } else {
+                  matchVend = nomeVend.includes(nomeUser) || nomeUser.includes(nomeVend);
+              }
+          } else {
+              // Se for Master, respeita a caixinha de seleção
+              matchVend = vendedorSelecionado === "todos" ? true : v.vendedor === vendedorSelecionado;
           }
-          const matchVend = targetVendedor === "todos" ? true : v.vendedor === targetVendedor;
           
           return matchAno && matchMes && matchVend;
       });
-  }, [vendasBrutas, anoSelecionado, mesSelecionado, vendedorSelecionado, isMaster, nomeVendedorErp]);
+  }, [vendasBrutas, anoSelecionado, mesSelecionado, vendedorSelecionado, isMaster, usuarioLogado]);
 
   const kpis = useMemo(() => {
       let totalValor = 0;
@@ -202,14 +169,7 @@ export default function AnaliseVendasPage() {
   const dadosGrafico = useMemo(() => {
       const agregado: any = {};
       dadosFiltrados.forEach(v => {
-          let chave = '';
-          if (mesSelecionado !== "todos" && anoSelecionado !== "todos") {
-              const d = new Date(v.timestamp);
-              chave = `${String(d.getDate()).padStart(2, '0')}/${v.mes}`; 
-          } else {
-              chave = `${v.mes}/${v.ano}`; 
-          }
-          
+          let chave = `${v.mes}/${v.ano}`; 
           if (!agregado[chave]) agregado[chave] = 0;
           agregado[chave] += v.valor;
       });
@@ -220,7 +180,7 @@ export default function AnaliseVendasPage() {
           if (p2A !== p2B) return Number(p2A) - Number(p2B);
           return Number(p1A) - Number(p1B);
       }).map(k => ({ name: k, valor: agregado[k] }));
-  }, [dadosFiltrados, mesSelecionado, anoSelecionado]);
+  }, [dadosFiltrados]);
 
   const getTop = (campo: 'produto' | 'cliente' | 'vendedor', limite: number) => {
       const mapa: any = {};
@@ -243,8 +203,8 @@ export default function AnaliseVendasPage() {
       return (
           <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 text-slate-400">
               <Activity className="animate-spin text-emerald-500 mb-4" size={40}/>
-              <h2 className="text-xl font-bold text-slate-600">Sincronizando com ERP...</h2>
-              <p className="text-sm mt-2">Processando e aplicando regras de segurança.</p>
+              <h2 className="text-xl font-bold text-slate-600">Lendo Planilha do ERP...</h2>
+              <p className="text-sm mt-2">Sincronizando dados e verificando regras de segurança.</p>
           </div>
       );
   }
@@ -253,13 +213,13 @@ export default function AnaliseVendasPage() {
     <div className="p-6 md:p-8 bg-slate-50 min-h-screen font-sans text-slate-800">
       <div className="max-w-[1400px] mx-auto space-y-8">
         
-        {/* HEADER & FILTROS GLOBAIS */}
+        {/* HEADER & FILTROS */}
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
             <div>
                 <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
                     <BarChart3 className="text-emerald-600" size={28} /> BI Faturamento
                 </h1>
-                <p className="text-slate-500 text-sm font-medium mt-1">Análise oficial baseada nos dados do ERP.</p>
+                <p className="text-slate-500 text-sm font-medium mt-1">Análise baseada 100% na planilha do ERP.</p>
             </div>
             
             <div className="flex flex-wrap items-center gap-3">
@@ -284,17 +244,16 @@ export default function AnaliseVendasPage() {
 
                 <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
                     <User size={16} className="text-slate-400"/>
-                    <select 
-                        value={!isMaster ? nomeVendedorErp : vendedorSelecionado} 
-                        onChange={e => setVendedorSelecionado(e.target.value)} 
-                        disabled={!isMaster}
-                        title={!isMaster ? "Você tem acesso visual apenas à sua carteira." : "Acesso Master: Selecione o vendedor."}
-                        className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer w-40 truncate disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                        {isMaster && <option value="todos">Toda Equipe</option>}
-                        {!isMaster && nomeVendedorErp === "NENHUM" && <option value="NENHUM">Sem Vendas Registradas</option>}
-                        {vendedoresDisponiveis.map(v => <option key={v} value={v}>{v}</option>)}
-                    </select>
+                    {isMaster ? (
+                        <select value={vendedorSelecionado} onChange={e => setVendedorSelecionado(e.target.value)} className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer w-40 truncate">
+                            <option value="todos">Toda Equipe</option>
+                            {vendedoresDisponiveis.map(v => <option key={v} value={v}>{v}</option>)}
+                        </select>
+                    ) : (
+                        <div className="text-sm font-bold text-slate-700 w-40 truncate select-none" title="Você visualiza apenas a sua carteira de comissões">
+                            {usuarioLogado?.nome || 'Minhas Vendas'}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
@@ -365,10 +324,9 @@ export default function AnaliseVendasPage() {
                 </div>
             </div>
 
-            {/* TOP PRODUTOS E CLIENTES (RANKINGS) */}
+            {/* TOP PRODUTOS E CLIENTES */}
             <div className="space-y-8">
                 
-                {/* Ranking Produtos */}
                 <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
                     <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-5 flex items-center gap-2">
                         <Award className="text-amber-500" size={18}/> Top 5 Produtos
@@ -389,7 +347,6 @@ export default function AnaliseVendasPage() {
                     </div>
                 </div>
 
-                {/* Ranking Clientes */}
                 <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
                     <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-5 flex items-center gap-2">
                         <Users className="text-blue-500" size={18}/> Top 5 Clientes
