@@ -56,6 +56,7 @@ export default function AnaliseVendasPage() {
 
     let dadosExtraidos: any[] = [];
 
+    // Função auxiliar robusta para garantir a extração do array
     const extractArray = (res: any) => {
         if (!res) return [];
         if (Array.isArray(res)) return res;
@@ -64,37 +65,44 @@ export default function AnaliseVendasPage() {
         return [];
     };
 
-    // 2. Busca APENAS da planilha do ERP (Faturamento e Vendas)
+    // 2. Busca APENAS da planilha do ERP (Aba Vendas)
     try {
-        const dataFat = extractArray(await fetch(`${API_CLIENTES_URL}?path=faturamento`).then(r => r.json()).catch(() => null));
         const dataVen = extractArray(await fetch(`${API_CLIENTES_URL}?path=vendas`).then(r => r.json()).catch(() => null));
-        
-        dadosExtraidos = [...dataFat, ...dataVen];
+        dadosExtraidos = [...dataVen];
     } catch (e) {
         console.error("Erro ao puxar dados da Planilha:", e);
     }
 
-    // 3. Mapeia as colunas exatas da Planilha (Ano, Mês, Valor Contábil, Qtde, etc)
+    // Normalizador de Chaves (Garante que vai ler a coluna independente de acentos ou espaços que a API coloque)
+    const normalizeKey = (key: string) => {
+        return key.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, '');
+    };
+
+    // 3. Mapeia as colunas extraindo dados da API de forma infalível
     const vendasFormatadas = dadosExtraidos.map(v => {
-        // Pega as colunas de Ano e Mês diretamente (protegendo contra letras minúsculas/maiúsculas da API)
-        const anoSheet = String(v.Ano || v.ano || '2024').trim();
-        const mesSheet = String(v.Mês || v.mês || v.Mes || v.mes || '01').trim().padStart(2, '0');
+        const objNorm: any = {};
+        Object.keys(v).forEach(k => {
+            objNorm[normalizeKey(k)] = v[k];
+        });
+
+        // Pega as informações baseadas nas chaves normalizadas
+        const anoSheet = String(objNorm.ano || '2024').trim();
+        const mesSheet = String(objNorm.mes || '01').trim().padStart(2, '0');
         
-        // Cria um timestamp fictício para ordenar o gráfico de área (sempre dia 15 do mês/ano)
         const timestamp = new Date(parseInt(anoSheet), parseInt(mesSheet) - 1, 15).getTime();
 
         return {
             id: Math.random().toString(36).substr(2, 9),
-            cliente: String(v['Nome Fantasia'] || v.nome_fantasia || v['Razão Social'] || v.razao_social || v.cliente || 'CLIENTE NÃO IDENTIFICADO').trim().toUpperCase(),
-            produto: String(v.Ativo || v.ativo || v.produto || v.item || 'PRODUTO NÃO IDENTIFICADO').trim().toUpperCase(),
-            valor: parseBRNumber(v['Valor Contábil'] || v.valor_contabil || v.valor || v.total || 0),
-            kg: parseBRNumber(v.Qtde || v.qtde || v.quantidade || v.kg || 0),
-            vendedor: String(v.Vendedor || v.vendedor || v.representante || 'SEM VENDEDOR').trim().toUpperCase(),
+            cliente: String(objNorm.nomefantasia || objNorm.razaosocial || objNorm.cliente || 'CLIENTE NÃO IDENTIFICADO').trim().toUpperCase(),
+            produto: String(objNorm.ativo || objNorm.produto || objNorm.item || 'PRODUTO NÃO IDENTIFICADO').trim().toUpperCase(),
+            valor: parseBRNumber(objNorm.valorcontabil || objNorm.valor || objNorm.total || 0),
+            kg: parseBRNumber(objNorm.qtde || objNorm.quantidade || objNorm.kg || 0),
+            vendedor: String(objNorm.vendedor || objNorm.representante || 'SEM VENDEDOR').trim().toUpperCase(),
             timestamp,
             ano: anoSheet,
             mes: mesSheet
         };
-    }).filter(v => v.valor > 0 || v.kg > 0); // Só aceita linha que tem venda de verdade
+    }).filter(v => v.valor > 0 || v.kg > 0); // Só aceita linha que tem venda
 
     // Preenche as opções de filtros
     const anosSet = new Set<string>();
@@ -204,7 +212,7 @@ export default function AnaliseVendasPage() {
           <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 text-slate-400">
               <Activity className="animate-spin text-emerald-500 mb-4" size={40}/>
               <h2 className="text-xl font-bold text-slate-600">Lendo Planilha do ERP...</h2>
-              <p className="text-sm mt-2">Sincronizando dados e verificando regras de segurança.</p>
+              <p className="text-sm mt-2">Normalizando colunas e carregando faturamento.</p>
           </div>
       );
   }
@@ -219,7 +227,7 @@ export default function AnaliseVendasPage() {
                 <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
                     <BarChart3 className="text-emerald-600" size={28} /> BI Faturamento
                 </h1>
-                <p className="text-slate-500 text-sm font-medium mt-1">Análise baseada 100% na planilha do ERP.</p>
+                <p className="text-slate-500 text-sm font-medium mt-1">Análise baseada 100% na planilha de Vendas do ERP.</p>
             </div>
             
             <div className="flex flex-wrap items-center gap-3">
