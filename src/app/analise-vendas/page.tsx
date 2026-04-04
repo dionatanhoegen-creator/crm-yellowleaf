@@ -7,15 +7,21 @@ import {
   Filter, Search, ArrowUpRight, ArrowDownRight, Database
 } from 'lucide-react';
 import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
-  BarChart, Bar, Cell
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer
 } from 'recharts';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 const API_CLIENTES_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
 export default function AnaliseVendasPage() {
+  const supabase = createClientComponentClient();
   const [loading, setLoading] = useState(true);
   const [vendasBrutas, setVendasBrutas] = useState<any[]>([]);
+
+  // Segurança e Autenticação
+  const [usuarioLogado, setUsuarioLogado] = useState<any>(null);
+  const [isMaster, setIsMaster] = useState(false);
+  const [nomeVendedorErp, setNomeVendedorErp] = useState<string>("");
 
   // Filtros Globais
   const [anoSelecionado, setAnoSelecionado] = useState<string>(new Date().getFullYear().toString());
@@ -27,13 +33,27 @@ export default function AnaliseVendasPage() {
   const [vendedoresDisponiveis, setVendedoresDisponiveis] = useState<string[]>([]);
 
   useEffect(() => {
-    carregarFaturamentoERP();
+    inicializarDados();
   }, []);
 
-  const carregarFaturamentoERP = async () => {
+  const inicializarDados = async () => {
     setLoading(true);
+    
+    // 1. Puxa perfil do usuário logado para aplicar regras de segurança
+    const { data: { user } } = await supabase.auth.getUser();
+    let perfilUsuario = null;
+    let master = false;
+
+    if (user) {
+        const { data: perfil } = await supabase.from('perfis').select('*').eq('id', user.id).single();
+        perfilUsuario = perfil;
+        setUsuarioLogado(perfil);
+        master = ['admin', 'Admin', 'diretor', 'Diretor'].includes(perfil?.cargo);
+        setIsMaster(master);
+    }
+
+    // 2. Puxa dados brutos do ERP
     try {
-      // 1. Puxa Faturamento Bruto e Clientes (para o flattening se necessário)
       const [resFaturamento, resVendas, resClientes] = await Promise.all([
           fetch(`${API_CLIENTES_URL}?path=faturamento`).then(r => r.json()).catch(() => ({success: false, data: []})),
           fetch(`${API_CLIENTES_URL}?path=vendas`).then(r => r.json()).catch(() => ({success: false, data: []})),
@@ -47,7 +67,6 @@ export default function AnaliseVendasPage() {
       } else if (resVendas.success && Array.isArray(resVendas.data) && resVendas.data.length > 0) {
           dadosExtraidos = resVendas.data;
       } else if (resClientes.success && Array.isArray(resClientes.data)) {
-          // Flattening do histórico de clientes
           resClientes.data.forEach((c: any) => {
               const hist = c.historico || c.vendas || c.compras || [];
               if (Array.isArray(hist)) {
@@ -62,7 +81,6 @@ export default function AnaliseVendasPage() {
           });
       }
 
-      // Padroniza os dados extraídos do ERP
       const vendasFormatadas = dadosExtraidos.map(v => {
           const dataBruta = String(v.data || v.data_venda || v.criado_em || v.data_faturamento || new Date().toISOString());
           let timestamp = 0;
@@ -94,9 +112,8 @@ export default function AnaliseVendasPage() {
               mes,
               dataCompleta: dataBruta
           };
-      }).filter(v => v.valor > 0 || v.kg > 0); // Remove lixo
+      }).filter(v => v.valor > 0 || v.kg > 0); 
 
-      // Extrai opções para os filtros
       const anosSet = new Set<string>();
       const vendSet = new Set<string>();
       vendasFormatadas.forEach(v => {
@@ -105,11 +122,31 @@ export default function AnaliseVendasPage() {
       });
 
       setAnosDisponiveis(Array.from(anosSet).sort().reverse());
-      setVendedoresDisponiveis(Array.from(vendSet).sort());
+      const vendArr = Array.from(vendSet).sort();
+      setVendedoresDisponiveis(vendArr);
       setVendasBrutas(vendasFormatadas);
 
+      // 3. Aplica regra de acesso e trava o filtro se não for Master
+      if (!master && perfilUsuario) {
+          const normalizeStr = (str: string) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : "";
+          const nomeUser = normalizeStr(perfilUsuario.nome);
+          
+          const match = vendArr.find(v => {
+              const vNorm = normalizeStr(v);
+              return vNorm.includes(nomeUser) || nomeUser.includes(vNorm);
+          });
+          
+          if (match) {
+              setVendedorSelecionado(match);
+              setNomeVendedorErp(match);
+          } else {
+              setVendedorSelecionado("NENHUM");
+              setNomeVendedorErp("NENHUM");
+          }
+      }
+
     } catch (e) {
-      console.error(e);
+      console.error("Erro ao puxar dados do ERP:", e);
     } finally {
       setLoading(false);
     }
@@ -125,15 +162,22 @@ export default function AnaliseVendasPage() {
       return isNaN(num) ? 0 : num;
   };
 
-  // --- MOTOR DE INTELIGÊNCIA (Reativo aos filtros) ---
+  // --- MOTOR DE INTELIGÊNCIA (Reativo aos filtros e segurança) ---
   const dadosFiltrados = useMemo(() => {
       return vendasBrutas.filter(v => {
           const matchAno = anoSelecionado === "todos" ? true : v.ano === anoSelecionado;
           const matchMes = mesSelecionado === "todos" ? true : v.mes === mesSelecionado;
-          const matchVend = vendedorSelecionado === "todos" ? true : v.vendedor === vendedorSelecionado;
+          
+          // Trava de Segurança RLS Visual
+          let targetVendedor = vendedorSelecionado;
+          if (!isMaster) {
+              targetVendedor = nomeVendedorErp; // Vendedor só vê ele mesmo
+          }
+          const matchVend = targetVendedor === "todos" ? true : v.vendedor === targetVendedor;
+          
           return matchAno && matchMes && matchVend;
       });
-  }, [vendasBrutas, anoSelecionado, mesSelecionado, vendedorSelecionado]);
+  }, [vendasBrutas, anoSelecionado, mesSelecionado, vendedorSelecionado, isMaster, nomeVendedorErp]);
 
   const kpis = useMemo(() => {
       let totalValor = 0;
@@ -155,17 +199,15 @@ export default function AnaliseVendasPage() {
       };
   }, [dadosFiltrados]);
 
-  // Gráfico Evolução de Receita
   const dadosGrafico = useMemo(() => {
       const agregado: any = {};
       dadosFiltrados.forEach(v => {
-          // Se filtrou por mês, mostra por dia. Se filtrou por ano, mostra por mês.
           let chave = '';
           if (mesSelecionado !== "todos" && anoSelecionado !== "todos") {
               const d = new Date(v.timestamp);
-              chave = `${String(d.getDate()).padStart(2, '0')}/${v.mes}`; // Ex: 15/04
+              chave = `${String(d.getDate()).padStart(2, '0')}/${v.mes}`; 
           } else {
-              chave = `${v.mes}/${v.ano}`; // Ex: 04/2024
+              chave = `${v.mes}/${v.ano}`; 
           }
           
           if (!agregado[chave]) agregado[chave] = 0;
@@ -173,7 +215,6 @@ export default function AnaliseVendasPage() {
       });
 
       return Object.keys(agregado).sort((a, b) => {
-          // Ordena cronologicamente
           const [p1A, p2A] = a.split('/');
           const [p1B, p2B] = b.split('/');
           if (p2A !== p2B) return Number(p2A) - Number(p2B);
@@ -181,7 +222,6 @@ export default function AnaliseVendasPage() {
       }).map(k => ({ name: k, valor: agregado[k] }));
   }, [dadosFiltrados, mesSelecionado, anoSelecionado]);
 
-  // Rankings
   const getTop = (campo: 'produto' | 'cliente' | 'vendedor', limite: number) => {
       const mapa: any = {};
       dadosFiltrados.forEach(v => {
@@ -204,7 +244,7 @@ export default function AnaliseVendasPage() {
           <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 text-slate-400">
               <Activity className="animate-spin text-emerald-500 mb-4" size={40}/>
               <h2 className="text-xl font-bold text-slate-600">Sincronizando com ERP...</h2>
-              <p className="text-sm mt-2">Processando milhares de linhas de faturamento.</p>
+              <p className="text-sm mt-2">Processando e aplicando regras de segurança.</p>
           </div>
       );
   }
@@ -244,8 +284,15 @@ export default function AnaliseVendasPage() {
 
                 <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
                     <User size={16} className="text-slate-400"/>
-                    <select value={vendedorSelecionado} onChange={e => setVendedorSelecionado(e.target.value)} className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer w-40 truncate">
-                        <option value="todos">Toda Equipe</option>
+                    <select 
+                        value={!isMaster ? nomeVendedorErp : vendedorSelecionado} 
+                        onChange={e => setVendedorSelecionado(e.target.value)} 
+                        disabled={!isMaster}
+                        title={!isMaster ? "Você tem acesso visual apenas à sua carteira." : "Acesso Master: Selecione o vendedor."}
+                        className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer w-40 truncate disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                        {isMaster && <option value="todos">Toda Equipe</option>}
+                        {!isMaster && nomeVendedorErp === "NENHUM" && <option value="NENHUM">Sem Vendas Registradas</option>}
                         {vendedoresDisponiveis.map(v => <option key={v} value={v}>{v}</option>)}
                     </select>
                 </div>
