@@ -40,7 +40,7 @@ export default function AnaliseVendasPage() {
 
   const inicializarDados = async () => {
     setLoading(true);
-    let logMsg = "Iniciando...\n";
+    let logMsg = "Iniciando Varredura Completa da API...\n";
     
     // 1. Identifica o usuário para a segurança
     const { data: { user } } = await supabase.auth.getUser();
@@ -68,21 +68,43 @@ export default function AnaliseVendasPage() {
         return [];
     };
 
-    // 2. Busca da planilha do ERP com QUEBRA DE CACHE (Evita fantasma do navegador)
+    // 2. A REDE DE ARRASTO: Puxa Vendas, Faturamento e Histórico de Clientes de uma vez
     try {
         const cacheBuster = new Date().getTime();
         
-        // Puxa tanto a rota VENDAS quanto FATURAMENTO para garantir que pega a aba certa
-        const [resVendas, resFaturamento] = await Promise.all([
+        const [resVendas, resFaturamento, resClientes] = await Promise.all([
             fetch(`${API_CLIENTES_URL}?path=vendas&t=${cacheBuster}`).then(r => r.json()).catch(() => null),
-            fetch(`${API_CLIENTES_URL}?path=faturamento&t=${cacheBuster}`).then(r => r.json()).catch(() => null)
+            fetch(`${API_CLIENTES_URL}?path=faturamento&t=${cacheBuster}`).then(r => r.json()).catch(() => null),
+            fetch(`${API_CLIENTES_URL}?path=clientes&t=${cacheBuster}`).then(r => r.json()).catch(() => null)
         ]);
 
         const dataVen = extractArray(resVendas);
         const dataFat = extractArray(resFaturamento);
+        const dataCli = extractArray(resClientes);
         
+        logMsg += `Resposta API -> Vendas: ${dataVen.length} | Faturamento: ${dataFat.length} | Clientes: ${dataCli.length}\n`;
+
         dadosExtraidos = [...dataVen, ...dataFat];
-        logMsg += `Linhas puxadas do ERP: ${dadosExtraidos.length}\n`;
+
+        // Se vendas diretas falharem, escava o histórico dentro do array de clientes
+        let countHist = 0;
+        dataCli.forEach((c: any) => {
+            const hist = c.historico || c.vendas || c.compras || c.faturamento || [];
+            if (Array.isArray(hist)) {
+                hist.forEach((compra: any) => {
+                    countHist++;
+                    dadosExtraidos.push({
+                        ...compra,
+                        cliente_extraido: c.fantasia || c.nome_fantasia || c.razao_social || c.cliente,
+                        vendedor_extraido: c.vendedor || c.consultor || c.representante || c.responsavel
+                    });
+                });
+            }
+        });
+        
+        logMsg += `Extraído do Histórico de Clientes: ${countHist} linhas.\n`;
+        logMsg += `Total Geral Extraído: ${dadosExtraidos.length} linhas.\n`;
+
     } catch (e) {
         console.error("Erro ao puxar dados da Planilha:", e);
         logMsg += `ERRO API: ${String(e)}\n`;
@@ -92,34 +114,56 @@ export default function AnaliseVendasPage() {
         return key.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, '');
     };
 
-    // Pegamos a primeira linha só para imprimir no painel de diagnóstico
     const colunasExemplo = dadosExtraidos.length > 0 ? Object.keys(dadosExtraidos[0]).join(' | ') : 'Nenhuma';
 
-    // 3. Mapeia as colunas extraídas
+    // 3. Mapeia e Normaliza as Colunas (Inteligência Híbrida)
     const vendasFormatadas = dadosExtraidos.map(v => {
         const objNorm: any = {};
         Object.keys(v).forEach(k => {
             objNorm[normalizeKey(k)] = v[k];
         });
 
-        const anoSheet = String(objNorm.ano || '2024').trim();
-        const mesSheet = String(objNorm.mes || '01').trim().padStart(2, '0');
-        const timestamp = new Date(parseInt(anoSheet), parseInt(mesSheet) - 1, 15).getTime();
+        let anoCalculado = '2000';
+        let mesCalculado = '01';
+        let timestamp = 0;
+
+        // Se a planilha tiver a coluna Ano e Mês prontas (sua foto do Sheets)
+        if (objNorm.ano && objNorm.mes) {
+            anoCalculado = String(objNorm.ano).trim();
+            mesCalculado = String(objNorm.mes).trim().padStart(2, '0');
+            timestamp = new Date(parseInt(anoCalculado), parseInt(mesCalculado) - 1, 15).getTime();
+        } 
+        // Se vier de um campo de Data (Histórico antigo)
+        else {
+            const dataBruta = String(objNorm.data || objNorm.datavenda || objNorm.criadoem || new Date().toISOString());
+            if (dataBruta.match(/^\d{2}\/\d{2}\/\d{4}/)) {
+                const p = dataBruta.substring(0,10).split('/');
+                anoCalculado = p[2]; mesCalculado = p[1];
+                timestamp = new Date(`${p[2]}-${p[1]}-${p[0]}T12:00:00Z`).getTime();
+            } else {
+                const d = new Date(dataBruta);
+                if (!isNaN(d.getTime())) {
+                    timestamp = d.getTime();
+                    anoCalculado = d.getFullYear().toString();
+                    mesCalculado = String(d.getMonth() + 1).padStart(2, '0');
+                }
+            }
+        }
 
         return {
             id: Math.random().toString(36).substr(2, 9),
-            cliente: String(objNorm.nomefantasia || objNorm.razaosocial || objNorm.cliente || 'N/D').trim().toUpperCase(),
-            produto: String(objNorm.ativo || objNorm.produto || objNorm.item || 'N/D').trim().toUpperCase(),
+            cliente: String(objNorm.cliente_extraido || objNorm.nomefantasia || objNorm.razaosocial || objNorm.cliente || 'CLIENTE NÃO IDENTIFICADO').trim().toUpperCase(),
+            produto: String(objNorm.ativo || objNorm.produto || objNorm.item || 'PRODUTO NÃO IDENTIFICADO').trim().toUpperCase(),
             valor: parseBRNumber(objNorm.valorcontabil || objNorm.valor || objNorm.total || objNorm.faturamento || 0),
             kg: parseBRNumber(objNorm.qtde || objNorm.quantidade || objNorm.kg || objNorm.peso || 0),
-            vendedor: String(objNorm.vendedor || objNorm.representante || objNorm.consultor || 'SEM VENDEDOR').trim().toUpperCase(),
+            vendedor: String(objNorm.vendedor_extraido || objNorm.vendedor || objNorm.representante || objNorm.consultor || 'SEM VENDEDOR').trim().toUpperCase(),
             timestamp,
-            ano: anoSheet,
-            mes: mesSheet
+            ano: anoCalculado,
+            mes: mesCalculado
         };
     }).filter(v => v.valor > 0 || v.kg > 0); 
 
-    logMsg += `Linhas válidas (>0 kg/valor): ${vendasFormatadas.length}\n`;
+    logMsg += `Linhas limpas válidas: ${vendasFormatadas.length}\n`;
 
     setDebugInfo({
         linhasRecebidas: dadosExtraidos.length,
@@ -231,8 +275,8 @@ export default function AnaliseVendasPage() {
       return (
           <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 text-slate-400">
               <Activity className="animate-spin text-emerald-500 mb-4" size={40}/>
-              <h2 className="text-xl font-bold text-slate-600">Lendo Planilha do ERP...</h2>
-              <p className="text-sm mt-2">Buscando dados frescos (limpando cache)...</p>
+              <h2 className="text-xl font-bold text-slate-600">Lendo API de Vendas...</h2>
+              <p className="text-sm mt-2">Buscando histórico na nuvem...</p>
           </div>
       );
   }
@@ -246,7 +290,7 @@ export default function AnaliseVendasPage() {
                 <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
                     <BarChart3 className="text-emerald-600" size={28} /> BI Faturamento
                 </h1>
-                <p className="text-slate-500 text-sm font-medium mt-1">Análise oficial integrada ao ERP (Live Data).</p>
+                <p className="text-slate-500 text-sm font-medium mt-1">Análise oficial integrada ao ERP.</p>
             </div>
             
             <div className="flex flex-wrap items-center gap-3">
@@ -329,7 +373,7 @@ export default function AnaliseVendasPage() {
                                 <p className="text-sm font-black text-slate-800 mb-2 border-b border-slate-200 pb-2">🛠 Raio-X do Sistema</p>
                                 <p><span className="font-bold">Total Recebido da API:</span> {debugInfo.linhasRecebidas} linhas.</p>
                                 <p><span className="font-bold">Total Válido (&gt;0):</span> {debugInfo.linhasLimpas} linhas.</p>
-                                <p className="text-[10px] break-all mt-2 text-slate-500"><span className="font-bold text-slate-700">Colunas Encontradas na Planilha:</span> <br/>{debugInfo.colunasVistas}</p>
+                                <p className="text-[10px] break-all mt-2 text-slate-500"><span className="font-bold text-slate-700">Colunas Encontradas:</span> <br/>{debugInfo.colunasVistas}</p>
                                 <div className="mt-4 bg-slate-800 text-green-400 p-3 rounded-lg overflow-hidden text-[10px]">
                                     {debugInfo.log.split('\n').map((line, i) => <div key={i}>{line}</div>)}
                                 </div>
