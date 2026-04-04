@@ -328,7 +328,7 @@ export default function AnaliseVendasPage() {
                             <div className="bg-slate-100 p-5 rounded-2xl w-full text-xs font-mono text-slate-600 space-y-2 border border-slate-200 shadow-inner">
                                 <p className="text-sm font-black text-slate-800 mb-2 border-b border-slate-200 pb-2">🛠 Raio-X do Sistema</p>
                                 <p><span className="font-bold">Total Recebido da API:</span> {debugInfo.linhasRecebidas} linhas.</p>
-                                <p><span className="font-bold">Total Válido (>0):</span> {debugInfo.linhasLimpas} linhas.</p>
+                                <p><span className="font-bold">Total Válido (&gt;0):</span> {debugInfo.linhasLimpas} linhas.</p>
                                 <p className="text-[10px] break-all mt-2 text-slate-500"><span className="font-bold text-slate-700">Colunas Encontradas na Planilha:</span> <br/>{debugInfo.colunasVistas}</p>
                                 <div className="mt-4 bg-slate-800 text-green-400 p-3 rounded-lg overflow-hidden text-[10px]">
                                     {debugInfo.log.split('\n').map((line, i) => <div key={i}>{line}</div>)}
