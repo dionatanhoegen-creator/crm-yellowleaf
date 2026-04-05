@@ -16,7 +16,7 @@ const outfit = Outfit({ subsets: ["latin"] });
 
 const MENU_BASE = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard, key: 'faturamento', section: 'Visão Geral' },
-  { name: 'Análise de Vendas', path: '/analise-vendas', icon: TrendingUp, key: 'faturamento', section: 'Visão Geral' },
+  // { name: 'Análise de Vendas', path: '/analise-vendas', icon: TrendingUp, key: 'faturamento', section: 'Visão Geral' }, // <-- OCULTADO TEMPORARIAMENTE
   { name: 'Faturamento', path: '/faturamento', icon: BarChart3, key: 'faturamento', section: 'Visão Geral' },
   { name: 'Relatórios', path: '/relatorios', icon: FileText, key: 'relatorios', section: 'Visão Geral' },
   { name: 'Prospecção', path: '/prospeccao', icon: Target, key: 'pipeline', section: 'Vendas & Comercial' },
@@ -94,7 +94,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           .select('*')
           .eq('user_id', userId)
           .order('created_at', { ascending: false })
-          .limit(30); // Aumentei o limite para 30 para ver as mais antigas
+          .limit(30); 
 
       if (data) {
           setNotificacoes(prev => {
@@ -116,14 +116,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       }
   };
 
-  // NOVA FUNÇÃO: Marcar e Desmarcar como Lida sem sair da tela
   const toggleLida = async (e: React.MouseEvent, id: string, statusAtual: boolean) => {
-      e.stopPropagation(); // Evita que o clique abra o link
+      e.stopPropagation(); 
       setNotificacoes(prev => prev.map(n => n.id === id ? { ...n, lida: !statusAtual } : n));
       await supabase.from('notificacoes').update({ lida: !statusAtual }).eq('id', id);
   };
 
-  // NOVA FUNÇÃO: Limpar todas as lidas
   const limparNotificacoesLidas = async () => {
       const lidas = notificacoes.filter(n => n.lida);
       if (lidas.length === 0) return;
