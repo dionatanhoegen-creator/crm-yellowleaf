@@ -88,7 +88,16 @@ function PipelineContent() {
     user_id: '' 
   });
 
-  const isSDRUser = usuarioLogado?.cargo?.toLowerCase().includes('p&d') || usuarioLogado?.cargo?.toLowerCase().includes('sdr') || usuarioLogado?.nome?.toLowerCase().includes('jaque');
+  const cargoStrLogado = String(usuarioLogado?.cargo || "").toLowerCase();
+  const nomeStrLogado = String(usuarioLogado?.nome || "").toLowerCase();
+
+  const isSDRUser = cargoStrLogado.includes('p&d') || cargoStrLogado.includes('sdr') || nomeStrLogado.includes('jaque') || nomeStrLogado.includes('eduarda');
+  
+  const isAdminUser = usuarioLogado && (
+      ['admin', 'diretor', 'master'].some(c => cargoStrLogado.includes(c)) ||
+      cargoStrLogado.includes('p&d') ||
+      nomeStrLogado.includes('eduarda')
+  );
 
   useEffect(() => { 
     setMounted(true); 
@@ -123,11 +132,24 @@ function PipelineContent() {
     }
   }, [oportunidades, usuarioLogado]);
 
+  // ==============================================================
+  // A MÁGICA DE ABRIR O CARD PELO LINK (Mesmo se não tiver na lista)
+  // ==============================================================
   const opIdUrl = searchParams.get('op_id');
   useEffect(() => {
-      if (opIdUrl && oportunidades.length > 0 && !modalOpen) {
-          const opEncontrada = oportunidades.find(o => String(o.id) === opIdUrl);
-          if (opEncontrada) {
+      const abrirOpViaUrl = async () => {
+          if (!opIdUrl) return;
+
+          // 1. Tenta achar na lista que já tá carregada na tela
+          let opEncontrada = oportunidades.find(o => String(o.id) === opIdUrl);
+
+          // 2. Se não achar (escondida por permissão), vai direto no Banco de Dados buscar!
+          if (!opEncontrada) {
+              const { data } = await supabase.from('pipeline').select('*').eq('id', opIdUrl).single();
+              if (data) opEncontrada = data;
+          }
+
+          if (opEncontrada && (!editingOp || String(editingOp.id) !== opIdUrl)) {
               setEditingOp(opEncontrada);
               setFormData(prev => ({...prev, ...opEncontrada, custo_fixo_operacional: opEncontrada.custo_fixo_operacional || '0'}));
               
@@ -149,8 +171,10 @@ function PipelineContent() {
               setNovaNotaInput("");
               setModalOpen(true);
           }
-      }
-  }, [opIdUrl, oportunidades, modalOpen]);
+      };
+
+      abrirOpViaUrl();
+  }, [opIdUrl, oportunidades]); // Removido restrições rígidas para sempre tentar abrir
 
   const fecharModalELimparURL = () => {
       setModalOpen(false);
@@ -238,8 +262,16 @@ function PipelineContent() {
 
   const carregarOportunidades = async (perfil: any) => {
     let query = supabase.from('pipeline').select('*').order('created_at', { ascending: false });
-    const isAdmin = perfil && ['admin', 'Admin', 'diretor', 'Diretor'].includes(perfil.cargo);
-    if (!isAdmin) query = query.or(`user_id.eq.${perfil.id},sdr_id.eq.${perfil.id}`);
+    
+    const perfilCargo = String(perfil?.cargo || "").toLowerCase();
+    const perfilNome = String(perfil?.nome || "").toLowerCase();
+    const isMaster = ['admin', 'diretor', 'master'].some(c => perfilCargo.includes(c)) ||
+                     perfilCargo.includes('p&d') ||
+                     perfilNome.includes('eduarda');
+
+    if (!isMaster) {
+        query = query.or(`user_id.eq.${perfil.id},sdr_id.eq.${perfil.id}`);
+    }
     
     const { data, error } = await query;
     if (error) console.error("Erro ao buscar:", error);
@@ -714,9 +746,6 @@ function PipelineContent() {
           });
       }
 
-      // ==========================================
-      // NOTIFICAÇÃO EDUARDA: VISÃO 360 PIPELINE
-      // ==========================================
       if (usuarioLogado?.nome && !usuarioLogado.nome.toLowerCase().includes('eduarda')) {
           const { data: eduardas } = await supabase.from('perfis').select('id').ilike('nome', '%eduarda%').limit(1);
           if (eduardas && eduardas.length > 0) {
@@ -732,7 +761,6 @@ function PipelineContent() {
               }
           }
       }
-      // ==========================================
 
       fecharModalELimparURL();
       setNovaNotaInput(""); 
@@ -832,8 +860,6 @@ function PipelineContent() {
         </div>
     );
   }
-
-  const isAdminUser = usuarioLogado && ['admin', 'Admin', 'diretor', 'Diretor'].includes(usuarioLogado.cargo);
 
   const getSortedOpportunities = (estagioId: string) => {
     const ops = oportunidades.filter(o => {
