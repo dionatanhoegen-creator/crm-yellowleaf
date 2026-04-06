@@ -5,11 +5,14 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Cell
 } from 'recharts';
 import { Filter, Calendar, User, XCircle, Activity, AlertTriangle, UserMinus, ArrowUpRight, Users } from 'lucide-react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
 export default function FaturamentoPage() {
+  const supabase = createClientComponentClient();
   const [dados, setDados] = useState<any>(null);
+  const [churnLocal, setChurnLocal] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -31,34 +34,95 @@ export default function FaturamentoPage() {
       params.append("ano", anoSelecionado === "todos" ? "" : anoSelecionado);
       if (vendedorSelecionado) params.append("representante", vendedorSelecionado);
 
-      // Adiciona timestamp para evitar cache do navegador
-      const res = await fetch(`${API_URL}?${params.toString()}&t=${new Date().getTime()}`);
+      // BUSCA HÍBRIDA: Puxa o painel, as vendas (para cruzar as datas) e as exclusividades
+      const cacheBuster = new Date().getTime();
+      const [resDash, resVen, resExcl] = await Promise.all([
+          fetch(`${API_URL}?${params.toString()}&t=${cacheBuster}`).then(r => r.json()).catch(() => null),
+          fetch(`${API_URL}?path=vendas&t=${cacheBuster}`).then(r => r.json()).catch(() => null),
+          supabase.from('exclusividades').select('nome_cliente').catch(() => ({ data: [] }))
+      ]);
       
-      if (!res.ok) throw new Error("Falha na comunicação com a planilha");
+      if (!resDash) throw new Error("Falha na comunicação com a planilha");
       
-      const json = await res.json();
-      
-      if (json.success || json.data) {
-        // --- AQUI ESTÁ A CORREÇÃO MÁGICA ---
-        // Se a planilha mandou "data" dentro de "data", a gente desempacota!
-        let dataFinal = json.data || json;
-        if (dataFinal && dataFinal.data && dataFinal.data.kpi) {
-             dataFinal = dataFinal.data;
-        }
-
-        setDados(dataFinal);
-        
-        // --- LÓGICA DE LISTA DE VENDEDORES ---
-        const listaNova = dataFinal.rankings?.listaVendedores || dataFinal.listaVendedores;
-        
-        if (Array.isArray(listaNova) && listaNova.length > 0) {
-            setListaVendedores(listaNova);
-        } else if (listaVendedores.length === 0 && dataFinal.rankings?.vendedores) {
-            setListaVendedores(dataFinal.rankings.vendedores);
-        }
-      } else {
-          setErro("Dados inválidos recebidos da API");
+      let dataFinal = resDash.data || resDash;
+      if (dataFinal && dataFinal.data && dataFinal.data.kpi) {
+           dataFinal = dataFinal.data;
       }
+      setDados(dataFinal);
+      
+      // Lista de vendedores
+      const listaNova = dataFinal.rankings?.listaVendedores || dataFinal.listaVendedores;
+      if (Array.isArray(listaNova) && listaNova.length > 0) {
+          setListaVendedores(listaNova);
+      } else if (listaVendedores.length === 0 && dataFinal.rankings?.vendedores) {
+          setListaVendedores(dataFinal.rankings.vendedores);
+      }
+
+      // ==========================================
+      // MOTOR DE CÁLCULO DE CHURN CRUZADO
+      // ==========================================
+      const extractArray = (r: any) => (r && r.data && Array.isArray(r.data) ? r.data : (Array.isArray(r) ? r : []));
+      const vendasArray = extractArray(resVen);
+      
+      const exclusividades = resExcl?.data || [];
+      const clientesComContrato = new Set(exclusividades.map((e: any) => String(e.nome_cliente).trim().toUpperCase()));
+
+      const ultimasCompras = new Map();
+
+      // Normaliza as chaves do Google para evitar erros
+      const normalizeKey = (key: string) => key.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, '');
+
+      vendasArray.forEach((v: any) => {
+          const objNorm: any = {};
+          Object.keys(v).forEach(k => objNorm[normalizeKey(k)] = v[k]);
+
+          // Aplica o filtro de vendedor no cálculo do churn também
+          const vendedor = String(objNorm.vendedor || objNorm.representante || '').trim().toUpperCase();
+          if (vendedorSelecionado && vendedor !== vendedorSelecionado.trim().toUpperCase()) return;
+
+          const cliente = String(objNorm.nomefantasia || objNorm.razaosocial || objNorm.cliente || '').trim().toUpperCase();
+          if (!cliente) return;
+
+          let timestamp = 0;
+          const anoSheet = String(objNorm.ano || '').trim();
+          const mesSheet = String(objNorm.mes || '').trim();
+          
+          if (anoSheet && mesSheet && anoSheet !== 'undefined') {
+              timestamp = new Date(parseInt(anoSheet), parseInt(mesSheet) - 1, 15).getTime();
+          } else if (objNorm.data || objNorm.datavenda) {
+              timestamp = new Date(objNorm.data || objNorm.datavenda).getTime();
+          }
+
+          if (timestamp > 0) {
+              if (!ultimasCompras.has(cliente) || timestamp > ultimasCompras.get(cliente)) {
+                  ultimasCompras.set(cliente, timestamp);
+              }
+          }
+      });
+
+      let churnCalc = { ativos: 0, c6_12: { total: 0, cont: 0 }, c1_2: { total: 0, cont: 0 }, cMais2: { total: 0, cont: 0 } };
+      const hoje = new Date().getTime();
+
+      ultimasCompras.forEach((ultimoTs, cliente) => {
+          const meses = (hoje - ultimoTs) / (1000 * 60 * 60 * 24 * 30.44); // Aproximação de meses
+          const temContrato = clientesComContrato.has(cliente);
+
+          if (meses < 6) {
+              churnCalc.ativos++;
+          } else if (meses >= 6 && meses < 12) {
+              churnCalc.c6_12.total++;
+              if (temContrato) churnCalc.c6_12.cont++;
+          } else if (meses >= 12 && meses < 24) {
+              churnCalc.c1_2.total++;
+              if (temContrato) churnCalc.c1_2.cont++;
+          } else if (meses >= 24) {
+              churnCalc.cMais2.total++;
+              if (temContrato) churnCalc.cMais2.cont++;
+          }
+      });
+
+      setChurnLocal(churnCalc);
+
     } catch (e) {
       console.error(e);
       setErro("Erro ao carregar dados. Verifique sua conexão.");
@@ -85,9 +149,7 @@ export default function FaturamentoPage() {
 
   if (!dados) return null;
 
-  // --- PROTEÇÃO CONTRA DADOS NULOS ---
   const kpi = dados.kpi || {};
-  const churn = kpi.churn || {};
   const graficoRecente = Array.isArray(dados.grafico) ? dados.grafico : [];
   const rankings = dados.rankings || { estados: [], produtos: [], vendedores: [] };
   
@@ -148,7 +210,7 @@ export default function FaturamentoPage() {
           <KpiCard title="Faturamento Total" value={fmtBRL(kpi.faturamentoAno || 0)} sub={vendedorSelecionado ? "Filtrado" : "Período Selecionado"} trend="up" />
           <KpiCard title="Ticket Médio" value={fmtBRL(kpi.ticketMedio || 0)} sub="Por transação" />
           <KpiCard title="Novos Clientes" value={kpi.novosClientes || 0} sub="Cadastrados no período" icon={<Users size={18} className="text-blue-500"/>} />
-          <KpiCard title="Carteira Ativa" value={churn.ativos || 0} sub="Compraram < 6 meses" icon={<Activity size={18} className="text-emerald-500"/>} />
+          <KpiCard title="Carteira Ativa" value={churnLocal ? churnLocal.ativos : 0} sub="Compraram < 6 meses" icon={<Activity size={18} className="text-emerald-500"/>} />
         </div>
 
         {/* ÁREA PRINCIPAL: GRÁFICO + CHURN */}
@@ -205,15 +267,33 @@ export default function FaturamentoPage() {
             </div>
             
             <div className="space-y-3 flex-1">
-                <ChurnRow label="6 a 12 Meses" count={churn.inativos6m || 0} color="bg-yellow-500" risk="Moderado" />
-                <ChurnRow label="1 a 2 Anos" count={churn.inativos12m || 0} color="bg-orange-500" risk="Alto" />
-                <ChurnRow label="+2 Anos" count={churn.perdidos || 0} color="bg-red-500" risk="Crítico" />
+                <ChurnRow 
+                    label="6 a 12 Meses" 
+                    count={churnLocal?.c6_12.total || 0} 
+                    contratos={churnLocal?.c6_12.cont || 0} 
+                    color="bg-yellow-500" 
+                    risk="Moderado" 
+                />
+                <ChurnRow 
+                    label="1 a 2 Anos" 
+                    count={churnLocal?.c1_2.total || 0} 
+                    contratos={churnLocal?.c1_2.cont || 0} 
+                    color="bg-orange-500" 
+                    risk="Alto" 
+                />
+                <ChurnRow 
+                    label="+2 Anos" 
+                    count={churnLocal?.cMais2.total || 0} 
+                    contratos={churnLocal?.cMais2.cont || 0} 
+                    color="bg-red-500" 
+                    risk="Crítico" 
+                />
             </div>
             
             <div className="mt-6 pt-4 border-t border-slate-50 text-center">
                 <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">Total na Base</p>
                 <p className="text-2xl font-black text-slate-700">
-                    {(churn.ativos || 0) + (churn.inativos6m || 0) + (churn.inativos12m || 0) + (churn.perdidos || 0)}
+                    {churnLocal ? (churnLocal.ativos + churnLocal.c6_12.total + churnLocal.c1_2.total + churnLocal.cMais2.total) : 0}
                 </p>
             </div>
           </div>
@@ -245,7 +325,7 @@ function KpiCard({ title, value, sub, icon, trend }: any) {
     )
 }
 
-function ChurnRow({ label, count, color, risk }: any) {
+function ChurnRow({ label, count, contratos, color, risk }: any) {
     return (
         <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
             <div className="flex items-center gap-3">
@@ -255,7 +335,18 @@ function ChurnRow({ label, count, color, risk }: any) {
                     <p className="text-[10px] text-slate-400 font-medium uppercase">{risk}</p>
                 </div>
             </div>
-            <span className="text-lg font-bold text-slate-800">{count}</span>
+            <div className="flex items-center gap-2">
+                {/* AQUI ESTÁ O EMOJI DE CONTRATO ATIVO! */}
+                {contratos > 0 && (
+                    <span 
+                        className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-1 rounded-lg flex items-center gap-1 shadow-sm border border-green-200" 
+                        title={`${contratos} farmácias possuem contrato ativo de exclusividade`}
+                    >
+                        {contratos} 🏥
+                    </span>
+                )}
+                <span className="text-lg font-black text-slate-800">{count}</span>
+            </div>
         </div>
     )
 }
