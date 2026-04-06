@@ -157,15 +157,12 @@ export default function PrescritoresPage() {
       setModalConfirmarExclusao(true);
   };
 
-  // --- FUNÇÃO DE EXCLUSÃO BLINDADA ---
   const confirmarExclusao = async () => {
       setExcluindo(true);
       try {
-          // Tenta apagar o prescritor direto (Se o CASCADE estiver ativo no Supabase, apaga tudo junto)
           const { error } = await supabase.from('prescritores').delete().eq('id', form.id);
           
           if (error) {
-              // Se der erro de Foreign Key (porque não rodou o SQL do Cascade ainda), tenta forçar a limpeza
               await supabase.from('interacoes').delete().eq('prescritor_id', form.id);
               const { error: err2 } = await supabase.from('prescritores').delete().eq('id', form.id);
               if (err2) throw err2;
@@ -255,6 +252,25 @@ export default function PrescritoresPage() {
           if (novaInteracao.data_proximo_contato) {
               await supabase.from('prescritores').update({ proximo_contato: novaInteracao.data_proximo_contato }).eq('id', prescritorAtivo.id);
           }
+
+          // ==========================================
+          // NOTIFICAÇÃO EDUARDA: VISÃO 360 PRESCRITORES
+          // ==========================================
+          const { data: perfilLogado } = await supabase.from('perfis').select('nome').eq('id', user.id).limit(1);
+          const nomeLogado = (perfilLogado && perfilLogado.length > 0) ? perfilLogado[0].nome : 'Usuário';
+
+          if (!nomeLogado.toLowerCase().includes('eduarda')) {
+              const { data: eduardas } = await supabase.from('perfis').select('id').ilike('nome', '%eduarda%').limit(1);
+              if (eduardas && eduardas.length > 0) {
+                  await supabase.from('notificacoes').insert({
+                      user_id: eduardas[0].id,
+                      remetente: nomeLogado,
+                      mensagem: `${nomeLogado.split(' ')[0]} registrou uma nova visita para o prescritor ${prescritorAtivo.nome}.`,
+                      link: `/prescritores`
+                  });
+              }
+          }
+          // ==========================================
 
           setNovaInteracao({ tipo: 'Visita Presencial', resumo: '', proximo_passo: '', farmacia_vinculada: '', produtos_vinculados: [], data_proximo_contato: '' });
           abrirInteracoes(prescritorAtivo); 
@@ -452,7 +468,7 @@ export default function PrescritoresPage() {
                                 <CalendarCheck size={14}/> <span className="hidden sm:inline">Diário</span>
                             </button>
                             {p.telefone && (
-                                <a href={`https://wa.me/55${p.telefone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="text-green-500 hover:text-green-600 transition-colors p-1.5 bg-green-50 rounded-lg">
+                                <a href={`https://wa.me/55${p.telefone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" className="text-green-500 hover:text-green-600 transition-colors p-1.5 bg-green-50 rounded-lg" title="Abrir WhatsApp">
                                     <MessageCircle size={14}/>
                                 </a>
                             )}
@@ -633,7 +649,7 @@ export default function PrescritoresPage() {
           </div>, document.body
         )}
 
-        {/* MODAL DE CADASTRO CORPORATIVO (COMPACTO COM OVERFLOW INTERNO) */}
+        {/* MODAL DE CADASTRO CORPORATIVO */}
         {modalAberto && mounted && !modalInteracoes && createPortal(
            <div className="fixed inset-0 z-[99999] flex items-end md:items-center justify-center bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-200 md:p-4 overflow-hidden">
              <div className="bg-white w-full h-[95vh] md:h-auto md:max-h-[90vh] md:max-w-4xl rounded-t-3xl md:rounded-[2rem] shadow-2xl flex flex-col animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-200 overflow-hidden">
@@ -749,7 +765,6 @@ export default function PrescritoresPage() {
            </div>, document.body
         )}
 
-        {/* --- NOVO MODAL DE CONFIRMAÇÃO DE EXCLUSÃO --- */}
         {modalConfirmarExclusao && mounted && createPortal(
           <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200">
              <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-red-100">

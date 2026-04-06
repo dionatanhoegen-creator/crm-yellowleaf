@@ -152,7 +152,6 @@ function PipelineContent() {
       }
   }, [opIdUrl, oportunidades, modalOpen]);
 
-  // FUNÇÃO CORRIGIDA SEM ESPAÇO
   const fecharModalELimparURL = () => {
       setModalOpen(false);
       router.replace('/pipeline', { scroll: false });
@@ -714,6 +713,26 @@ function PipelineContent() {
               link: `/pipeline?op_id=${editingOp.id}` 
           });
       }
+
+      // ==========================================
+      // NOTIFICAÇÃO EDUARDA: VISÃO 360 PIPELINE
+      // ==========================================
+      if (usuarioLogado?.nome && !usuarioLogado.nome.toLowerCase().includes('eduarda')) {
+          const { data: eduardas } = await supabase.from('perfis').select('id').ilike('nome', '%eduarda%').limit(1);
+          if (eduardas && eduardas.length > 0) {
+              const acao = editingOp ? 'atualizou a oportunidade' : 'criou uma nova oportunidade';
+              const opId = editingOp ? editingOp.id : (savedOpData && savedOpData.length > 0 ? savedOpData[0].id : null);
+              if (opId) {
+                  await supabase.from('notificacoes').insert({
+                      user_id: eduardas[0].id,
+                      remetente: usuarioLogado.nome,
+                      mensagem: `${usuarioLogado.nome.split(' ')[0]} ${acao}: ${formData.nome_cliente.toUpperCase()}.`,
+                      link: `/pipeline?op_id=${opId}`
+                  });
+              }
+          }
+      }
+      // ==========================================
 
       fecharModalELimparURL();
       setNovaNotaInput(""); 
