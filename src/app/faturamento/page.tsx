@@ -16,14 +16,42 @@ export default function FaturamentoPage() {
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
+  // Segurança e Autenticação
+  const [usuarioLogado, setUsuarioLogado] = useState<any>(null);
+  const [isMaster, setIsMaster] = useState(false);
+  const [authLoaded, setAuthLoaded] = useState(false);
+
   // Filtros
   const [anoSelecionado, setAnoSelecionado] = useState<string>(new Date().getFullYear().toString());
   const [vendedorSelecionado, setVendedorSelecionado] = useState<string>(""); 
   const [listaVendedores, setListaVendedores] = useState<any[]>([]); 
 
+  // Carrega o usuário primeiro
   useEffect(() => {
-    carregarDados();
-  }, [anoSelecionado, vendedorSelecionado]);
+    const carregarAuth = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+          const { data: perfil } = await supabase.from('perfis').select('*').eq('id', user.id).single();
+          setUsuarioLogado(perfil);
+
+          const cargoStr = String(perfil?.cargo || "").toLowerCase();
+          const nomeStr = String(perfil?.nome || "").toLowerCase();
+          
+          // Regra Master: Admins, Diretores, P&D, SDR, Eduarda e Jaque
+          const master = ['admin', 'diretor', 'master'].some(c => cargoStr.includes(c)) ||
+                         cargoStr.includes('p&d') || cargoStr.includes('sdr') ||
+                         nomeStr.includes('eduarda') || nomeStr.includes('jaque');
+          setIsMaster(master);
+      }
+      setAuthLoaded(true);
+    };
+    carregarAuth();
+  }, [supabase]);
+
+  // Carrega os dados só depois de saber quem é o usuário
+  useEffect(() => {
+    if (authLoaded) carregarDados();
+  }, [anoSelecionado, vendedorSelecionado, authLoaded]);
 
   const carregarDados = async () => {
     setLoading(true);
@@ -32,7 +60,13 @@ export default function FaturamentoPage() {
       const params = new URLSearchParams();
       params.append("path", "dashboard/faturamento");
       params.append("ano", anoSelecionado === "todos" ? "" : anoSelecionado);
-      if (vendedorSelecionado) params.append("representante", vendedorSelecionado);
+      
+      // TRAVA DE SEGURANÇA RLS: Força a busca apenas pela Rafaela/Vendedor logado
+      let repTarget = vendedorSelecionado;
+      if (!isMaster && usuarioLogado) {
+          repTarget = usuarioLogado.nome; 
+      }
+      if (repTarget) params.append("representante", repTarget);
 
       // Função segura para buscar exclusividades
       const fetchExclusividadesSeguro = async () => {
@@ -67,7 +101,7 @@ export default function FaturamentoPage() {
       }
 
       // ==========================================
-      // CÁLCULO DE EMOJIS (Em segundo plano)
+      // CÁLCULO DE EMOJIS E CHURN (Protegido por Usuário)
       // ==========================================
       const extractArray = (r: any) => (r && r.data && Array.isArray(r.data) ? r.data : (Array.isArray(r) ? r : []));
       const vendasArray = extractArray(resVen);
@@ -82,7 +116,15 @@ export default function FaturamentoPage() {
           Object.keys(v).forEach(k => objNorm[normalizeKey(k)] = v[k]);
 
           const vendedor = String(objNorm.vendedor || objNorm.representante || '').trim().toUpperCase();
-          if (vendedorSelecionado && vendedor !== vendedorSelecionado.trim().toUpperCase()) return;
+          
+          // Trava para o Vendedor Logado não calcular churn da empresa toda
+          if (!isMaster && usuarioLogado) {
+             const nomeLogadoNorm = normalizeKey(usuarioLogado.nome || "");
+             const vendedorNorm = normalizeKey(vendedor);
+             if (!vendedorNorm.includes(nomeLogadoNorm) && !nomeLogadoNorm.includes(vendedorNorm)) return;
+          } else if (vendedorSelecionado && vendedor !== vendedorSelecionado.trim().toUpperCase()) {
+             return;
+          }
 
           const cliente = String(objNorm.nomefantasia || objNorm.razaosocial || objNorm.cliente || '').trim().toUpperCase();
           if (!cliente) return;
@@ -146,7 +188,6 @@ export default function FaturamentoPage() {
 
   if (!dados) return null;
 
-  // DADOS OFICIAIS DA API (Nunca Zeram)
   const kpi = dados.kpi || {};
   const churnAPI = kpi.churn || {};
   
@@ -184,20 +225,26 @@ export default function FaturamentoPage() {
             </div>
 
             <div className="relative group">
-                <select 
-                    value={vendedorSelecionado} 
-                    onChange={(e) => setVendedorSelecionado(e.target.value)}
-                    className="appearance-none pl-9 pr-8 py-2.5 bg-white border border-slate-200 hover:border-blue-400 rounded-lg text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 transition cursor-pointer min-w-[220px]"
-                >
-                    <option value="">Todos os Representantes</option>
-                    {(listaVendedores.length > 0 ? listaVendedores : (rankings.vendedores || [])).map((v: any, i: number) => (
-                        <option key={i} value={v.nome}>{v.nome}</option>
-                    ))}
-                </select>
+                {isMaster ? (
+                    <select 
+                        value={vendedorSelecionado} 
+                        onChange={(e) => setVendedorSelecionado(e.target.value)}
+                        className="appearance-none pl-9 pr-8 py-2.5 bg-white border border-slate-200 hover:border-blue-400 rounded-lg text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-100 transition cursor-pointer min-w-[220px]"
+                    >
+                        <option value="">Todos os Representantes</option>
+                        {(listaVendedores.length > 0 ? listaVendedores : (rankings.vendedores || [])).map((v: any, i: number) => (
+                            <option key={i} value={v.nome}>{v.nome}</option>
+                        ))}
+                    </select>
+                ) : (
+                    <div className="pl-9 pr-4 py-2.5 bg-slate-100 border border-slate-200 rounded-lg text-sm font-semibold text-slate-500 cursor-not-allowed min-w-[220px] flex items-center select-none" title="Você visualiza apenas sua carteira">
+                        {usuarioLogado?.nome || 'Minhas Vendas'}
+                    </div>
+                )}
                 <User size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
             </div>
 
-            {vendedorSelecionado && (
+            {isMaster && vendedorSelecionado && (
                 <button onClick={() => setVendedorSelecionado("")} className="text-xs font-bold text-red-500 hover:bg-red-50 px-3 py-2 rounded-lg transition flex items-center gap-1">
                     <XCircle size={14}/> Limpar
                 </button>
@@ -206,7 +253,7 @@ export default function FaturamentoPage() {
 
         {/* KPI GRID - CLEAN */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <KpiCard title="Faturamento Total" value={fmtBRL(kpi.faturamentoAno || 0)} sub={vendedorSelecionado ? "Filtrado" : "Período Selecionado"} trend="up" />
+          <KpiCard title="Faturamento Total" value={fmtBRL(kpi.faturamentoAno || 0)} sub={vendedorSelecionado || !isMaster ? "Sua Carteira" : "Período Selecionado"} trend="up" />
           <KpiCard title="Ticket Médio" value={fmtBRL(kpi.ticketMedio || 0)} sub="Por transação" />
           <KpiCard title="Novos Clientes" value={kpi.novosClientes || 0} sub="Cadastrados no período" icon={<Users size={18} className="text-blue-500"/>} />
           <KpiCard title="Carteira Ativa" value={churnAPI.ativos || 0} sub="Compraram < 6 meses" icon={<Activity size={18} className="text-emerald-500"/>} />
@@ -222,7 +269,7 @@ export default function FaturamentoPage() {
                     <h3 className="text-lg font-bold text-slate-800">Evolução de Receita</h3>
                     <p className="text-xs text-slate-400 mt-1">{isVisaoAnual ? "Comparativo anual" : `Detalhamento mensal de ${anoSelecionado}`}</p>
                 </div>
-                {vendedorSelecionado && <span className="text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-100 px-3 py-1 rounded-full uppercase tracking-wider">{vendedorSelecionado}</span>}
+                {vendedorSelecionado && isMaster && <span className="text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-100 px-3 py-1 rounded-full uppercase tracking-wider">{vendedorSelecionado}</span>}
             </div>
             
             <div className="h-[300px]">
@@ -301,7 +348,9 @@ export default function FaturamentoPage() {
         {/* RANKINGS */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
             <RankingCard title="Top Regiões" items={rankings.estados || []} type="uf" />
-            <RankingCard title="Performance Equipe" items={rankings.vendedores || []} type="vendedor" highlight={vendedorSelecionado} />
+            {isMaster && (
+               <RankingCard title="Performance Equipe" items={rankings.vendedores || []} type="vendedor" highlight={vendedorSelecionado} />
+            )}
         </div>
 
       </div>
