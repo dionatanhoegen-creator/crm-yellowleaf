@@ -34,12 +34,22 @@ export default function FaturamentoPage() {
       params.append("ano", anoSelecionado === "todos" ? "" : anoSelecionado);
       if (vendedorSelecionado) params.append("representante", vendedorSelecionado);
 
+      // Função segura para buscar exclusividades sem quebrar o Promise.all
+      const fetchExclusividadesSeguro = async () => {
+          try {
+              const { data } = await supabase.from('exclusividades').select('nome_cliente');
+              return data || [];
+          } catch (e) {
+              return [];
+          }
+      };
+
       // BUSCA HÍBRIDA: Puxa o painel, as vendas (para cruzar as datas) e as exclusividades
       const cacheBuster = new Date().getTime();
-      const [resDash, resVen, resExcl] = await Promise.all([
+      const [resDash, resVen, exclusividades] = await Promise.all([
           fetch(`${API_URL}?${params.toString()}&t=${cacheBuster}`).then(r => r.json()).catch(() => null),
           fetch(`${API_URL}?path=vendas&t=${cacheBuster}`).then(r => r.json()).catch(() => null),
-          supabase.from('exclusividades').select('nome_cliente').catch(() => ({ data: [] }))
+          fetchExclusividadesSeguro()
       ]);
       
       if (!resDash) throw new Error("Falha na comunicação com a planilha");
@@ -64,7 +74,6 @@ export default function FaturamentoPage() {
       const extractArray = (r: any) => (r && r.data && Array.isArray(r.data) ? r.data : (Array.isArray(r) ? r : []));
       const vendasArray = extractArray(resVen);
       
-      const exclusividades = resExcl?.data || [];
       const clientesComContrato = new Set(exclusividades.map((e: any) => String(e.nome_cliente).trim().toUpperCase()));
 
       const ultimasCompras = new Map();
@@ -336,7 +345,6 @@ function ChurnRow({ label, count, contratos, color, risk }: any) {
                 </div>
             </div>
             <div className="flex items-center gap-2">
-                {/* AQUI ESTÁ O EMOJI DE CONTRATO ATIVO! */}
                 {contratos > 0 && (
                     <span 
                         className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-1 rounded-lg flex items-center gap-1 shadow-sm border border-green-200" 
