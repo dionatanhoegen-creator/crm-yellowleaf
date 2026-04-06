@@ -34,7 +34,7 @@ export default function FaturamentoPage() {
       params.append("ano", anoSelecionado === "todos" ? "" : anoSelecionado);
       if (vendedorSelecionado) params.append("representante", vendedorSelecionado);
 
-      // Função segura para buscar exclusividades sem quebrar o Promise.all
+      // Função segura para buscar exclusividades
       const fetchExclusividadesSeguro = async () => {
           try {
               const { data } = await supabase.from('exclusividades').select('nome_cliente');
@@ -44,7 +44,6 @@ export default function FaturamentoPage() {
           }
       };
 
-      // BUSCA HÍBRIDA: Puxa o painel, as vendas (para cruzar as datas) e as exclusividades
       const cacheBuster = new Date().getTime();
       const [resDash, resVen, exclusividades] = await Promise.all([
           fetch(`${API_URL}?${params.toString()}&t=${cacheBuster}`).then(r => r.json()).catch(() => null),
@@ -60,7 +59,6 @@ export default function FaturamentoPage() {
       }
       setDados(dataFinal);
       
-      // Lista de vendedores
       const listaNova = dataFinal.rankings?.listaVendedores || dataFinal.listaVendedores;
       if (Array.isArray(listaNova) && listaNova.length > 0) {
           setListaVendedores(listaNova);
@@ -69,23 +67,20 @@ export default function FaturamentoPage() {
       }
 
       // ==========================================
-      // MOTOR DE CÁLCULO DE CHURN CRUZADO
+      // CÁLCULO DE EMOJIS (Em segundo plano)
       // ==========================================
       const extractArray = (r: any) => (r && r.data && Array.isArray(r.data) ? r.data : (Array.isArray(r) ? r : []));
       const vendasArray = extractArray(resVen);
       
       const clientesComContrato = new Set(exclusividades.map((e: any) => String(e.nome_cliente).trim().toUpperCase()));
-
       const ultimasCompras = new Map();
 
-      // Normaliza as chaves do Google para evitar erros
       const normalizeKey = (key: string) => key.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, '');
 
       vendasArray.forEach((v: any) => {
           const objNorm: any = {};
           Object.keys(v).forEach(k => objNorm[normalizeKey(k)] = v[k]);
 
-          // Aplica o filtro de vendedor no cálculo do churn também
           const vendedor = String(objNorm.vendedor || objNorm.representante || '').trim().toUpperCase();
           if (vendedorSelecionado && vendedor !== vendedorSelecionado.trim().toUpperCase()) return;
 
@@ -109,24 +104,17 @@ export default function FaturamentoPage() {
           }
       });
 
-      let churnCalc = { ativos: 0, c6_12: { total: 0, cont: 0 }, c1_2: { total: 0, cont: 0 }, cMais2: { total: 0, cont: 0 } };
+      let churnCalc = { c6_12: { cont: 0 }, c1_2: { cont: 0 }, cMais2: { cont: 0 } };
       const hoje = new Date().getTime();
 
       ultimasCompras.forEach((ultimoTs, cliente) => {
-          const meses = (hoje - ultimoTs) / (1000 * 60 * 60 * 24 * 30.44); // Aproximação de meses
+          const meses = (hoje - ultimoTs) / (1000 * 60 * 60 * 24 * 30.44); 
           const temContrato = clientesComContrato.has(cliente);
 
-          if (meses < 6) {
-              churnCalc.ativos++;
-          } else if (meses >= 6 && meses < 12) {
-              churnCalc.c6_12.total++;
-              if (temContrato) churnCalc.c6_12.cont++;
-          } else if (meses >= 12 && meses < 24) {
-              churnCalc.c1_2.total++;
-              if (temContrato) churnCalc.c1_2.cont++;
-          } else if (meses >= 24) {
-              churnCalc.cMais2.total++;
-              if (temContrato) churnCalc.cMais2.cont++;
+          if (temContrato) {
+              if (meses >= 6 && meses < 12) churnCalc.c6_12.cont++;
+              else if (meses >= 12 && meses < 24) churnCalc.c1_2.cont++;
+              else if (meses >= 24) churnCalc.cMais2.cont++;
           }
       });
 
@@ -158,10 +146,12 @@ export default function FaturamentoPage() {
 
   if (!dados) return null;
 
+  // DADOS OFICIAIS DA API (Nunca Zeram)
   const kpi = dados.kpi || {};
+  const churnAPI = kpi.churn || {};
+  
   const graficoRecente = Array.isArray(dados.grafico) ? dados.grafico : [];
   const rankings = dados.rankings || { estados: [], produtos: [], vendedores: [] };
-  
   const isVisaoAnual = anoSelecionado === "todos";
 
   return (
@@ -219,7 +209,7 @@ export default function FaturamentoPage() {
           <KpiCard title="Faturamento Total" value={fmtBRL(kpi.faturamentoAno || 0)} sub={vendedorSelecionado ? "Filtrado" : "Período Selecionado"} trend="up" />
           <KpiCard title="Ticket Médio" value={fmtBRL(kpi.ticketMedio || 0)} sub="Por transação" />
           <KpiCard title="Novos Clientes" value={kpi.novosClientes || 0} sub="Cadastrados no período" icon={<Users size={18} className="text-blue-500"/>} />
-          <KpiCard title="Carteira Ativa" value={churnLocal ? churnLocal.ativos : 0} sub="Compraram < 6 meses" icon={<Activity size={18} className="text-emerald-500"/>} />
+          <KpiCard title="Carteira Ativa" value={churnAPI.ativos || 0} sub="Compraram < 6 meses" icon={<Activity size={18} className="text-emerald-500"/>} />
         </div>
 
         {/* ÁREA PRINCIPAL: GRÁFICO + CHURN */}
@@ -268,7 +258,7 @@ export default function FaturamentoPage() {
             </div>
           </div>
 
-          {/* PAINEL CHURN */}
+          {/* PAINEL CHURN (COM DADOS OFICIAIS DA API) */}
           <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow flex flex-col">
             <div className="mb-6">
                 <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">Risco de Churn</h3>
@@ -278,22 +268,22 @@ export default function FaturamentoPage() {
             <div className="space-y-3 flex-1">
                 <ChurnRow 
                     label="6 a 12 Meses" 
-                    count={churnLocal?.c6_12.total || 0} 
-                    contratos={churnLocal?.c6_12.cont || 0} 
+                    count={churnAPI.inativos6m || 0} 
+                    contratos={churnLocal?.c6_12?.cont || 0} 
                     color="bg-yellow-500" 
                     risk="Moderado" 
                 />
                 <ChurnRow 
                     label="1 a 2 Anos" 
-                    count={churnLocal?.c1_2.total || 0} 
-                    contratos={churnLocal?.c1_2.cont || 0} 
+                    count={churnAPI.inativos12m || 0} 
+                    contratos={churnLocal?.c1_2?.cont || 0} 
                     color="bg-orange-500" 
                     risk="Alto" 
                 />
                 <ChurnRow 
                     label="+2 Anos" 
-                    count={churnLocal?.cMais2.total || 0} 
-                    contratos={churnLocal?.cMais2.cont || 0} 
+                    count={churnAPI.perdidos || 0} 
+                    contratos={churnLocal?.cMais2?.cont || 0} 
                     color="bg-red-500" 
                     risk="Crítico" 
                 />
@@ -302,7 +292,7 @@ export default function FaturamentoPage() {
             <div className="mt-6 pt-4 border-t border-slate-50 text-center">
                 <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">Total na Base</p>
                 <p className="text-2xl font-black text-slate-700">
-                    {churnLocal ? (churnLocal.ativos + churnLocal.c6_12.total + churnLocal.c1_2.total + churnLocal.cMais2.total) : 0}
+                    {(churnAPI.ativos || 0) + (churnAPI.inativos6m || 0) + (churnAPI.inativos12m || 0) + (churnAPI.perdidos || 0)}
                 </p>
             </div>
           </div>
