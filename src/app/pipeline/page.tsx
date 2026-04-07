@@ -70,7 +70,6 @@ function PipelineContent() {
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  // --- ESTADOS DO CHAT INTERNO ---
   const [chatMsgs, setChatMsgs] = useState<any[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [showMentions, setShowMentions] = useState(false);
@@ -139,9 +138,6 @@ function PipelineContent() {
     }
   }, [oportunidades, usuarioLogado]);
 
-  // ==============================================================
-  // A MÁGICA DE ABRIR O CARD PELO LINK
-  // ==============================================================
   const opIdUrl = searchParams.get('op_id');
   useEffect(() => {
       const abrirOpViaUrl = async () => {
@@ -182,14 +178,10 @@ function PipelineContent() {
       abrirOpViaUrl();
   }, [opIdUrl, oportunidades]);
 
-  // ==============================================================
-  // REALTIME DO CHAT INTERNO (CORRIGIDO)
-  // ==============================================================
   useEffect(() => {
       if (!editingOp || !modalOpen) return;
 
       const fetchMensagens = async () => {
-          // Correção do join: usa apenas "perfis(nome)" pois a chave estrangeira foi arrumada
           const { data, error } = await supabase
             .from('chat_mensagens')
             .select('*, perfis(nome)')
@@ -241,7 +233,6 @@ function PipelineContent() {
       setChatInput(""); 
       setShowMentions(false);
 
-      // ATUALIZAÇÃO OTIMISTA: Mostra a mensagem na hora pra não parecer lento
       const msgOtimista = {
           id: 'temp-' + Date.now(),
           user_id: usuarioLogado.id,
@@ -256,7 +247,6 @@ function PipelineContent() {
           if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
       }, 100);
 
-      // Envia de verdade pro banco
       const { data: novaMsg, error } = await supabase.from('chat_mensagens').insert({
           user_id: usuarioLogado.id,
           referencia_tipo: 'pipeline',
@@ -267,7 +257,6 @@ function PipelineContent() {
       if (error) {
           console.error(error);
           alert("Aviso: Ocorreu um erro na rede e a mensagem pode não ter sido entregue.");
-          // Reverte se der erro
           setChatMsgs(prev => prev.filter(m => m.id !== msgOtimista.id));
           return;
       }
@@ -473,21 +462,31 @@ function PipelineContent() {
         }
 
         if (vendedorERP !== "") {
-            const normalizeStr = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+            // LÓGICA DE BUSCA MELHORADA E BLINDADA
+            const normalizeStr = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
             const vendedorNorm = normalizeStr(vendedorERP);
 
             const repEncontrado = equipe.find(u => {
                 const nomeNorm = normalizeStr(u.nome);
-                return vendedorNorm.includes(nomeNorm) || nomeNorm.includes(vendedorNorm);
+                if (vendedorNorm.includes(nomeNorm) || nomeNorm.includes(vendedorNorm)) return true;
+                
+                const pVend = vendedorNorm.split(/\s+/);
+                const pNome = nomeNorm.split(/\s+/);
+                
+                if (pVend[0] === pNome[0]) {
+                    if (pNome.length === 1) return true;
+                    return pNome.slice(1).some(p => p.length > 2 && vendedorNorm.includes(p));
+                }
+                return false;
             });
 
             if (repEncontrado) {
-                if (isSDRUser) {
+                if (isSDRUser || isAdminUser) {
                     setIsRepLocked(false); 
                     setConfirmModal({
                         open: true,
                         title: 'CLIENTE COM CARTEIRA NO ERP',
-                        message: `A farmácia "${nomeFantasiaOuRazao}" já pertence a ${repEncontrado.nome.toUpperCase()}.\n\nComo você é do setor de P&D/SDR, o sistema pré-selecionou este vendedor, mas você está liberada para repassar a oportunidade para outro representante manualmente se precisar.`,
+                        message: `A farmácia "${nomeFantasiaOuRazao}" já pertence a ${repEncontrado.nome.toUpperCase()}.\n\nComo você tem acesso avançado (P&D/SDR/Admin), o sistema pré-selecionou este vendedor, mas você pode repassar a oportunidade para outro representante manualmente se precisar.`,
                         onConfirm: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, user_id: repEncontrado.id })); preencherDadosAPI(cnpjLimpo, chavesERP); },
                         onCancel: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, cnpj: '', user_id: usuarioLogado.id })); setLoadingCNPJ(false); }
                     });
@@ -503,8 +502,18 @@ function PipelineContent() {
                 }
                 return;
             } else {
-                 setBlockModal({ open: true, title: 'ACESSO NEGADO', message: `A farmácia "${nomeFantasiaOuRazao}" JÁ ESTÁ CADASTRADA.`, motivo: `Pertence ao vendedor: ${vendedorERP.toUpperCase()}.\n\nEste vendedor não possui conta ativa no CRM para receber o repasse.` });
-                 setFormData(prev => ({ ...prev, cnpj: '' })); setLoadingCNPJ(false);
+                 if (isSDRUser || isAdminUser) {
+                      setConfirmModal({
+                          open: true,
+                          title: 'VENDEDOR NÃO ENCONTRADO',
+                          message: `A farmácia "${nomeFantasiaOuRazao}" pertence a ${vendedorERP.toUpperCase()} no ERP.\n\nPorém, este usuário NÃO possui conta no CRM.\nComo você tem acesso avançado, deseja criar a proposta e repassar para outro representante ativo?`,
+                          onConfirm: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); preencherDadosAPI(cnpjLimpo, chavesERP); },
+                          onCancel: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, cnpj: '' })); setLoadingCNPJ(false); }
+                      });
+                 } else {
+                      setBlockModal({ open: true, title: 'ACESSO NEGADO', message: `A farmácia "${nomeFantasiaOuRazao}" JÁ ESTÁ CADASTRADA.`, motivo: `Pertence ao vendedor: ${vendedorERP.toUpperCase()}.\n\nEste vendedor não possui conta ativa no CRM para receber o repasse.` });
+                      setFormData(prev => ({ ...prev, cnpj: '' })); setLoadingCNPJ(false);
+                 }
                  return; 
             }
         }
@@ -587,6 +596,17 @@ function PipelineContent() {
       const novos = [...contatosList];
       novos[index] = { ...novos[index], [campo]: valor };
       setContatosList(novos);
+  };
+
+  const adicionarNotaAoHistorico = () => {
+    if (!novaNotaInput.trim()) return;
+    const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const autor = usuarioLogado?.nome ? usuarioLogado.nome.split(' ')[0] : 'Usuário';
+    
+    const notaFormatada = `📅 ${dataHora} | 👤 ${autor}\n${novaNotaInput}\n────────────────────────────────────────\n${formData.observacoes || ''}`;
+    
+    setFormData({ ...formData, observacoes: notaFormatada });
+    setNovaNotaInput(""); 
   };
 
   const gerarPropostaIndividualPDF = () => {
