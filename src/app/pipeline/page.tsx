@@ -7,7 +7,7 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users, Building2, UserPlus, Bell
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users, Building2, UserPlus, Bell, AtSign
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -65,7 +65,6 @@ function PipelineContent() {
 
   const [lembreteModal, setLembreteModal] = useState({ open: false, clientes: [] as any[] });
 
-  const [novaNotaInput, setNovaNotaInput] = useState("");
   const [isRepLocked, setIsRepLocked] = useState(false); 
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -173,7 +172,6 @@ function PipelineContent() {
               setContatosList(contatosCarregados);
 
               setIsRepLocked(false);
-              setNovaNotaInput("");
               setChatInput("");
               setModalOpen(true);
           }
@@ -562,17 +560,6 @@ function PipelineContent() {
       setContatosList(novos);
   };
 
-  const adicionarNotaAoHistorico = () => {
-    if (!novaNotaInput.trim()) return;
-    const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-    const autor = usuarioLogado?.nome ? usuarioLogado.nome.split(' ')[0] : 'Usuário';
-    
-    const notaFormatada = `📅 ${dataHora} | 👤 ${autor}\n${novaNotaInput}\n────────────────────────────────────────\n${formData.observacoes || ''}`;
-    
-    setFormData({ ...formData, observacoes: notaFormatada });
-    setNovaNotaInput(""); 
-  };
-
   const gerarPropostaIndividualPDF = () => {
     if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
 
@@ -759,15 +746,7 @@ function PipelineContent() {
   const handleSave = async () => {
     if (!formData.nome_cliente) return alert("Preencha a Razão Social.");
     if (!formData.user_id) return alert("Selecione um Representante Responsável para assumir esta oportunidade.");
-    if ((!formData.observacoes || formData.observacoes.trim() === "") && !novaNotaInput.trim()) return alert("O campo 'Diário de Bordo' é obrigatório. Registre o andamento da negociação.");
     if (!formData.data_lembrete || formData.data_lembrete.trim() === "") return alert("Por favor, selecione uma data para 'Próximo Contato'. É obrigatório definir um retorno.");
-    
-    let obsFinal = formData.observacoes || "";
-    if (novaNotaInput.trim()) {
-        const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-        const autor = usuarioLogado?.nome ? usuarioLogado.nome.split(' ')[0] : 'Usuário';
-        obsFinal = `📅 ${dataHora} | 👤 ${autor}\n${novaNotaInput}\n────────────────────────────────────────\n${obsFinal}`;
-    }
 
     let valorFinal = parseFloat(String(formData.valor)) || 0;
     let numeroFinal = formData.numero_proposta;
@@ -809,7 +788,7 @@ function PipelineContent() {
         data_lembrete_sdr: (formData.data_lembrete_sdr && formData.data_lembrete_sdr.trim() !== "") ? formData.data_lembrete_sdr : null,
         data_entrada: formData.data_entrada || getLocalData(), 
         canal_contato: formData.canal_contato, 
-        observacoes: obsFinal, 
+        observacoes: formData.observacoes, // Mantém o histórico antigo intacto sem sobrescrever
         observacoes_proposta: formData.observacoes_proposta 
     };
 
@@ -853,7 +832,6 @@ function PipelineContent() {
       }
 
       fecharModalELimparURL();
-      setNovaNotaInput(""); 
       setChatInput("");
       carregarOportunidades(usuarioLogado); 
     } else { 
@@ -911,7 +889,7 @@ function PipelineContent() {
             }
             setContatosList(contatosCarregados);
 
-            setIsRepLocked(false); setNovaNotaInput(""); setChatInput(""); setModalOpen(true); 
+            setIsRepLocked(false); setChatInput(""); setModalOpen(true); 
         }} className={`p-4 rounded-2xl border-2 cursor-pointer shadow-sm transition hover:shadow-md ${bgClass} ${borderClass}`}>
             <div className="flex justify-between items-start mb-2">
                 <div className="max-w-[80%]">
@@ -1013,7 +991,6 @@ function PipelineContent() {
                     setIsRepLocked(false); 
                     setFormData({cnpj: '', nome_cliente: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', data_lembrete_sdr: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', endereco: '', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); 
                     setContatosList([{ nome: '', cargo: 'Comprador(a)', telefone: '', email: '' }]); 
-                    setNovaNotaInput(""); 
                     setChatInput("");
                     setModalOpen(true); 
                 }} className="flex-1 sm:flex-none bg-blue-600 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-xs md:text-sm flex items-center justify-center gap-2 hover:bg-blue-700">
@@ -1209,9 +1186,24 @@ function PipelineContent() {
                       <label className="text-[10px] font-bold text-slate-700 uppercase tracking-widest mb-1.5 block">Canal de Contato</label>
                       <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select>
                   </div>
+
+                  {/* RESTAURANDO O HISTÓRICO ANTIGO AQUI (Visível Apenas se Existir) */}
+                  {formData.observacoes && formData.observacoes.trim() !== "" && (
+                      <div className="md:col-span-4 mt-6 p-4 bg-slate-100/50 border border-slate-200 rounded-2xl shadow-inner">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2">
+                              <History size={14}/> Histórico de Anotações (Legado)
+                          </label>
+                          <textarea 
+                              className="w-full bg-transparent resize-none text-xs text-slate-700 font-mono leading-relaxed outline-none h-40 custom-scrollbar" 
+                              value={formData.observacoes} 
+                              readOnly 
+                          />
+                      </div>
+                  )}
+
               </div>
 
-              {/* LADO DIREITO (Chat e Histórico) */}
+              {/* LADO DIREITO (Chat e Histórico Novo) */}
               <div className="lg:col-span-4 flex flex-col h-[500px] lg:h-full min-h-[400px] bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="bg-slate-100 p-3 border-b border-slate-200 shrink-0">
                       <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
