@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, Suspense, useRef } from 'react';
 import { createPortal } from 'react-dom'; 
 import { useSearchParams, useRouter } from 'next/navigation';
 import { 
@@ -69,6 +69,13 @@ function PipelineContent() {
   const [isRepLocked, setIsRepLocked] = useState(false); 
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  // --- ESTADOS DO CHAT INTERNO ---
+  const [chatMsgs, setChatMsgs] = useState<any[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [showMentions, setShowMentions] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   
   const getLocalData = () => {
     const now = new Date();
@@ -133,17 +140,15 @@ function PipelineContent() {
   }, [oportunidades, usuarioLogado]);
 
   // ==============================================================
-  // A MÁGICA DE ABRIR O CARD PELO LINK (Mesmo se não tiver na lista)
+  // A MÁGICA DE ABRIR O CARD PELO LINK
   // ==============================================================
   const opIdUrl = searchParams.get('op_id');
   useEffect(() => {
       const abrirOpViaUrl = async () => {
           if (!opIdUrl) return;
 
-          // 1. Tenta achar na lista que já tá carregada na tela
           let opEncontrada = oportunidades.find(o => String(o.id) === opIdUrl);
 
-          // 2. Se não achar (escondida por permissão), vai direto no Banco de Dados buscar!
           if (!opEncontrada) {
               const { data } = await supabase.from('pipeline').select('*').eq('id', opIdUrl).single();
               if (data) opEncontrada = data;
@@ -169,12 +174,97 @@ function PipelineContent() {
 
               setIsRepLocked(false);
               setNovaNotaInput("");
+              setChatInput("");
               setModalOpen(true);
           }
       };
 
       abrirOpViaUrl();
-  }, [opIdUrl, oportunidades]); // Removido restrições rígidas para sempre tentar abrir
+  }, [opIdUrl, oportunidades]);
+
+  // ==============================================================
+  // REALTIME DO CHAT INTERNO
+  // ==============================================================
+  useEffect(() => {
+      if (!editingOp || !modalOpen) return;
+
+      const fetchMensagens = async () => {
+          const { data } = await supabase
+            .from('chat_mensagens')
+            .select('*, perfis:user_id(nome)')
+            .eq('referencia_tipo', 'pipeline')
+            .eq('referencia_id', editingOp.id)
+            .order('created_at', { ascending: true });
+          
+          setChatMsgs(data || []);
+          setTimeout(() => {
+              if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+          }, 100);
+      };
+
+      fetchMensagens();
+
+      const channel = supabase.channel(`chat_${editingOp.id}`)
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_mensagens', filter: `referencia_id=eq.${editingOp.id}` }, () => {
+              fetchMensagens(); 
+          })
+          .subscribe();
+
+      return () => { supabase.removeChannel(channel); };
+  }, [editingOp, modalOpen, supabase]);
+
+  const handleChatInputChange = (e: any) => {
+      const val = e.target.value;
+      setChatInput(val);
+
+      const match = val.match(/(?:^|\s)@(\w*)$/);
+      if (match) {
+          setShowMentions(true);
+          setMentionQuery(match[1].toLowerCase());
+      } else {
+          setShowMentions(false);
+      }
+  };
+
+  const inserirMencao = (nomeUsuario: string) => {
+      const novoTexto = chatInput.replace(/(?:^|\s)@(\w*)$/, ` @${nomeUsuario.split(' ')[0]} `);
+      setChatInput(novoTexto);
+      setShowMentions(false);
+  };
+
+  const enviarMensagemChat = async () => {
+      if (!chatInput.trim() || !editingOp) return;
+      const msgTexto = chatInput;
+      setChatInput(""); 
+      setShowMentions(false);
+
+      const { data: novaMsg, error } = await supabase.from('chat_mensagens').insert({
+          user_id: usuarioLogado.id,
+          referencia_tipo: 'pipeline',
+          referencia_id: editingOp.id,
+          texto: msgTexto
+      }).select();
+
+      if (!error && novaMsg) {
+          const regex = /@(\w+)/g;
+          const mencoes = msgTexto.match(regex);
+          if (mencoes) {
+              mencoes.forEach(async (mentionStr) => {
+                  const nomeMencionado = mentionStr.substring(1).toLowerCase(); 
+                  const usuarioAlvo = equipe.find(u => u.nome.toLowerCase().includes(nomeMencionado));
+                  
+                  if (usuarioAlvo && usuarioAlvo.id !== usuarioLogado.id) {
+                      await supabase.from('notificacoes').insert({
+                          user_id: usuarioAlvo.id,
+                          remetente: usuarioLogado.nome.split(' ')[0],
+                          mensagem: `Mencionou você no chat da conta: ${editingOp.nome_cliente}`,
+                          link: `/pipeline?op_id=${editingOp.id}`
+                      });
+                  }
+              });
+          }
+      }
+  };
 
   const fecharModalELimparURL = () => {
       setModalOpen(false);
@@ -764,6 +854,7 @@ function PipelineContent() {
 
       fecharModalELimparURL();
       setNovaNotaInput(""); 
+      setChatInput("");
       carregarOportunidades(usuarioLogado); 
     } else { 
       alert(`Erro ao salvar: ${error.message}`); 
@@ -820,7 +911,7 @@ function PipelineContent() {
             }
             setContatosList(contatosCarregados);
 
-            setIsRepLocked(false); setNovaNotaInput(""); setModalOpen(true); 
+            setIsRepLocked(false); setNovaNotaInput(""); setChatInput(""); setModalOpen(true); 
         }} className={`p-4 rounded-2xl border-2 cursor-pointer shadow-sm transition hover:shadow-md ${bgClass} ${borderClass}`}>
             <div className="flex justify-between items-start mb-2">
                 <div className="max-w-[80%]">
@@ -923,6 +1014,7 @@ function PipelineContent() {
                     setFormData({cnpj: '', nome_cliente: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', data_lembrete_sdr: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', endereco: '', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); 
                     setContatosList([{ nome: '', cargo: 'Comprador(a)', telefone: '', email: '' }]); 
                     setNovaNotaInput(""); 
+                    setChatInput("");
                     setModalOpen(true); 
                 }} className="flex-1 sm:flex-none bg-blue-600 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-xs md:text-sm flex items-center justify-center gap-2 hover:bg-blue-700">
                     <Plus size={16} /> Nova Op.
@@ -949,7 +1041,7 @@ function PipelineContent() {
 
       {modalOpen && mounted && createPortal(
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-end md:items-center justify-center md:p-4">
-          <div className="bg-white w-full h-[95vh] md:h-auto md:max-h-[95vh] md:max-w-5xl rounded-t-3xl md:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-200">
+          <div className="bg-white w-full h-[95vh] md:h-auto md:max-h-[95vh] md:max-w-6xl rounded-t-3xl md:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-200">
             
             <div className="bg-[#1e293b] p-4 md:p-6 flex justify-between items-center text-white shrink-0 border-b-4 border-blue-500">
               <div className="overflow-hidden mr-2">
@@ -968,177 +1060,228 @@ function PipelineContent() {
               </div>
             </div>
 
-            <div className="p-4 md:p-8 grid grid-cols-1 md:grid-cols-4 gap-4 md:gap-6 overflow-y-auto bg-slate-50 flex-1 custom-scrollbar">
-              <div className="md:col-span-4 flex items-center gap-2 mb-1 md:mb-2">
-                  <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black text-xs md:text-sm">1</div>
-                  <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Identificação e Atribuição</h3>
-              </div>
+            <div className="p-4 md:p-8 grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6 overflow-y-auto bg-slate-50 flex-1 custom-scrollbar">
               
-              <div className="md:col-span-2">
-                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">CNPJ (Com Validação)</label>
-                  <div className="flex gap-2">
-                      <input className="w-full bg-white border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none rounded-xl p-3 text-sm font-medium transition shadow-sm" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} onBlur={buscarDadosCNPJ} placeholder="Digite para buscar..."/>
-                      <button type="button" onClick={buscarDadosCNPJ} className="bg-blue-600 text-white p-3 rounded-xl shadow-sm hover:bg-blue-700 transition"><Loader2 size={20} className={loadingCNPJ ? "animate-spin" : "hidden"}/><Search size={20} className={loadingCNPJ ? "hidden" : ""}/></button>
-                  </div>
-              </div>
-
-              <div className="md:col-span-2">
-                  <label className="text-xs font-black text-green-700 mb-1.5 block uppercase tracking-widest">Farmácia (Nome Fantasia)</label>
-                  <input className="w-full bg-green-50 border-2 border-green-400 focus:border-green-600 rounded-xl p-3 text-sm font-black text-green-900 uppercase outline-none shadow-sm transition-colors" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})} placeholder="NOME DA FARMÁCIA"/>
-              </div>
-
-              <div className="md:col-span-2">
-                  <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1"><MapPin size={14}/> Endereço Completo</label>
-                  <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-medium uppercase outline-none shadow-sm" value={formData.endereco} onChange={e => setFormData({...formData, endereco: e.target.value.toUpperCase()})} placeholder="Rua, Número, Bairro"/>
-              </div>
-
-              <div className="md:col-span-1">
-                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Cidade</label>
-                  <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm" value={formData.cidade_exclusividade} onChange={e => setFormData({...formData, cidade_exclusividade: e.target.value.toUpperCase()})} placeholder="CIDADE"/>
-              </div>
-
-              <div className="md:col-span-1">
-                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">UF</label>
-                  <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm text-center" value={formData.uf_exclusividade} onChange={e => setFormData({...formData, uf_exclusividade: e.target.value.toUpperCase()})} placeholder="SP" maxLength={2}/>
-              </div>
-              
-              <div className="md:col-span-4 mt-2">
-                  <div className="flex items-center justify-between mb-3 border-b border-slate-200 pb-2">
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1"><Users size={14}/> Contatos da Farmácia</label>
+              {/* LADO ESQUERDO (Formulário) */}
+              <div className="lg:col-span-8 grid grid-cols-1 md:grid-cols-4 gap-4 md:gap-6 content-start">
+                  <div className="md:col-span-4 flex items-center gap-2 mb-1 md:mb-2">
+                      <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black text-xs md:text-sm">1</div>
+                      <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Identificação e Atribuição</h3>
                   </div>
                   
-                  {contatosList.map((contato, idx) => (
-                      <div key={idx} className="p-4 bg-white border border-slate-200 rounded-xl mb-3 relative shadow-sm hover:border-blue-300 transition-colors">
-                          {idx > 0 && (
-                              <button type="button" onClick={() => removeContato(idx)} className="absolute top-2 right-2 text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 p-2 rounded-lg transition" title="Remover Contato">
-                                  <Trash2 size={16}/>
-                              </button>
-                          )}
-                          <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-4">
-                              {idx === 0 ? '⭐ Contato Principal (Aparece no PDF)' : `👤 Contato Adicional ${idx + 1}`}
-                          </h4>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div>
-                                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Nome do Contato</label>
-                                  <input className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm transition" value={contato.nome} onChange={e => updateContato(idx, 'nome', e.target.value.toUpperCase())} placeholder="EX: DRA. JULIA"/>
-                              </div>
-                              <div>
-                                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">Cargo / Papel</label>
-                                  <select className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer transition" value={contato.cargo} onChange={e => updateContato(idx, 'cargo', e.target.value)}>
-                                      {OPCOES_CARGO_CONTATO.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                                  </select>
-                              </div>
-                              <div>
-                                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">WhatsApp / Tel</label>
-                                  <input className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-bold outline-none shadow-sm transition" value={contato.telefone} onChange={e => updateContato(idx, 'telefone', e.target.value)} placeholder="(11) 99999-9999"/>
-                              </div>
-                              <div>
-                                  <label className="text-xs font-bold text-slate-700 mb-1.5 block">E-mail</label>
-                                  <input type="email" className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-medium outline-none shadow-sm transition" value={contato.email} onChange={e => updateContato(idx, 'email', e.target.value.toLowerCase())} placeholder="email@farmacia.com"/>
+                  <div className="md:col-span-2">
+                      <label className="text-xs font-bold text-slate-700 mb-1.5 block">CNPJ (Com Validação)</label>
+                      <div className="flex gap-2">
+                          <input className="w-full bg-white border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none rounded-xl p-3 text-sm font-medium transition shadow-sm" value={formData.cnpj} onChange={e => setFormData({...formData, cnpj: e.target.value})} onBlur={buscarDadosCNPJ} placeholder="Digite para buscar..."/>
+                          <button type="button" onClick={buscarDadosCNPJ} className="bg-blue-600 text-white p-3 rounded-xl shadow-sm hover:bg-blue-700 transition"><Loader2 size={20} className={loadingCNPJ ? "animate-spin" : "hidden"}/><Search size={20} className={loadingCNPJ ? "hidden" : ""}/></button>
+                      </div>
+                  </div>
+
+                  <div className="md:col-span-2">
+                      <label className="text-xs font-black text-green-700 mb-1.5 block uppercase tracking-widest">Farmácia (Nome Fantasia)</label>
+                      <input className="w-full bg-green-50 border-2 border-green-400 focus:border-green-600 rounded-xl p-3 text-sm font-black text-green-900 uppercase outline-none shadow-sm transition-colors" value={formData.nome_cliente} onChange={e => setFormData({...formData, nome_cliente: e.target.value.toUpperCase()})} placeholder="NOME DA FARMÁCIA"/>
+                  </div>
+
+                  <div className="md:col-span-2">
+                      <label className="text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1"><MapPin size={14}/> Endereço Completo</label>
+                      <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-medium uppercase outline-none shadow-sm" value={formData.endereco} onChange={e => setFormData({...formData, endereco: e.target.value.toUpperCase()})} placeholder="Rua, Número, Bairro"/>
+                  </div>
+
+                  <div className="md:col-span-1">
+                      <label className="text-xs font-bold text-slate-700 mb-1.5 block">Cidade</label>
+                      <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm" value={formData.cidade_exclusividade} onChange={e => setFormData({...formData, cidade_exclusividade: e.target.value.toUpperCase()})} placeholder="CIDADE"/>
+                  </div>
+
+                  <div className="md:col-span-1">
+                      <label className="text-xs font-bold text-slate-700 mb-1.5 block">UF</label>
+                      <input className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm text-center" value={formData.uf_exclusividade} onChange={e => setFormData({...formData, uf_exclusividade: e.target.value.toUpperCase()})} placeholder="SP" maxLength={2}/>
+                  </div>
+                  
+                  <div className="md:col-span-4 mt-2">
+                      <div className="flex items-center justify-between mb-3 border-b border-slate-200 pb-2">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1"><Users size={14}/> Contatos da Farmácia</label>
+                      </div>
+                      
+                      {contatosList.map((contato, idx) => (
+                          <div key={idx} className="p-4 bg-white border border-slate-200 rounded-xl mb-3 relative shadow-sm hover:border-blue-300 transition-colors">
+                              {idx > 0 && (
+                                  <button type="button" onClick={() => removeContato(idx)} className="absolute top-2 right-2 text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 p-2 rounded-lg transition" title="Remover Contato">
+                                      <Trash2 size={16}/>
+                                  </button>
+                              )}
+                              <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-4">
+                                  {idx === 0 ? '⭐ Contato Principal (Aparece no PDF)' : `👤 Contato Adicional ${idx + 1}`}
+                              </h4>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  <div>
+                                      <label className="text-xs font-bold text-slate-700 mb-1.5 block">Nome do Contato</label>
+                                      <input className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm transition" value={contato.nome} onChange={e => updateContato(idx, 'nome', e.target.value.toUpperCase())} placeholder="EX: DRA. JULIA"/>
+                                  </div>
+                                  <div>
+                                      <label className="text-xs font-bold text-slate-700 mb-1.5 block">Cargo / Papel</label>
+                                      <select className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer transition" value={contato.cargo} onChange={e => updateContato(idx, 'cargo', e.target.value)}>
+                                          {OPCOES_CARGO_CONTATO.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                      </select>
+                                  </div>
+                                  <div>
+                                      <label className="text-xs font-bold text-slate-700 mb-1.5 block">WhatsApp / Tel</label>
+                                      <input className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-bold outline-none shadow-sm transition" value={contato.telefone} onChange={e => updateContato(idx, 'telefone', e.target.value)} placeholder="(11) 99999-9999"/>
+                                  </div>
+                                  <div>
+                                      <label className="text-xs font-bold text-slate-700 mb-1.5 block">E-mail</label>
+                                      <input type="email" className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-medium outline-none shadow-sm transition" value={contato.email} onChange={e => updateContato(idx, 'email', e.target.value.toLowerCase())} placeholder="email@farmacia.com"/>
+                                  </div>
                               </div>
                           </div>
-                      </div>
-                  ))}
-                  
-                  <button type="button" onClick={addContato} className="mt-1 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-4 py-2.5 rounded-xl transition flex items-center gap-2 active:scale-95">
-                      <UserPlus size={14}/> Adicionar Outro Contato
-                  </button>
-              </div>
-
-              <div className="md:col-span-2 bg-blue-50 border border-blue-200 p-4 rounded-xl shadow-sm relative mt-2">
-                  <div className="absolute right-0 top-0 w-16 h-16 bg-blue-500 rounded-bl-full opacity-10 pointer-events-none"></div>
-                  <label className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-2 flex items-center gap-1 relative z-10"><Briefcase size={12}/> Vendedor Responsável (Hand-off)</label>
-                  <select value={formData.user_id} onChange={e => setFormData({...formData, user_id: e.target.value})} disabled={isRepLocked} className="w-full relative z-10 bg-white border border-blue-200 rounded-lg p-2.5 text-sm font-bold text-slate-800 outline-none shadow-sm cursor-pointer disabled:bg-slate-100 disabled:text-slate-500">
-                      <option value="">Selecione o Representante...</option>
-                      {equipe.map(u => <option key={u.id} value={u.id}>{u.nome} ({u.cargo})</option>)}
-                  </select>
-                  {isRepLocked && <p className="text-[9px] font-bold text-red-500 mt-1 uppercase relative z-10">Bloqueado pela regra de carteira ERP</p>}
-              </div>
-              <div className="md:col-span-2 mt-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Status no Funil</label>
-                  <select className="w-full bg-white border border-slate-300 text-blue-700 text-sm font-bold p-3 rounded-xl outline-none shadow-sm cursor-pointer" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
-                      {ESTAGIOS.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
-                  </select>
-              </div>
-
-              <div className="md:col-span-4 flex items-center gap-2 mb-1 md:mb-2 mt-4 md:mt-6">
-                  <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-black text-xs md:text-sm">2</div>
-                  <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Produto e Precificação</h3>
-              </div>
-              <div className="md:col-span-2">
-                  <label className="text-xs font-bold text-slate-700 mb-1.5 flex justify-between">Ativo a Negociar <Loader2 size={12} className={loadingProdutos ? "animate-spin text-blue-500" : "hidden"}/></label>
-                  <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold disabled:opacity-50 outline-none shadow-sm cursor-pointer" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})} disabled={loadingProdutos}>
-                      <option value="">Selecione...</option>
-                      {produtosDisponiveis.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}
-                  </select>
-              </div>
-              <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Validade do Ativo</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm text-slate-500" value={formData.validade_produto} onChange={e => setFormData({...formData, validade_produto: e.target.value})} placeholder="Mês/Ano ou Lote" /></div>
-              
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:col-span-4">
-                  <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Preço/g (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-black text-emerald-700 outline-none shadow-sm" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} /></div>
-                  <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Proposto</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
-                  <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Bonificado</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
-                  <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Parcelas</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
-              </div>
-              <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Dias para 1ª Parcela</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
-
-              <div className="md:col-span-4 border-t border-slate-200 my-2 md:my-4 pt-4">
-                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Variáveis do Payback (Para o PDF)</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Peso da Fórmula (g)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.peso_formula_g} onChange={e => setFormData({...formData, peso_formula_g: e.target.value})}/></div>
-                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Fator de Lucro</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.fator_lucro} onChange={e => setFormData({...formData, fator_lucro: e.target.value})}/></div>
-                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Custo Fixo / Fórm. (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.custo_fixo_operacional} onChange={e => setFormData({...formData, custo_fixo_operacional: e.target.value})}/></div>
-                  </div>
-              </div>
-
-              <div className="md:col-span-4 bg-slate-800 p-4 rounded-2xl flex items-center justify-between text-white mt-2 shadow-lg">
-                  <span className="text-xs font-black uppercase tracking-widest text-slate-300">Total Proposta</span>
-                  <span className="text-xl md:text-2xl font-black text-[#82D14D]">{formatCurrency(formData.valor)}</span>
-              </div>
-
-              <div className="md:col-span-4 flex items-center gap-2 mb-1 md:mb-2 mt-4 md:mt-6">
-                  <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-black text-xs md:text-sm">3</div>
-                  <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Follow-up e Histórico</h3>
-              </div>
-              
-              <div className="md:col-span-1">
-                  <label className="text-[10px] font-black text-red-600 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Clock size={12}/> Próx. Contato (Closer)</label>
-                  <input type="date" className="w-full bg-white border border-red-200 focus:border-red-500 rounded-xl p-3 text-sm font-bold text-red-900 outline-none shadow-sm cursor-pointer" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} />
-              </div>
-              <div className="md:col-span-1">
-                  <label className="text-[10px] font-black text-purple-600 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Clock size={12}/> Acompanhar (SDR)</label>
-                  <input type="date" className="w-full bg-white border border-purple-200 focus:border-purple-500 rounded-xl p-3 text-sm font-bold text-purple-900 outline-none shadow-sm cursor-pointer disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200" value={formData.data_lembrete_sdr} onChange={e => setFormData({...formData, data_lembrete_sdr: e.target.value})} disabled={!isSDRUser} title={!isSDRUser ? "Apenas a equipe de SDR/P&D pode alterar esta data." : "Defina a data para cobrar o vendedor"}/>
-              </div>
-
-              <div className="md:col-span-2"><label className="text-[10px] font-bold text-slate-700 uppercase tracking-widest mb-1.5 block">Canal de Contato</label><select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-              
-              <div className="md:col-span-4 space-y-3 mt-4">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2">
-                      <MessageSquare size={14}/> Nova Anotação
-                  </label>
-                  
-                  <div className="flex flex-col gap-2 bg-blue-50/50 p-3 border border-blue-100 rounded-2xl">
-                      <textarea 
-                          className="w-full bg-white border border-slate-200 focus:border-blue-500 rounded-xl p-3 outline-none text-sm text-slate-700 font-medium shadow-sm transition resize-none min-h-[80px] custom-scrollbar" 
-                          placeholder="Escreva sua anotação aqui... (Use a tecla 'Enter' para pular linhas e formatar o texto livremente)" 
-                          value={novaNotaInput} 
-                          onChange={(e) => setNovaNotaInput(e.target.value)} 
-                      />
-                      <button type="button" onClick={adicionarNotaAoHistorico} className="self-end bg-blue-600 text-white px-5 py-2.5 rounded-xl hover:bg-blue-700 transition font-bold shadow-md active:scale-95 flex items-center gap-2 text-xs">
-                          <Send size={14}/> Registrar no Histórico
+                      ))}
+                      
+                      <button type="button" onClick={addContato} className="mt-1 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-4 py-2.5 rounded-xl transition flex items-center gap-2 active:scale-95">
+                          <UserPlus size={14}/> Adicionar Outro Contato
                       </button>
                   </div>
 
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mt-4 mb-2">
-                      <History size={14}/> Histórico Imutável
-                  </label>
-                  <textarea 
-                      className="w-full bg-slate-100 border border-slate-200 rounded-xl p-4 h-48 resize-none text-xs text-slate-700 font-mono leading-relaxed shadow-inner outline-none custom-scrollbar" 
-                      value={formData.observacoes} 
-                      readOnly 
-                      placeholder="Todo o histórico de conversas será registrado aqui com data e hora e não poderá ser alterado..."
-                  />
+                  <div className="md:col-span-2 bg-blue-50 border border-blue-200 p-4 rounded-xl shadow-sm relative mt-2">
+                      <div className="absolute right-0 top-0 w-16 h-16 bg-blue-500 rounded-bl-full opacity-10 pointer-events-none"></div>
+                      <label className="text-[10px] font-black text-blue-800 uppercase tracking-widest mb-2 flex items-center gap-1 relative z-10"><Briefcase size={12}/> Vendedor Responsável (Hand-off)</label>
+                      <select value={formData.user_id} onChange={e => setFormData({...formData, user_id: e.target.value})} disabled={isRepLocked} className="w-full relative z-10 bg-white border border-blue-200 rounded-lg p-2.5 text-sm font-bold text-slate-800 outline-none shadow-sm cursor-pointer disabled:bg-slate-100 disabled:text-slate-500">
+                          <option value="">Selecione o Representante...</option>
+                          {equipe.map(u => <option key={u.id} value={u.id}>{u.nome} ({u.cargo})</option>)}
+                      </select>
+                      {isRepLocked && <p className="text-[9px] font-bold text-red-500 mt-1 uppercase relative z-10">Bloqueado pela regra de carteira ERP</p>}
+                  </div>
+                  <div className="md:col-span-2 mt-2">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5 block">Status no Funil</label>
+                      <select className="w-full bg-white border border-slate-300 text-blue-700 text-sm font-bold p-3 rounded-xl outline-none shadow-sm cursor-pointer" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
+                          {ESTAGIOS.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
+                      </select>
+                  </div>
+
+                  <div className="md:col-span-4 flex items-center gap-2 mb-1 md:mb-2 mt-4 md:mt-6">
+                      <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-black text-xs md:text-sm">2</div>
+                      <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Produto e Precificação</h3>
+                  </div>
+                  <div className="md:col-span-2">
+                      <label className="text-xs font-bold text-slate-700 mb-1.5 flex justify-between">Ativo a Negociar <Loader2 size={12} className={loadingProdutos ? "animate-spin text-blue-500" : "hidden"}/></label>
+                      <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold disabled:opacity-50 outline-none shadow-sm cursor-pointer" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})} disabled={loadingProdutos}>
+                          <option value="">Selecione...</option>
+                          {produtosDisponiveis.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}
+                      </select>
+                  </div>
+                  <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Validade do Ativo</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm text-slate-500" value={formData.validade_produto} onChange={e => setFormData({...formData, validade_produto: e.target.value})} placeholder="Mês/Ano ou Lote" /></div>
+                  
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:col-span-4">
+                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Preço/g (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-black text-emerald-700 outline-none shadow-sm" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} /></div>
+                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Proposto</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
+                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Bonificado</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
+                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Parcelas</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
+                  </div>
+                  <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Dias para 1ª Parcela</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
+
+                  <div className="md:col-span-4 border-t border-slate-200 my-2 md:my-4 pt-4">
+                      <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Variáveis do Payback (Para o PDF)</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Peso da Fórmula (g)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.peso_formula_g} onChange={e => setFormData({...formData, peso_formula_g: e.target.value})}/></div>
+                          <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Fator de Lucro</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.fator_lucro} onChange={e => setFormData({...formData, fator_lucro: e.target.value})}/></div>
+                          <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Custo Fixo / Fórm. (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.custo_fixo_operacional} onChange={e => setFormData({...formData, custo_fixo_operacional: e.target.value})}/></div>
+                      </div>
+                  </div>
+
+                  <div className="md:col-span-4 bg-slate-800 p-4 rounded-2xl flex items-center justify-between text-white mt-2 shadow-lg">
+                      <span className="text-xs font-black uppercase tracking-widest text-slate-300">Total Proposta</span>
+                      <span className="text-xl md:text-2xl font-black text-[#82D14D]">{formatCurrency(formData.valor)}</span>
+                  </div>
+
+                  <div className="md:col-span-4 flex items-center gap-2 mb-1 md:mb-2 mt-4 md:mt-6">
+                      <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-black text-xs md:text-sm">3</div>
+                      <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Follow-up Clássico</h3>
+                  </div>
+                  
+                  <div className="md:col-span-1">
+                      <label className="text-[10px] font-black text-red-600 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Clock size={12}/> Próx. Contato</label>
+                      <input type="date" className="w-full bg-white border border-red-200 focus:border-red-500 rounded-xl p-3 text-sm font-bold text-red-900 outline-none shadow-sm cursor-pointer" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} />
+                  </div>
+                  <div className="md:col-span-1">
+                      <label className="text-[10px] font-black text-purple-600 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Clock size={12}/> Cobrar SDR</label>
+                      <input type="date" className="w-full bg-white border border-purple-200 focus:border-purple-500 rounded-xl p-3 text-sm font-bold text-purple-900 outline-none shadow-sm cursor-pointer disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200" value={formData.data_lembrete_sdr} onChange={e => setFormData({...formData, data_lembrete_sdr: e.target.value})} disabled={!isSDRUser} title={!isSDRUser ? "Apenas a equipe de SDR/P&D pode alterar esta data." : "Defina a data para cobrar o vendedor"}/>
+                  </div>
+
+                  <div className="md:col-span-2">
+                      <label className="text-[10px] font-bold text-slate-700 uppercase tracking-widest mb-1.5 block">Canal de Contato</label>
+                      <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select>
+                  </div>
               </div>
+
+              {/* LADO DIREITO (Chat e Histórico) */}
+              <div className="lg:col-span-4 flex flex-col h-[500px] lg:h-full min-h-[400px] bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="bg-slate-100 p-3 border-b border-slate-200 shrink-0">
+                      <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                          <MessageSquare size={16} className="text-blue-500"/> Discussão da Conta
+                      </h3>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto p-4 bg-slate-50 flex flex-col gap-3 custom-scrollbar" ref={chatScrollRef}>
+                      {chatMsgs.length === 0 ? (
+                          <div className="m-auto text-center p-4">
+                              <MessageCircle size={32} className="mx-auto text-slate-300 mb-2"/>
+                              <p className="text-xs text-slate-500 font-medium">Inicie a discussão desta proposta. Use @ para notificar a equipe.</p>
+                          </div>
+                      ) : (
+                          chatMsgs.map(msg => {
+                              const isMe = msg.user_id === usuarioLogado?.id;
+                              return (
+                                  <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[90%] ${isMe ? 'self-end' : 'self-start'}`}>
+                                      <span className="text-[9px] font-bold text-slate-400 mb-1 ml-1">{msg.perfis?.nome.split(' ')[0]} • {new Date(msg.created_at).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}</span>
+                                      <div className={`p-3 rounded-2xl text-sm shadow-sm whitespace-pre-wrap leading-relaxed ${isMe ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white text-slate-700 border border-slate-200 rounded-tl-none'}`}>
+                                          {/* Renderiza as menções em negrito */}
+                                          {msg.texto.split(/(@\w+)/g).map((part: string, i: number) => 
+                                              part.startsWith('@') ? <span key={i} className={isMe ? "text-yellow-300 font-black" : "text-blue-600 font-black"}>{part}</span> : part
+                                          )}
+                                      </div>
+                                  </div>
+                              )
+                          })
+                      )}
+                  </div>
+
+                  <div className="p-3 bg-white border-t border-slate-200 shrink-0 relative">
+                      {showMentions && mentionQuery !== "" && (
+                          <div className="absolute bottom-full mb-2 left-3 right-3 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden">
+                              <div className="p-2 bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Mencionar Usuário</div>
+                              <ul className="max-h-40 overflow-y-auto custom-scrollbar p-1">
+                                  {equipe.filter(u => u.nome.toLowerCase().includes(mentionQuery) || u.cargo.toLowerCase().includes(mentionQuery)).map(u => (
+                                      <li key={u.id} onClick={() => inserirMencao(u.nome)} className="p-2 hover:bg-blue-50 text-xs font-bold text-slate-700 cursor-pointer rounded-lg flex justify-between items-center transition">
+                                          {u.nome} <span className="text-[9px] text-slate-400 font-medium bg-white px-1.5 py-0.5 rounded border border-slate-100">{u.cargo}</span>
+                                      </li>
+                                  ))}
+                              </ul>
+                          </div>
+                      )}
+                      
+                      <div className="relative">
+                          <textarea 
+                              disabled={!editingOp}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl p-3 pr-12 text-sm text-slate-700 font-medium outline-none resize-none min-h-[80px] transition custom-scrollbar disabled:opacity-50"
+                              placeholder={editingOp ? "Digite sua mensagem... (Use @ para marcar)" : "Salve a oportunidade primeiro."}
+                              value={chatInput}
+                              onChange={handleChatInputChange}
+                              onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && !e.shiftKey) {
+                                      e.preventDefault();
+                                      enviarMensagemChat();
+                                  }
+                              }}
+                          />
+                          <button 
+                              disabled={!editingOp || !chatInput.trim()}
+                              onClick={enviarMensagemChat} 
+                              className="absolute bottom-3 right-3 w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center hover:bg-blue-700 transition disabled:opacity-50 shadow-sm"
+                          >
+                              <Send size={14}/>
+                          </button>
+                      </div>
+                  </div>
+              </div>
+
             </div>
 
             <div className="p-4 md:p-6 bg-white border-t border-slate-200 flex flex-col md:flex-row justify-between items-center shrink-0 gap-3">
