@@ -70,7 +70,9 @@ function PipelineContent() {
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
 
+  // --- ESTADOS DO CHAT INTERNO ---
   const [chatMsgs, setChatMsgs] = useState<any[]>([]);
+  const [mensagensPendentes, setMensagensPendentes] = useState<string[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [showMentions, setShowMentions] = useState(false);
   const [mentionQuery, setMentionQuery] = useState("");
@@ -171,6 +173,8 @@ function PipelineContent() {
               setIsRepLocked(false);
               setNovaNotaInput("");
               setChatInput("");
+              setChatMsgs([]);
+              setMensagensPendentes([]);
               setModalOpen(true);
           }
       };
@@ -228,7 +232,7 @@ function PipelineContent() {
   };
 
   const enviarMensagemChat = async () => {
-      if (!chatInput.trim() || !editingOp) return;
+      if (!chatInput.trim()) return;
       const msgTexto = chatInput;
       setChatInput(""); 
       setShowMentions(false);
@@ -237,7 +241,7 @@ function PipelineContent() {
           id: 'temp-' + Date.now(),
           user_id: usuarioLogado.id,
           referencia_tipo: 'pipeline',
-          referencia_id: String(editingOp.id),
+          referencia_id: editingOp ? String(editingOp.id) : 'nova',
           texto: msgTexto,
           created_at: new Date().toISOString(),
           perfis: { nome: usuarioLogado.nome }
@@ -246,6 +250,11 @@ function PipelineContent() {
       setTimeout(() => {
           if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
       }, 100);
+
+      if (!editingOp) {
+          setMensagensPendentes(prev => [...prev, msgTexto]);
+          return;
+      }
 
       const { data: novaMsg, error } = await supabase.from('chat_mensagens').insert({
           user_id: usuarioLogado.id,
@@ -395,19 +404,27 @@ function PipelineContent() {
   useEffect(() => {
     if (!formData.produto) return;
     const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
+    
     if (produtoSelecionado) {
-        setFormData(prev => ({
-            ...prev,
-            validade_produto: produtoSelecionado.validade || prev.validade_produto, 
-            valor_g_tabela: (parseMoney(prev.valor_g_tabela) === 0 || !prev.valor_g_tabela) 
-                ? produtoSelecionado.preco_grama.toFixed(2).replace('.', ',') 
-                : prev.valor_g_tabela,
-            peso_formula_g: prev.peso_formula_g === '13.2' 
-                ? produtoSelecionado.peso_formula.toString() 
-                : prev.peso_formula_g
-        }));
+        setFormData(prev => {
+            if (editingOp && editingOp.produto === prev.produto) {
+                return {
+                    ...prev,
+                    validade_produto: prev.validade_produto || produtoSelecionado.validade || '', 
+                    valor_g_tabela: prev.valor_g_tabela || produtoSelecionado.preco_grama.toFixed(2).replace('.', ','),
+                    peso_formula_g: prev.peso_formula_g || produtoSelecionado.peso_formula.toString()
+                };
+            }
+            
+            return {
+                ...prev,
+                validade_produto: produtoSelecionado.validade || '',
+                valor_g_tabela: produtoSelecionado.preco_grama.toFixed(2).replace('.', ','),
+                peso_formula_g: produtoSelecionado.peso_formula.toString()
+            };
+        });
     }
-  }, [formData.produto, produtosApi]);
+  }, [formData.produto, produtosApi, editingOp]);
 
   useEffect(() => {
     const precoG = parseMoney(formData.valor_g_tabela);
@@ -462,7 +479,6 @@ function PipelineContent() {
         }
 
         if (vendedorERP !== "") {
-            // LÓGICA DE BUSCA MELHORADA E BLINDADA
             const normalizeStr = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
             const vendedorNorm = normalizeStr(vendedorERP);
 
@@ -837,7 +853,7 @@ function PipelineContent() {
         data_lembrete_sdr: (formData.data_lembrete_sdr && formData.data_lembrete_sdr.trim() !== "") ? formData.data_lembrete_sdr : null,
         data_entrada: formData.data_entrada || getLocalData(), 
         canal_contato: formData.canal_contato, 
-        observacoes: formData.observacoes, // Mantém o histórico antigo intacto sem sobrescrever
+        observacoes: formData.observacoes, 
         observacoes_proposta: formData.observacoes_proposta 
     };
 
@@ -846,6 +862,8 @@ function PipelineContent() {
         : await supabase.from('pipeline').insert(dadosSalvar).select();
     
     if (!error) { 
+      const opId = editingOp ? editingOp.id : (savedOpData && savedOpData.length > 0 ? savedOpData[0].id : null);
+
       if (isRepasse && !editingOp && savedOpData && savedOpData.length > 0) {
           await supabase.from('notificacoes').insert({
               user_id: formData.user_id,
@@ -866,22 +884,51 @@ function PipelineContent() {
 
       if (usuarioLogado?.nome && !usuarioLogado.nome.toLowerCase().includes('eduarda')) {
           const { data: eduardas } = await supabase.from('perfis').select('id').ilike('nome', '%eduarda%').limit(1);
-          if (eduardas && eduardas.length > 0) {
+          if (eduardas && eduardas.length > 0 && opId) {
               const acao = editingOp ? 'atualizou a oportunidade' : 'criou uma nova oportunidade';
-              const opId = editingOp ? editingOp.id : (savedOpData && savedOpData.length > 0 ? savedOpData[0].id : null);
-              if (opId) {
-                  await supabase.from('notificacoes').insert({
-                      user_id: eduardas[0].id,
-                      remetente: usuarioLogado.nome,
-                      mensagem: `${usuarioLogado.nome.split(' ')[0]} ${acao}: ${formData.nome_cliente.toUpperCase()}.`,
-                      link: `/pipeline?op_id=${opId}`
-                  });
+              await supabase.from('notificacoes').insert({
+                  user_id: eduardas[0].id,
+                  remetente: usuarioLogado.nome,
+                  mensagem: `${usuarioLogado.nome.split(' ')[0]} ${acao}: ${formData.nome_cliente.toUpperCase()}.`,
+                  link: `/pipeline?op_id=${opId}`
+              });
+          }
+      }
+
+      if (!editingOp && mensagensPendentes.length > 0 && opId) {
+          for (const msgTexto of mensagensPendentes) {
+              const { data: novaMsg } = await supabase.from('chat_mensagens').insert({
+                  user_id: usuarioLogado.id,
+                  referencia_tipo: 'pipeline',
+                  referencia_id: String(opId),
+                  texto: msgTexto
+              }).select();
+
+              if (novaMsg) {
+                  const regex = /@(\w+)/g;
+                  const mencoes = msgTexto.match(regex);
+                  if (mencoes) {
+                      mencoes.forEach(async (mentionStr) => {
+                          const nomeMencionado = mentionStr.substring(1).toLowerCase(); 
+                          const usuarioAlvo = equipe.find(u => u.nome.toLowerCase().includes(nomeMencionado));
+                          
+                          if (usuarioAlvo && usuarioAlvo.id !== usuarioLogado.id) {
+                              await supabase.from('notificacoes').insert({
+                                  user_id: usuarioAlvo.id,
+                                  remetente: usuarioLogado.nome.split(' ')[0],
+                                  mensagem: `Mencionou você no chat da conta: ${formData.nome_cliente.toUpperCase()}`,
+                                  link: `/pipeline?op_id=${opId}`
+                              });
+                          }
+                      });
+                  }
               }
           }
       }
 
       fecharModalELimparURL();
       setChatInput("");
+      setMensagensPendentes([]); 
       carregarOportunidades(usuarioLogado); 
     } else { 
       alert(`Erro ao salvar: ${error.message}`); 
@@ -938,7 +985,12 @@ function PipelineContent() {
             }
             setContatosList(contatosCarregados);
 
-            setIsRepLocked(false); setChatInput(""); setModalOpen(true); 
+            setIsRepLocked(false); 
+            setNovaNotaInput(""); 
+            setChatInput(""); 
+            setChatMsgs([]); 
+            setMensagensPendentes([]); 
+            setModalOpen(true); 
         }} className={`p-4 rounded-2xl border-2 cursor-pointer shadow-sm transition hover:shadow-md ${bgClass} ${borderClass}`}>
             <div className="flex justify-between items-start mb-2">
                 <div className="max-w-[80%]">
@@ -1040,7 +1092,10 @@ function PipelineContent() {
                     setIsRepLocked(false); 
                     setFormData({cnpj: '', nome_cliente: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', data_lembrete_sdr: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', endereco: '', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); 
                     setContatosList([{ nome: '', cargo: 'Comprador(a)', telefone: '', email: '' }]); 
+                    setNovaNotaInput(""); 
                     setChatInput("");
+                    setChatMsgs([]);
+                    setMensagensPendentes([]);
                     setModalOpen(true); 
                 }} className="flex-1 sm:flex-none bg-blue-600 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-xs md:text-sm flex items-center justify-center gap-2 hover:bg-blue-700">
                     <Plus size={16} /> Nova Op.
@@ -1236,23 +1291,38 @@ function PipelineContent() {
                       <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select>
                   </div>
 
-                  {/* RESTAURANDO O HISTÓRICO ANTIGO AQUI (Visível Apenas se Existir) */}
-                  {formData.observacoes && formData.observacoes.trim() !== "" && (
-                      <div className="md:col-span-4 mt-6 p-4 bg-slate-100/50 border border-slate-200 rounded-2xl shadow-inner">
-                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2">
-                              <History size={14}/> Histórico de Anotações (Legado)
-                          </label>
+                  {/* BLOCO ORIGINAL RESTAURADO EXATAMENTE COMO PEDIDO */}
+                  <div className="md:col-span-4 space-y-3 mt-4">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2">
+                          <MessageSquare size={14}/> Nova Anotação
+                      </label>
+                      
+                      <div className="flex flex-col gap-2 bg-blue-50/50 p-3 border border-blue-100 rounded-2xl">
                           <textarea 
-                              className="w-full bg-transparent resize-none text-xs text-slate-700 font-mono leading-relaxed outline-none h-40 custom-scrollbar" 
-                              value={formData.observacoes} 
-                              readOnly 
+                              className="w-full bg-white border border-slate-200 focus:border-blue-500 rounded-xl p-3 outline-none text-sm text-slate-700 font-medium shadow-sm transition resize-none min-h-[80px] custom-scrollbar" 
+                              placeholder="Escreva sua anotação aqui... (Use a tecla 'Enter' para pular linhas e formatar o texto livremente)" 
+                              value={novaNotaInput} 
+                              onChange={(e) => setNovaNotaInput(e.target.value)} 
                           />
+                          <button type="button" onClick={adicionarNotaAoHistorico} className="self-end bg-blue-600 text-white px-5 py-2.5 rounded-xl hover:bg-blue-700 transition font-bold shadow-md active:scale-95 flex items-center gap-2 text-xs">
+                              <Send size={14}/> Registrar no Histórico
+                          </button>
                       </div>
-                  )}
+
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mt-4 mb-2">
+                          <History size={14}/> Histórico Imutável
+                      </label>
+                      <textarea 
+                          className="w-full bg-slate-100 border border-slate-200 rounded-xl p-4 h-48 resize-none text-xs text-slate-700 font-mono leading-relaxed shadow-inner outline-none custom-scrollbar" 
+                          value={formData.observacoes} 
+                          readOnly 
+                          placeholder="Todo o histórico de conversas será registrado aqui com data e hora e não poderá ser alterado..."
+                      />
+                  </div>
 
               </div>
 
-              {/* LADO DIREITO (Chat e Histórico Novo) */}
+              {/* LADO DIREITO (Chat Novo) */}
               <div className="lg:col-span-4 flex flex-col h-[500px] lg:h-full min-h-[400px] bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="bg-slate-100 p-3 border-b border-slate-200 shrink-0">
                       <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
@@ -1300,9 +1370,8 @@ function PipelineContent() {
                       
                       <div className="relative">
                           <textarea 
-                              disabled={!editingOp}
-                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl p-3 pr-12 text-sm text-slate-700 font-medium outline-none resize-none min-h-[80px] transition custom-scrollbar disabled:opacity-50"
-                              placeholder={editingOp ? "Digite sua mensagem... (Use @ para marcar)" : "Salve a oportunidade primeiro."}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl p-3 pr-12 text-sm text-slate-700 font-medium outline-none resize-none min-h-[80px] transition custom-scrollbar"
+                              placeholder="Digite sua mensagem... (Use @ para marcar a equipe)"
                               value={chatInput}
                               onChange={handleChatInputChange}
                               onKeyDown={(e) => {
@@ -1313,7 +1382,7 @@ function PipelineContent() {
                               }}
                           />
                           <button 
-                              disabled={!editingOp || !chatInput.trim()}
+                              disabled={!chatInput.trim()}
                               onClick={enviarMensagemChat} 
                               className="absolute bottom-3 right-3 w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center hover:bg-blue-700 transition disabled:opacity-50 shadow-sm"
                           >
