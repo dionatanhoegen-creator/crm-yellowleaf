@@ -65,6 +65,7 @@ function PipelineContent() {
 
   const [lembreteModal, setLembreteModal] = useState({ open: false, clientes: [] as any[] });
 
+  const [novaNotaInput, setNovaNotaInput] = useState("");
   const [isRepLocked, setIsRepLocked] = useState(false); 
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -172,6 +173,7 @@ function PipelineContent() {
               setContatosList(contatosCarregados);
 
               setIsRepLocked(false);
+              setNovaNotaInput("");
               setChatInput("");
               setModalOpen(true);
           }
@@ -181,18 +183,21 @@ function PipelineContent() {
   }, [opIdUrl, oportunidades]);
 
   // ==============================================================
-  // REALTIME DO CHAT INTERNO
+  // REALTIME DO CHAT INTERNO (CORRIGIDO)
   // ==============================================================
   useEffect(() => {
       if (!editingOp || !modalOpen) return;
 
       const fetchMensagens = async () => {
-          const { data } = await supabase
+          // Correção do join: usa apenas "perfis(nome)" pois a chave estrangeira foi arrumada
+          const { data, error } = await supabase
             .from('chat_mensagens')
-            .select('*, perfis:user_id(nome)')
+            .select('*, perfis(nome)')
             .eq('referencia_tipo', 'pipeline')
-            .eq('referencia_id', editingOp.id)
+            .eq('referencia_id', String(editingOp.id))
             .order('created_at', { ascending: true });
+          
+          if (error) console.error("Erro ao buscar chat:", error);
           
           setChatMsgs(data || []);
           setTimeout(() => {
@@ -236,14 +241,38 @@ function PipelineContent() {
       setChatInput(""); 
       setShowMentions(false);
 
+      // ATUALIZAÇÃO OTIMISTA: Mostra a mensagem na hora pra não parecer lento
+      const msgOtimista = {
+          id: 'temp-' + Date.now(),
+          user_id: usuarioLogado.id,
+          referencia_tipo: 'pipeline',
+          referencia_id: String(editingOp.id),
+          texto: msgTexto,
+          created_at: new Date().toISOString(),
+          perfis: { nome: usuarioLogado.nome }
+      };
+      setChatMsgs(prev => [...prev, msgOtimista]);
+      setTimeout(() => {
+          if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+      }, 100);
+
+      // Envia de verdade pro banco
       const { data: novaMsg, error } = await supabase.from('chat_mensagens').insert({
           user_id: usuarioLogado.id,
           referencia_tipo: 'pipeline',
-          referencia_id: editingOp.id,
+          referencia_id: String(editingOp.id),
           texto: msgTexto
       }).select();
 
-      if (!error && novaMsg) {
+      if (error) {
+          console.error(error);
+          alert("Aviso: Ocorreu um erro na rede e a mensagem pode não ter sido entregue.");
+          // Reverte se der erro
+          setChatMsgs(prev => prev.filter(m => m.id !== msgOtimista.id));
+          return;
+      }
+
+      if (novaMsg) {
           const regex = /@(\w+)/g;
           const mencoes = msgTexto.match(regex);
           if (mencoes) {
@@ -1222,7 +1251,7 @@ function PipelineContent() {
                               const isMe = msg.user_id === usuarioLogado?.id;
                               return (
                                   <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[90%] ${isMe ? 'self-end' : 'self-start'}`}>
-                                      <span className="text-[9px] font-bold text-slate-400 mb-1 ml-1">{msg.perfis?.nome.split(' ')[0]} • {new Date(msg.created_at).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}</span>
+                                      <span className="text-[9px] font-bold text-slate-400 mb-1 ml-1">{msg.perfis?.nome?.split(' ')[0] || 'Usuário'} • {new Date(msg.created_at).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}</span>
                                       <div className={`p-3 rounded-2xl text-sm shadow-sm whitespace-pre-wrap leading-relaxed ${isMe ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white text-slate-700 border border-slate-200 rounded-tl-none'}`}>
                                           {/* Renderiza as menções em negrito */}
                                           {msg.texto.split(/(@\w+)/g).map((part: string, i: number) => 
