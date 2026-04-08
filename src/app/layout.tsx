@@ -9,7 +9,7 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
   LayoutDashboard, Users, Trello, Package, Lock, 
   BarChart3, LogOut, Menu, X, ChevronRight,
-  FileText, Shield, ChevronDown, Stethoscope, Lightbulb, CalendarCheck, Target, TrendingUp, Bell, CheckCircle2, Circle, Trash2
+  FileText, Shield, ChevronDown, Stethoscope, Lightbulb, CalendarCheck, Target, TrendingUp, Bell, CheckCircle2, Circle, Trash2, Radar
 } from 'lucide-react';
 
 const outfit = Outfit({ subsets: ["latin"] });
@@ -22,6 +22,7 @@ const MENU_BASE = [
   { name: 'Prospecção', path: '/prospeccao', icon: Target, key: 'pipeline', section: 'Vendas & Comercial' },
   { name: 'Pipeline', path: '/pipeline', icon: Trello, key: 'pipeline', section: 'Vendas & Comercial' },
   { name: 'Clientes', path: '/clientes', icon: Users, key: 'clientes', section: 'Vendas & Comercial' },
+  { name: 'Radar P&D', path: '/mailing', icon: Radar, key: 'prescritores', section: 'Pesquisa & Desenvolvimento' },
   { name: 'Prescritores', path: '/prescritores', icon: Stethoscope, key: 'prescritores', section: 'Pesquisa & Desenvolvimento' },
   { name: 'Visitas P&D', path: '/visitas', icon: CalendarCheck, key: 'prescritores', section: 'Pesquisa & Desenvolvimento' },
   { name: 'Inteligência', path: '/inteligencia', icon: Lightbulb, key: 'inteligencia', section: 'Pesquisa & Desenvolvimento' },
