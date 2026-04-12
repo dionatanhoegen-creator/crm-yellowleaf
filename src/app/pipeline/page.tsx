@@ -250,7 +250,7 @@ function PipelineContent() {
     } catch (e) {}
   };
 
-  // INTELIGÊNCIA BLINDADA DE LEITURA DO GOOGLE SHEETS
+  // INTELIGÊNCIA DE ESTOQUE CORRIGIDA: Lendo por LINHAS da planilha
   const carregarProdutosDaAPI = async () => {
     setLoadingProdutos(true);
     try {
@@ -261,7 +261,7 @@ function PipelineContent() {
             
             json.data.forEach((p: any) => {
                 let ativo = p.ativo ? p.ativo.trim() : 'Sem Nome';
-                let preco_grama = parseMoney(p.preco_grama || p['preço/grama'] || p.Preco);
+                let preco_grama = parseMoney(p.preco_grama || p['preço/grama'] || p.Preco || p.preco);
                 let validadeBruta = p.validade || p.data_validade || p.vencimento || p['validade do ativo'] || p['Validade'] || '';
                 let validade = formatarDataPlanilha(validadeBruta);
                 let peso_formula = parseMoney(p.peso_formula) || 13.2;
@@ -276,50 +276,43 @@ function PipelineContent() {
                     });
                 }
                 
-                let achouFracionamento = false;
-                const pacotesBase = [10, 30, 50, 100, 250, 500, 1000, 2500, 5000];
+                // Busca inteligente para descobrir o nome da coluna de Fracionamento e de Estoque
+                const keys = Object.keys(p);
+                
+                // Procura coluna de fracionamento (Embalagem, Peso, etc)
+                const keyFrac = keys.find(k => ['fracionamento', 'embalagem', 'peso', 'tamanho', 'apresentacao'].includes(k.toLowerCase().trim().replace(/[^\w]/g, '')));
+                let fracionamento = keyFrac && p[keyFrac] ? String(p[keyFrac]).trim() : '1000g';
+                
+                // Se o fracionamento for só um número (ex: "250"), adiciona o "g"
+                if (!isNaN(Number(fracionamento))) {
+                    fracionamento += 'g';
+                }
 
-                // Varre a linha inteira da planilha
-                Object.keys(p).forEach(key => {
-                    // Tira espaços e caracteres estranhos. Ex: " 250 G " vira "250g"
-                    const cleanKey = String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+                // Procura coluna de estoque (Saldo, Quantidade, Disponivel)
+                const keyEstoque = keys.find(k => ['estoque', 'saldo', 'quantidade', 'disp', 'disponivel'].includes(k.toLowerCase().trim().replace(/[^\w]/g, '')));
+                let estoque = keyEstoque && p[keyEstoque] !== undefined && p[keyEstoque] !== '' ? parseInt(p[keyEstoque]) : 99;
 
-                    pacotesBase.forEach(gramatura => {
-                        // Verifica se a chave é exatamente "250" ou "250g"
-                        if (cleanKey === `${gramatura}g` || cleanKey === String(gramatura)) {
-                            const qty = p[key];
-                            // Se a célula tiver valor (mesmo que seja 0), nós lemos!
-                            if (qty !== null && qty !== undefined && String(qty).trim() !== '') {
-                                const jaExiste = mapProdutos.get(ativo).opcoes.find((o: any) => o.fracionamento === `${gramatura}g`);
-                                if (!jaExiste) {
-                                    mapProdutos.get(ativo).opcoes.push({
-                                        fracionamento: `${gramatura}g`,
-                                        estoque: parseInt(qty) || 0,
-                                        preco_grama: preco_grama,
-                                        validade: validade
-                                    });
-                                }
-                                achouFracionamento = true;
-                            }
-                        }
-                    });
-                });
-
-                // Se a API não mandou de jeito nenhum, usamos o fallback apenas para não quebrar a tela
-                if (!achouFracionamento) {
+                // Previne de adicionar fracionamentos duplicados se a planilha tiver sujeira
+                const jaExiste = mapProdutos.get(ativo).opcoes.find((o:any) => o.fracionamento.toLowerCase() === fracionamento.toLowerCase());
+                
+                if (!jaExiste) {
                     mapProdutos.get(ativo).opcoes.push({
-                        fracionamento: '1000g',
-                        estoque: 99,
-                        preco_grama: preco_grama,
-                        validade: validade
+                        fracionamento,
+                        estoque,
+                        preco_grama,
+                        validade
                     });
                 }
             });
 
-            // Organiza os itens da menor embalagem pra maior (ex: 100g, 250g, 1000g)
+            // Organiza as opções da menor gramatura para a maior (100g, 250g, 500g, 1000g)
             const produtosAgrupados = Array.from(mapProdutos.values()).sort((a: any, b: any) => a.ativo.localeCompare(b.ativo));
             produtosAgrupados.forEach(prod => {
-                prod.opcoes.sort((a: any, b: any) => parseInt(a.fracionamento) - parseInt(b.fracionamento));
+                prod.opcoes.sort((a: any, b: any) => {
+                    const numA = parseInt(a.fracionamento.replace(/\D/g, '')) || 0;
+                    const numB = parseInt(b.fracionamento.replace(/\D/g, '')) || 0;
+                    return numA - numB;
+                });
             });
             
             setProdutosApi(produtosAgrupados);
@@ -390,6 +383,10 @@ function PipelineContent() {
           
           let novoItem = { ...it, [campo]: valor };
 
+          if (campo === 'preco_g') {
+              novoItem.preco_g = parseFloat(String(valor).replace(',', '.')) || 0;
+          }
+
           if (campo === 'insumo') {
               const prod = produtosApi.find(p => p.ativo === valor);
               if (prod && prod.opcoes.length > 0) {
@@ -415,12 +412,9 @@ function PipelineContent() {
               }
           }
 
-          // Recalcula o total com base no input (seja usando ponto ou vírgula no celular)
           if (campo === 'fracionamento' || campo === 'tipo_venda' || campo === 'insumo' || campo === 'preco_g') {
               const numStr = String(novoItem.fracionamento).replace(/\D/g, ''); 
               const gramas = parseFloat(numStr) || 0;
-              
-              // Garante que o input manual como "2,5" do celular seja compreendido como matemática "2.5"
               const precoTratado = parseFloat(String(novoItem.preco_g).replace(',', '.')) || 0;
 
               if (novoItem.tipo_venda === 'Bonificado') {
