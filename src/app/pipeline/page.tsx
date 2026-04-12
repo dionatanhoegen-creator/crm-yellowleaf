@@ -737,12 +737,12 @@ function PipelineContent() {
 
         // NOVO: BLOCO DE LOGÍSTICA FLUIDO
         doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("CONDIÇÕES COMERCIAIS E LOGÍSTICA:", 14, finalY);
+        doc.text("CONDIÇÕES COMERCIAIS:", 14, finalY);
         doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
         
         doc.text(`• Pagamento: ${formData.condicoes_pagamento || 'A combinar'}`, 14, finalY + 7);
         
-        const freteTexto = `• Frete: A mercadoria será despachada na modalidade ${formData.frete_tipo || 'CIF'} via ${formData.frete_transportadora || 'transportadora parceira'}, com prazo de postagem de até ${formData.frete_previsao || '2'} dias após a confirmação.`;
+        const freteTexto = `• Frete: A mercadoria será despachada na modalidade ${formData.frete_tipo || 'CIF(Pago pela YellowLeaf)'} via ${formData.frete_transportadora || 'transportadora parceira'}, com prazo de postagem de até ${formData.frete_previsao || '1'} dias após a confirmação.`;
         const splitFrete = doc.splitTextToSize(freteTexto, pageWidth - 28);
         doc.text(splitFrete, 14, finalY + 12);
         
