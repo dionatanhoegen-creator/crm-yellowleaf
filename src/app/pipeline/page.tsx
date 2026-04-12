@@ -275,31 +275,30 @@ function PipelineContent() {
                     });
                 }
                 
-                const embalagensPadrao = [
-                    { chave: 'estoque_10g', label: '10g' },
-                    { chave: 'estoque_30g', label: '30g' },
-                    { chave: 'estoque_50g', label: '50g' },
-                    { chave: 'estoque_100g', label: '100g' },
-                    { chave: 'estoque_250g', label: '250g' },
-                    { chave: 'estoque_500g', label: '500g' },
-                    { chave: 'estoque_1000g', label: '1000g' },
-                    { chave: 'estoque_2500g', label: '2500g' },
-                    { chave: 'estoque_5000g', label: '5000g' }
-                ];
+                const pacotesBase = [10, 30, 50, 100, 250, 500, 1000, 2500, 5000];
 
                 let achouFracionamento = false;
 
-                embalagensPadrao.forEach(emb => {
-                    const qty = p[emb.chave];
-                    if (qty !== undefined && qty !== null && String(qty).trim() !== '') {
-                        mapProdutos.get(ativo).opcoes.push({
-                            fracionamento: emb.label,
-                            estoque: parseInt(qty) || 0,
-                            preco_grama: preco_grama,
-                            validade: validade
-                        });
-                        achouFracionamento = true;
-                    }
+                Object.keys(p).forEach(key => {
+                    const cleanKey = String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+                    pacotesBase.forEach(gramatura => {
+                        if (cleanKey === `${gramatura}g` || cleanKey === String(gramatura)) {
+                            const qty = p[key];
+                            if (qty !== null && qty !== undefined && String(qty).trim() !== '') {
+                                const jaExiste = mapProdutos.get(ativo).opcoes.find((o: any) => o.fracionamento === `${gramatura}g`);
+                                if (!jaExiste) {
+                                    mapProdutos.get(ativo).opcoes.push({
+                                        fracionamento: `${gramatura}g`,
+                                        estoque: parseInt(qty) || 0,
+                                        preco_grama: preco_grama,
+                                        validade: validade
+                                    });
+                                }
+                                achouFracionamento = true;
+                            }
+                        }
+                    });
                 });
 
                 if (!achouFracionamento) {
@@ -313,6 +312,10 @@ function PipelineContent() {
             });
 
             const produtosAgrupados = Array.from(mapProdutos.values()).sort((a: any, b: any) => a.ativo.localeCompare(b.ativo));
+            produtosAgrupados.forEach(prod => {
+                prod.opcoes.sort((a: any, b: any) => parseInt(a.fracionamento) - parseInt(b.fracionamento));
+            });
+            
             setProdutosApi(produtosAgrupados);
         }
     } catch (e) {}
@@ -377,10 +380,13 @@ function PipelineContent() {
   const atualizarItemCotacao = (id: string, campo: string, valor: any) => {
       const itens = getItensCotacao().map((it: any) => {
           if (it.id !== id) return it;
+          
           let novoItem = { ...it, [campo]: valor };
+
           if (campo === 'preco_g') {
               novoItem.preco_g = parseFloat(String(valor).replace(',', '.')) || 0;
           }
+
           if (campo === 'insumo') {
               const prod = produtosApi.find(p => p.ativo === valor);
               if (prod && prod.opcoes.length > 0) {
@@ -394,6 +400,7 @@ function PipelineContent() {
                   novoItem.validade = '';
               }
           }
+
           if (campo === 'fracionamento') {
               const prod = produtosApi.find(p => p.ativo === novoItem.insumo);
               if (prod) {
@@ -404,16 +411,19 @@ function PipelineContent() {
                   }
               }
           }
+
           if (campo === 'fracionamento' || campo === 'tipo_venda' || campo === 'insumo' || campo === 'preco_g') {
               const numStr = String(novoItem.fracionamento).replace(/\D/g, ''); 
               const gramas = parseFloat(numStr) || 0;
               const precoTratado = parseFloat(String(novoItem.preco_g).replace(',', '.')) || 0;
+
               if (novoItem.tipo_venda === 'Bonificado') {
                   novoItem.preco_total = 0;
               } else {
                   novoItem.preco_total = gramas * precoTratado;
               }
           }
+
           return novoItem;
       });
       setItensCotacao(itens);
@@ -436,6 +446,7 @@ function PipelineContent() {
     if (formData.tipo_negociacao === 'cotacao') return;
     if (!formData.produto) return;
     const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
+    
     if (produtoSelecionado) {
         setFormData(prev => {
             if (editingOp && editingOp.produto === prev.produto) {
@@ -461,6 +472,7 @@ function PipelineContent() {
     const cnpjLimpo = formData.cnpj?.replace(/\D/g, '');
     if (cnpjLimpo?.length !== 14) return;
     setLoadingCNPJ(true);
+
     if (!editingOp) {
         const propostaExistente = oportunidades.find(op => (op.cnpj?.replace(/\D/g, '') || '') === cnpjLimpo);
         if (propostaExistente) {
@@ -504,11 +516,14 @@ function PipelineContent() {
         if (vendedorERP !== "") {
             const normalizeStr = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
             const vendedorNorm = normalizeStr(vendedorERP);
+
             const repEncontrado = equipe.find(u => {
                 const nomeNorm = normalizeStr(u.nome);
                 if (vendedorNorm.includes(nomeNorm) || nomeNorm.includes(vendedorNorm)) return true;
+                
                 const pVend = vendedorNorm.split(/\s+/);
                 const pNome = nomeNorm.split(/\s+/);
+                
                 if (pVend[0] === pNome[0]) {
                     if (pNome.length === 1) return true;
                     return pNome.slice(1).some(p => p.length > 2 && vendedorNorm.includes(p));
@@ -553,6 +568,7 @@ function PipelineContent() {
                  return; 
             }
         }
+
         setIsRepLocked(false);
         setConfirmModal({
             open: true,
@@ -563,6 +579,7 @@ function PipelineContent() {
         });
         return;
     }
+
     setIsRepLocked(false);
     preencherDadosAPI(cnpjLimpo, null);
   };
@@ -573,6 +590,7 @@ function PipelineContent() {
       if (res.ok) {
           const data = await res.json();
           const enderecoFormatado = data.logradouro ? `${data.logradouro}, ${data.numero || 'S/N'}${data.complemento ? ' - ' + data.complemento : ''}, ${data.bairro || ''}` : '';
+          
           setFormData(prev => ({ 
             ...prev, 
             nome_cliente: (data.nome_fantasia || data.razao_social || chavesERP?.razaosocial || '').toUpperCase(),
@@ -580,6 +598,7 @@ function PipelineContent() {
             cidade_exclusividade: (data.municipio || chavesERP?.cidade || '').toUpperCase(),
             uf_exclusividade: (data.uf || chavesERP?.uf || '').toUpperCase(),
           }));
+
           setContatosList(prev => {
               const novos = [...prev];
               novos[0] = {
@@ -599,6 +618,7 @@ function PipelineContent() {
               cidade_exclusividade: (chavesERP.cidade || '').toUpperCase(), 
               uf_exclusividade: (chavesERP.uf || '').toUpperCase(), 
           }));
+          
           setContatosList(prev => {
               const novos = [...prev];
               novos[0] = {
@@ -633,7 +653,9 @@ function PipelineContent() {
     if (!novaNotaInput.trim()) return;
     const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     const autor = usuarioLogado?.nome ? usuarioLogado.nome.split(' ')[0] : 'Usuário';
+    
     const notaFormatada = `📅 ${dataHora} | 👤 ${autor}\n${novaNotaInput}\n────────────────────────────────────────\n${formData.observacoes || ''}`;
+    
     setFormData({ ...formData, observacoes: notaFormatada });
     setNovaNotaInput(""); 
   };
@@ -661,10 +683,9 @@ function PipelineContent() {
     doc.setFontSize(9); doc.setTextColor(150, 150, 150);
     doc.text(`Nº ${formatPropostaId(formData.numero_proposta)}`, pageWidth - 14, 22, { align: "right" });
     
-    // NOVO: DATA DE EMISSÃO E VALIDADE
     const dataEmissao = new Date().toLocaleDateString('pt-BR');
     const validadeBase = new Date();
-    validadeBase.setDate(validadeBase.getDate() + 7); // 5 dias úteis ± 7 dias corridos
+    validadeBase.setDate(validadeBase.getDate() + 7); 
     const dataValidade = validadeBase.toLocaleDateString('pt-BR');
 
     doc.text(`Emissão: ${dataEmissao}  |  Validade: ${dataValidade}`, pageWidth - 14, 26, { align: "right" });
@@ -686,11 +707,11 @@ function PipelineContent() {
     doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 18, 47);
     
     let clienteY = 52;
-    if (contatoPrincipal.nome) {
+    if (contatoPrincipal.nome && contatoPrincipal.nome.trim() !== '') {
         doc.text(`Contato: ${contatoPrincipal.nome}`, 18, clienteY);
         clienteY += 5;
     }
-    if (contatoPrincipal.telefone) {
+    if (contatoPrincipal.telefone && contatoPrincipal.telefone.trim() !== '') {
         doc.text(`Telefone: ${contatoPrincipal.telefone}`, 18, clienteY);
         clienteY += 5;
     }
@@ -735,26 +756,43 @@ function PipelineContent() {
 
         finalY += 18;
 
-        // NOVO: BLOCO DE LOGÍSTICA FLUIDO
+        // NOVO: CONDIÇÕES COMERCIAIS (TÓPICOS IGUAL AO SISTEMA)
         doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("CONDIÇÕES COMERCIAIS:", 14, finalY);
+        doc.text("CONDIÇÕES COMERCIAIS E LOGÍSTICA", 14, finalY);
+        
+        doc.setFontSize(9);
+        
+        doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
+        doc.text("PAGAMENTO:", 14, finalY + 7);
         doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
-        
-        doc.text(`• Pagamento: ${formData.condicoes_pagamento || 'A combinar'}`, 14, finalY + 7);
-        
-        const freteTexto = `• Frete: A mercadoria será despachada na modalidade ${formData.frete_tipo || 'CIF(Pago pela YellowLeaf)'} via ${formData.frete_transportadora || 'transportadora parceira'}, com prazo de postagem de até ${formData.frete_previsao || '1'} dias após a confirmação.`;
-        const splitFrete = doc.splitTextToSize(freteTexto, pageWidth - 28);
-        doc.text(splitFrete, 14, finalY + 12);
-        
-        finalY += (splitFrete.length * 5) + 12;
+        doc.text(`${formData.condicoes_pagamento || 'A combinar'}`, 40, finalY + 7);
 
-        // NOVO: DESTAQUE CARTÃO DE CRÉDITO
-        doc.setFillColor(232, 245, 233); // Fundo verde clarinho
+        doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
+        doc.text("TRANSPORTADORA:", 14, finalY + 12);
+        doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+        doc.text(`${formData.frete_transportadora || '-'}`, 53, finalY + 12);
+
+        doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
+        doc.text("PRAZO DE ENTREGA:", 14, finalY + 17);
+        doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+        const prazoStr = formData.frete_previsao && formData.frete_previsao.trim() !== '' ? `${formData.frete_previsao} dias` : 'A combinar';
+        doc.text(`Postagem + ${prazoStr} após confirmação.`, 53, finalY + 17);
+
+        doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
+        doc.text("FRETE:", 14, finalY + 22);
+        doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+        const freteTexto = formData.frete_tipo === 'CIF' ? 'CIF - Por conta da YellowLeaf' : (formData.frete_tipo === 'FOB' ? 'FOB - Por conta do Cliente' : '-');
+        doc.text(freteTexto, 28, finalY + 22);
+        
+        finalY += 32;
+
+        // BLOCO DE CARTÃO DE CRÉDITO
+        doc.setFillColor(232, 245, 233); 
         doc.rect(14, finalY, pageWidth - 28, 12, 'F');
         doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
         doc.text("NOVIDADE NA YELLOWLEAF!", 18, finalY + 5);
         doc.setFontSize(8); doc.setFont("helvetica", "normal");
-        doc.text("Agora você pode pagar com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 9);
+        doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 9);
         
         finalY += 20;
 
@@ -768,7 +806,6 @@ function PipelineContent() {
         }
 
     } else {
-        // PROPOSTA ESTRATÉGICA (PAYBACK) - MANTIDA
         const precoG = parseMoney(formData.valor_g_tabela);
         const kg = parseMoney(formData.kg_proposto);
         const kgBonificado = parseMoney(formData.kg_bonificado);
@@ -1148,7 +1185,7 @@ function PipelineContent() {
                       <div className="md:col-span-4 mb-2"><h4 className="text-[10px] font-black text-slate-500 uppercase"><Building2 size={14}/> Faturamento e Logística</h4></div>
                       <div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1.5">Frete</label><select className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold" value={formData.frete_tipo} onChange={e => setFormData({...formData, frete_tipo: e.target.value})}><option value="CIF">CIF</option><option value="FOB">FOB</option></select></div>
                       <div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1.5">Transportadora</label><select className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold" value={formData.frete_transportadora} onChange={e => setFormData({...formData, frete_transportadora: e.target.value})}><option value="Correios">Correios</option><option value="Quality">Quality</option><option value="Braspress">Braspress</option></select></div>
-                      <div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1.5">Postagem (Dias)</label><input type="text" className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold" value={formData.frete_previsao} onChange={e => setFormData({...formData, frete_previsao: e.target.value})} /></div>
+                      <div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1.5">Postagem (Dias)</label><input type="text" className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold" value={formData.frete_previsao} onChange={e => setFormData({...formData, frete_previsao: e.target.value})} placeholder="Ex: 5" /></div>
                       <div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1.5">Condições</label><input type="text" className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold" value={formData.condicoes_pagamento} onChange={e => setFormData({...formData, condicoes_pagamento: e.target.value})} /></div>
                   </div>
 
@@ -1176,6 +1213,16 @@ function PipelineContent() {
            <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
               <div className="p-8 text-center"><div className="mx-auto w-16 h-16 bg-yellow-50 text-yellow-600 rounded-full flex items-center justify-center mb-6"><AlertTriangle size={32} /></div><h2 className="text-xl font-black text-slate-800 mb-3">{confirmModal.title}</h2><p className="text-slate-600 font-medium whitespace-pre-wrap">{confirmModal.message}</p></div>
               <div className="p-4 md:p-6 bg-slate-50 border-t flex flex-col md:flex-row gap-3"><button onClick={confirmModal.onCancel} className="w-full bg-white border text-slate-600 font-bold py-3 rounded-xl">Cancelar</button><button onClick={confirmModal.onConfirm} className="w-full bg-yellow-500 text-white font-bold py-3 rounded-xl shadow-lg">Sim, Continuar</button></div>
+           </div>
+        </div>, document.body
+      )}
+
+      {blockModal.open && mounted && createPortal(
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in duration-300">
+           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
+              <div className="bg-red-600 p-6 md:p-8 flex flex-col items-center justify-center text-white"><ShieldAlert size={50} className="mb-4 opacity-90"/><h2 className="text-xl md:text-2xl font-black uppercase tracking-tight text-center">{blockModal.title}</h2></div>
+              <div className="p-6 md:p-8 text-center bg-white"><p className="text-slate-800 font-bold text-base md:text-lg mb-2">{blockModal.message}</p><div className="bg-red-50 border border-red-100 rounded-xl p-4 mt-4 text-left"><p className="text-xs text-red-500 font-bold uppercase tracking-wider mb-1">Motivo</p><p className="text-red-800 font-bold text-sm whitespace-pre-wrap">{blockModal.motivo}</p></div></div>
+              <div className="p-4 md:p-6 bg-slate-50 border-t border-slate-100"><button onClick={() => setBlockModal({ ...blockModal, open: false })} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-xl transition active:scale-95">FECHAR</button></div>
            </div>
         </div>, document.body
       )}
