@@ -13,10 +13,6 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-import dynamic from 'next/dynamic';
-const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
-import 'react-quill-new/dist/quill.snow.css';
-
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 const API_CLIENTES_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 
@@ -251,7 +247,7 @@ function PipelineContent() {
     } catch (e) {}
   };
 
-  // INTELIGÊNCIA: Agrupando produtos e seus respectivos fracionamentos com base nas colunas 100G, 250G, 1000G, etc.
+  // INTELIGÊNCIA MÁXIMA DE ESTOQUE: Varre a linha inteira da planilha atrás de números!
   const carregarProdutosDaAPI = async () => {
     setLoadingProdutos(true);
     try {
@@ -270,31 +266,38 @@ function PipelineContent() {
                 if (!mapProdutos.has(ativo)) {
                     mapProdutos.set(ativo, { 
                         ativo, 
-                        preco_grama, // Preço base para estratégia
+                        preco_grama, 
                         peso_formula,
                         validade_base: validade,
                         opcoes: [] 
                     });
                 }
                 
-                // Mapeamento dinâmico das colunas da planilha (100G, 250G, 500G, 1000G, 2500G)
-                const pacotesDisponiveis = ['100G', '250G', '500G', '1000G', '2500G'];
-                pacotesDisponiveis.forEach(pacoteStr => {
-                    const keyLower = pacoteStr.toLowerCase();
-                    const qty = p[pacoteStr] !== undefined ? p[pacoteStr] : (p[keyLower] !== undefined ? p[keyLower] : null);
+                let achouFracionamento = false;
+                
+                // Mapeamento super dinâmico (não depende mais de ser exatamente "250G")
+                Object.keys(p).forEach(coluna => {
+                    const colLower = coluna.toLowerCase().trim().replace(/\s+/g, ''); // Ex: "250 G" vira "250g"
+                    const valoresComuns = ['10','30','50','100','250','500','1000','2500','5000','100g','250g','500g','1000g','1kg','2kg','5kg', '10g', '30g', '50g'];
+                    const isFracionamento = /^\d+(g|kg)?$/.test(colLower);
                     
-                    if (qty !== null && qty !== '') {
-                        mapProdutos.get(ativo).opcoes.push({
-                            fracionamento: pacoteStr.replace('G', 'g'), // Exibe bonitinho "250g" em vez de "250G"
-                            estoque: parseInt(qty) || 0,
-                            preco_grama: preco_grama,
-                            validade: validade
-                        });
+                    if (isFracionamento && valoresComuns.includes(colLower)) {
+                        const qty = p[coluna];
+                        if (qty !== null && qty !== '') {
+                            const sufixo = colLower.includes('g') || colLower.includes('k') ? '' : 'g'; // Garante que exiba '250g' mesmo se a coluna for só '250'
+                            mapProdutos.get(ativo).opcoes.push({
+                                fracionamento: colLower + sufixo,
+                                estoque: parseInt(qty) || 0,
+                                preco_grama: preco_grama,
+                                validade: validade
+                            });
+                            achouFracionamento = true;
+                        }
                     }
                 });
 
-                // Fallback caso a linha não tenha nenhuma das colunas (para não quebrar produtos antigos)
-                if (mapProdutos.get(ativo).opcoes.length === 0) {
+                // Fallback (plano B) caso a planilha esteja com formatos antigos
+                if (!achouFracionamento) {
                     let fracionamentoAntigo = String(p.fracionamento || p.embalagem || p.peso || p.tamanho || '1000g').trim();
                     mapProdutos.get(ativo).opcoes.push({
                         fracionamento: fracionamentoAntigo,
@@ -305,7 +308,12 @@ function PipelineContent() {
                 }
             });
 
+            // Ordena as opções de gramatura de forma crescente dentro de cada produto
             const produtosAgrupados = Array.from(mapProdutos.values()).sort((a: any, b: any) => a.ativo.localeCompare(b.ativo));
+            produtosAgrupados.forEach(prod => {
+                prod.opcoes.sort((a: any, b: any) => parseInt(a.fracionamento) - parseInt(b.fracionamento));
+            });
+            
             setProdutosApi(produtosAgrupados);
         }
     } catch (e) {}
