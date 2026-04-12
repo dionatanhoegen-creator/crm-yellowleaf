@@ -250,7 +250,7 @@ function PipelineContent() {
     } catch (e) {}
   };
 
-  // INTELIGÊNCIA DE ESTOQUE CORRIGIDA: Lendo por LINHAS da planilha
+  // INTELIGÊNCIA EXATA DA TELA DE PRODUTOS
   const carregarProdutosDaAPI = async () => {
     setLoadingProdutos(true);
     try {
@@ -261,7 +261,7 @@ function PipelineContent() {
             
             json.data.forEach((p: any) => {
                 let ativo = p.ativo ? p.ativo.trim() : 'Sem Nome';
-                let preco_grama = parseMoney(p.preco_grama || p['preço/grama'] || p.Preco || p.preco);
+                let preco_grama = parseMoney(p.preco_grama || p['preço/grama'] || p.Preco);
                 let validadeBruta = p.validade || p.data_validade || p.vencimento || p['validade do ativo'] || p['Validade'] || '';
                 let validade = formatarDataPlanilha(validadeBruta);
                 let peso_formula = parseMoney(p.peso_formula) || 13.2;
@@ -276,44 +276,48 @@ function PipelineContent() {
                     });
                 }
                 
-                // Busca inteligente para descobrir o nome da coluna de Fracionamento e de Estoque
-                const keys = Object.keys(p);
-                
-                // Procura coluna de fracionamento (Embalagem, Peso, etc)
-                const keyFrac = keys.find(k => ['fracionamento', 'embalagem', 'peso', 'tamanho', 'apresentacao'].includes(k.toLowerCase().trim().replace(/[^\w]/g, '')));
-                let fracionamento = keyFrac && p[keyFrac] ? String(p[keyFrac]).trim() : '1000g';
-                
-                // Se o fracionamento for só um número (ex: "250"), adiciona o "g"
-                if (!isNaN(Number(fracionamento))) {
-                    fracionamento += 'g';
-                }
+                // Lê as colunas exatas que vêm do Google Apps Script (como na tela de produtos)
+                const embalagensPadrao = [
+                    { chave: 'estoque_10g', label: '10g' },
+                    { chave: 'estoque_30g', label: '30g' },
+                    { chave: 'estoque_50g', label: '50g' },
+                    { chave: 'estoque_100g', label: '100g' },
+                    { chave: 'estoque_250g', label: '250g' },
+                    { chave: 'estoque_500g', label: '500g' },
+                    { chave: 'estoque_1000g', label: '1000g' },
+                    { chave: 'estoque_2500g', label: '2500g' },
+                    { chave: 'estoque_5000g', label: '5000g' }
+                ];
 
-                // Procura coluna de estoque (Saldo, Quantidade, Disponivel)
-                const keyEstoque = keys.find(k => ['estoque', 'saldo', 'quantidade', 'disp', 'disponivel'].includes(k.toLowerCase().trim().replace(/[^\w]/g, '')));
-                let estoque = keyEstoque && p[keyEstoque] !== undefined && p[keyEstoque] !== '' ? parseInt(p[keyEstoque]) : 99;
+                let achouFracionamento = false;
 
-                // Previne de adicionar fracionamentos duplicados se a planilha tiver sujeira
-                const jaExiste = mapProdutos.get(ativo).opcoes.find((o:any) => o.fracionamento.toLowerCase() === fracionamento.toLowerCase());
-                
-                if (!jaExiste) {
+                embalagensPadrao.forEach(emb => {
+                    const qty = p[emb.chave];
+                    // Se a coluna existe e tem um número lá dentro, nós adicionamos ao menu!
+                    if (qty !== undefined && qty !== null && String(qty).trim() !== '') {
+                        mapProdutos.get(ativo).opcoes.push({
+                            fracionamento: emb.label,
+                            estoque: parseInt(qty) || 0,
+                            preco_grama: preco_grama,
+                            validade: validade
+                        });
+                        achouFracionamento = true;
+                    }
+                });
+
+                // Fallback de segurança 
+                if (!achouFracionamento) {
                     mapProdutos.get(ativo).opcoes.push({
-                        fracionamento,
-                        estoque,
-                        preco_grama,
-                        validade
+                        fracionamento: '1000g',
+                        estoque: 99,
+                        preco_grama: preco_grama,
+                        validade: validade
                     });
                 }
             });
 
-            // Organiza as opções da menor gramatura para a maior (100g, 250g, 500g, 1000g)
+            // Organiza os produtos
             const produtosAgrupados = Array.from(mapProdutos.values()).sort((a: any, b: any) => a.ativo.localeCompare(b.ativo));
-            produtosAgrupados.forEach(prod => {
-                prod.opcoes.sort((a: any, b: any) => {
-                    const numA = parseInt(a.fracionamento.replace(/\D/g, '')) || 0;
-                    const numB = parseInt(b.fracionamento.replace(/\D/g, '')) || 0;
-                    return numA - numB;
-                });
-            });
             
             setProdutosApi(produtosAgrupados);
         }
