@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense, useRef } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { createPortal } from 'react-dom'; 
 import { useSearchParams, useRouter } from 'next/navigation';
 import { 
@@ -66,13 +66,6 @@ function PipelineContent() {
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  const [chatMsgs, setChatMsgs] = useState<any[]>([]);
-  const [mensagensPendentes, setMensagensPendentes] = useState<string[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [showMentions, setShowMentions] = useState(false);
-  const [mentionQuery, setMentionQuery] = useState("");
-  const chatScrollRef = useRef<HTMLDivElement>(null);
-  
   const getLocalData = () => {
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60000;
@@ -164,7 +157,8 @@ function PipelineContent() {
                   frete_tipo: opEncontrada.frete_tipo || 'CIF',
                   frete_transportadora: opEncontrada.frete_transportadora || 'Correios',
                   frete_previsao: opEncontrada.frete_previsao || '',
-                  condicoes_pagamento: opEncontrada.condicoes_pagamento || ''
+                  condicoes_pagamento: opEncontrada.condicoes_pagamento || '',
+                  observacoes_proposta: opEncontrada.observacoes_proposta || ''
               }));
               
               let contatosCarregados = [{
@@ -183,124 +177,12 @@ function PipelineContent() {
 
               setIsRepLocked(false);
               setNovaNotaInput("");
-              setChatInput("");
-              setChatMsgs([]);
-              setMensagensPendentes([]);
               setModalOpen(true);
           }
       };
 
       abrirOpViaUrl();
   }, [opIdUrl, oportunidades]);
-
-  useEffect(() => {
-      if (!editingOp || !modalOpen) return;
-
-      const fetchMensagens = async () => {
-          const { data, error } = await supabase
-            .from('chat_mensagens')
-            .select('*, perfis(nome)')
-            .eq('referencia_tipo', 'pipeline')
-            .eq('referencia_id', String(editingOp.id))
-            .order('created_at', { ascending: true });
-          
-          if (error) console.error("Erro ao buscar chat:", error);
-          
-          setChatMsgs(data || []);
-          setTimeout(() => {
-              if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
-          }, 100);
-      };
-
-      fetchMensagens();
-
-      const channel = supabase.channel(`chat_${editingOp.id}`)
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_mensagens', filter: `referencia_id=eq.${editingOp.id}` }, () => {
-              fetchMensagens(); 
-          })
-          .subscribe();
-
-      return () => { supabase.removeChannel(channel); };
-  }, [editingOp, modalOpen, supabase]);
-
-  const handleChatInputChange = (e: any) => {
-      const val = e.target.value;
-      setChatInput(val);
-
-      const match = val.match(/(?:^|\s)@(\w*)$/);
-      if (match) {
-          setShowMentions(true);
-          setMentionQuery(match[1].toLowerCase());
-      } else {
-          setShowMentions(false);
-      }
-  };
-
-  const inserirMencao = (nomeUsuario: string) => {
-      const novoTexto = chatInput.replace(/(?:^|\s)@(\w*)$/, ` @${nomeUsuario.split(' ')[0]} `);
-      setChatInput(novoTexto);
-      setShowMentions(false);
-  };
-
-  const enviarMensagemChat = async () => {
-      if (!chatInput.trim()) return;
-      const msgTexto = chatInput;
-      setChatInput(""); 
-      setShowMentions(false);
-
-      const msgOtimista = {
-          id: 'temp-' + Date.now(),
-          user_id: usuarioLogado.id,
-          referencia_tipo: 'pipeline',
-          referencia_id: editingOp ? String(editingOp.id) : 'nova',
-          texto: msgTexto,
-          created_at: new Date().toISOString(),
-          perfis: { nome: usuarioLogado.nome }
-      };
-      setChatMsgs(prev => [...prev, msgOtimista]);
-      setTimeout(() => {
-          if (chatScrollRef.current) chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
-      }, 100);
-
-      if (!editingOp) {
-          setMensagensPendentes(prev => [...prev, msgTexto]);
-          return;
-      }
-
-      const { data: novaMsg, error } = await supabase.from('chat_mensagens').insert({
-          user_id: usuarioLogado.id,
-          referencia_tipo: 'pipeline',
-          referencia_id: String(editingOp.id),
-          texto: msgTexto
-      }).select();
-
-      if (error) {
-          console.error(error);
-          alert("Aviso: Ocorreu um erro na rede e a mensagem pode não ter sido entregue.");
-          setChatMsgs(prev => prev.filter(m => m.id !== msgOtimista.id));
-          return;
-      }
-
-      if (novaMsg) {
-          const regex = /@(\w+)/g;
-          const mencoes = msgTexto.match(regex);
-          if (mencoes) {
-              mencoes.forEach(async (mentionStr) => {
-                  const nomeMencionado = mentionStr.substring(1).toLowerCase(); 
-                  const usuarioAlvo = equipe.find(u => u.nome.toLowerCase().includes(nomeMencionado));
-                  
-                  if (usuarioAlvo && usuarioAlvo.id !== usuarioLogado.id) {
-                      await supabase.from('notificacoes').insert({
-                          user_id: usuarioAlvo.id,
-                          remetente: usuarioLogado.nome.split(' ')[0],
-                          mensagem: `Mencionou você no chat da conta: ${editingOp.nome_cliente}`,
-                          link: `/pipeline?op_id=${editingOp.id}`
-                      });
-                  }
-              });
-          }
-      }
-  };
 
   const fecharModalELimparURL = () => {
       setModalOpen(false);
@@ -365,22 +247,43 @@ function PipelineContent() {
     } catch (e) {}
   };
 
+  // INTELIGÊNCIA: Agrupando produtos e seus respectivos fracionamentos
   const carregarProdutosDaAPI = async () => {
     setLoadingProdutos(true);
     try {
         const res = await fetch(`${API_PRODUTOS_URL}?path=produtos`);
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
-            const produtosLimpos = json.data.map((p: any) => {
+            const mapProdutos = new Map();
+            
+            json.data.forEach((p: any) => {
+                let ativo = p.ativo ? p.ativo.trim() : 'Sem Nome';
+                let preco_grama = parseMoney(p.preco_grama);
                 let validadeBruta = p.validade || p.data_validade || p.vencimento || p['validade do ativo'] || p['Validade'] || '';
-                return {
-                    ativo: p.ativo ? p.ativo.trim() : 'Sem Nome',
-                    preco_grama: parseMoney(p.preco_grama), 
-                    peso_formula: parseMoney(p.peso_formula) || 13.2,
-                    validade: formatarDataPlanilha(validadeBruta)
+                let validade = formatarDataPlanilha(validadeBruta);
+                let fracionamento = String(p.fracionamento || p.embalagem || p.peso || p.tamanho || '1000g').trim();
+                let peso_formula = parseMoney(p.peso_formula) || 13.2;
+
+                if (!mapProdutos.has(ativo)) {
+                    mapProdutos.set(ativo, { 
+                        ativo, 
+                        preco_grama, // Guarda o preço base para a proposta estratégica
+                        peso_formula,
+                        validade_base: validade,
+                        opcoes: [] 
+                    });
                 }
+                
+                // Adiciona o fracionamento na lista daquele insumo
+                mapProdutos.get(ativo).opcoes.push({
+                    fracionamento,
+                    preco_grama,
+                    validade
+                });
             });
-            setProdutosApi(produtosLimpos.sort((a: any, b: any) => a.ativo.localeCompare(b.ativo)));
+
+            const produtosAgrupados = Array.from(mapProdutos.values()).sort((a: any, b: any) => a.ativo.localeCompare(b.ativo));
+            setProdutosApi(produtosAgrupados);
         }
     } catch (e) {}
     setLoadingProdutos(false);
@@ -447,16 +350,35 @@ function PipelineContent() {
           if (it.id !== id) return it;
           let novoItem = { ...it, [campo]: valor };
 
+          // Se trocou o insumo, pega a primeira opção de embalagem como padrão
           if (campo === 'insumo') {
               const prod = produtosApi.find(p => p.ativo === valor);
-              if (prod) {
-                  novoItem.preco_g = prod.preco_grama;
-                  novoItem.validade = prod.validade || '';
+              if (prod && prod.opcoes.length > 0) {
+                  novoItem.fracionamento = prod.opcoes[0].fracionamento;
+                  novoItem.preco_g = prod.opcoes[0].preco_grama;
+                  novoItem.validade = prod.opcoes[0].validade;
+              } else {
+                  novoItem.fracionamento = '';
+                  novoItem.preco_g = 0;
+                  novoItem.validade = '';
               }
           }
 
+          // Se trocou o fracionamento específico, atualiza o preço e validade daquela embalagem
+          if (campo === 'fracionamento') {
+              const prod = produtosApi.find(p => p.ativo === novoItem.insumo);
+              if (prod) {
+                  const opcaoSelecionada = prod.opcoes.find((o: any) => o.fracionamento === valor);
+                  if (opcaoSelecionada) {
+                      novoItem.preco_g = opcaoSelecionada.preco_grama;
+                      novoItem.validade = opcaoSelecionada.validade;
+                  }
+              }
+          }
+
+          // Recalcula o total da linha
           if (campo === 'fracionamento' || campo === 'tipo_venda' || campo === 'insumo') {
-              const numStr = String(novoItem.fracionamento).replace(/\D/g, '');
+              const numStr = String(novoItem.fracionamento).replace(/\D/g, ''); // Tira o "g" ou "kg" para fazer a conta
               const gramas = parseFloat(numStr) || 0;
               if (novoItem.tipo_venda === 'Bonificado') {
                   novoItem.preco_total = 0;
@@ -493,14 +415,14 @@ function PipelineContent() {
             if (editingOp && editingOp.produto === prev.produto) {
                 return {
                     ...prev,
-                    validade_produto: prev.validade_produto || produtoSelecionado.validade || '', 
+                    validade_produto: prev.validade_produto || produtoSelecionado.validade_base || '', 
                     valor_g_tabela: prev.valor_g_tabela || produtoSelecionado.preco_grama.toFixed(2).replace('.', ','),
                     peso_formula_g: prev.peso_formula_g || produtoSelecionado.peso_formula.toString()
                 };
             }
             return {
                 ...prev,
-                validade_produto: produtoSelecionado.validade || '',
+                validade_produto: produtoSelecionado.validade_base || '',
                 valor_g_tabela: produtoSelecionado.preco_grama.toFixed(2).replace('.', ','),
                 peso_formula_g: produtoSelecionado.peso_formula.toString()
             };
@@ -630,7 +552,7 @@ function PipelineContent() {
       const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpjLimpo}`);
       if (res.ok) {
           const data = await res.json();
-          const enderecoFormatado = data.logradouro ? `${data.logradouro}, ${data.numero || 'S/N'}${data.complemento ? ' - ' + data.complemento : ''}` : '';
+          const enderecoFormatado = data.logradouro ? `${data.logradouro}, ${data.numero || 'S/N'}${data.complemento ? ' - ' + data.complemento : ''}, ${data.bairro || ''}` : '';
           
           setFormData(prev => ({ 
             ...prev, 
@@ -704,7 +626,8 @@ function PipelineContent() {
   const gerarPropostaIndividualPDF = () => {
     if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
 
-    const doc = new jsPDF({ orientation: formData.tipo_negociacao === 'cotacao' ? 'landscape' : 'portrait' });
+    // PDF SEMPRE EM RETRATO (PORTRAIT)
+    const doc = new jsPDF({ orientation: 'portrait' });
     const darkGreen = [18, 85, 48]; 
     const lightGreen = [0, 150, 0]; 
     
@@ -730,17 +653,20 @@ function PipelineContent() {
     doc.line(14, 31, pageWidth - 14, 31);
 
     doc.setFillColor(248, 249, 250); 
-    doc.rect(14, 35, pageWidth - 28, 23, 'F');
+    doc.rect(14, 35, pageWidth - 28, 26, 'F');
 
     doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
     doc.text("DADOS DO CLIENTE", 18, 41);
 
     const contatoPrincipal = contatosList[0] || { nome: '', telefone: '' };
+    
+    // NOVO: ENDEREÇO COMPLETO NO PDF
+    const enderecoFormatadoPDF = `${formData.endereco || 'N/D'} - ${formData.cidade_exclusividade || ''} / ${formData.uf_exclusividade || ''}`;
 
     doc.setFontSize(9); doc.setTextColor(80, 80, 80); doc.setFont("helvetica", "normal");
     doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 18, 47);
     doc.text(`Contato: ${contatoPrincipal.nome || 'N/D'}   |   Tel: ${contatoPrincipal.telefone || 'N/D'}`, 18, 52);
-    doc.text(`Cidade/UF: ${formData.cidade_exclusividade || '-'} / ${formData.uf_exclusividade || '-'}`, 18, 57);
+    doc.text(`Endereço: ${enderecoFormatadoPDF}`, 18, 57);
 
     let finalY = 69;
 
@@ -750,27 +676,25 @@ function PipelineContent() {
 
         const itens = getItensCotacao();
         const tableBody = itens.map((it: any) => [
-            'Nutracêutico',
             it.insumo,
             it.info_adicional || '-',
-            `${it.fracionamento}g`,
+            `${it.fracionamento}`,
             it.tipo_venda,
             formatCurrency(it.preco_g),
             formatCurrency(it.preco_total),
-            it.validade || '-',
-            it.origem || 'China'
+            it.validade || '-'
         ]);
 
         autoTable(doc, {
             startY: 69,
-            head: [['Tipo', 'Insumo', 'Info Adicional', 'Embalagem', 'Classificação', 'Preço(g)', 'Total', 'Validade', 'Origem']],
+            head: [['Insumo', 'Info Adicional', 'Embalagem', 'Classificação', 'Preço/g', 'Total', 'Validade']],
             body: tableBody,
             theme: 'grid',
             headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
-            styles: { fontSize: 8, cellPadding: 3, textColor: [60, 60, 60] },
-            columnStyles: { 6: { fontStyle: 'bold', textColor: lightGreen } },
+            styles: { fontSize: 7, cellPadding: 2, textColor: [60, 60, 60] }, // Fonte um pouco menor para caber em Retrato
+            columnStyles: { 5: { fontStyle: 'bold', textColor: lightGreen } },
             didParseCell: (data) => {
-                if (data.section === 'body' && data.column.index === 4) { 
+                if (data.section === 'body' && data.column.index === 3) { 
                     if (data.cell.raw === 'Bonificado') data.cell.styles.textColor = [34, 197, 94];
                 }
             }
@@ -785,15 +709,29 @@ function PipelineContent() {
         
         if (!isPedido) {
             doc.text("Pague no cartão de crédito é muito mais facilidade no seu dia a dia.", 14, finalY + 15);
-            finalY += 20;
+            finalY += 25;
         } else {
+            finalY += 15;
+        }
+
+        // NOVO: LOGÍSTICA SEMPRE VISÍVEL
+        doc.setFont("helvetica", "bold");
+        doc.text("DADOS DE FATURAMENTO E LOGÍSTICA:", 14, finalY);
+        doc.setFont("helvetica", "normal");
+        doc.text(`Condições de Pagamento: ${formData.condicoes_pagamento || '-'}`, 14, finalY + 7);
+        doc.text(`Frete: ${formData.frete_tipo || '-'} via ${formData.frete_transportadora || '-'}`, 14, finalY + 12);
+        doc.text(`Postagem * ${formData.frete_previsao || '-'} dias de acordo com o site/transportadora selecionada.`, 14, finalY + 17);
+        
+        finalY += 27;
+
+        // NOVO: OBSERVAÇÕES
+        if (formData.observacoes_proposta && formData.observacoes_proposta.trim() !== '') {
             doc.setFont("helvetica", "bold");
-            doc.text("DADOS DE FATURAMENTO E LOGÍSTICA:", 14, finalY + 15);
+            doc.text("OBSERVAÇÕES:", 14, finalY);
             doc.setFont("helvetica", "normal");
-            doc.text(`Condições de Pagamento: ${formData.condicoes_pagamento || '-'}`, 14, finalY + 22);
-            doc.text(`Frete: ${formData.frete_tipo} via ${formData.frete_transportadora}`, 14, finalY + 27);
-            doc.text(`Postagem * ${formData.frete_previsao} dias de acordo com o site/transportadora selecionada.`, 14, finalY + 32);
-            finalY += 37;
+            const splitObs = doc.splitTextToSize(formData.observacoes_proposta, pageWidth - 28);
+            doc.text(splitObs, 14, finalY + 6);
+            finalY += (splitObs.length * 5) + 10;
         }
 
     } else {
@@ -1044,40 +982,8 @@ function PipelineContent() {
           }
       }
 
-      if (!editingOp && mensagensPendentes.length > 0 && opId) {
-          for (const msgTexto of mensagensPendentes) {
-              const { data: novaMsg } = await supabase.from('chat_mensagens').insert({
-                  user_id: usuarioLogado.id,
-                  referencia_tipo: 'pipeline',
-                  referencia_id: String(opId),
-                  texto: msgTexto
-              }).select();
-
-              if (novaMsg) {
-                  const regex = /@(\w+)/g;
-                  const mencoes = msgTexto.match(regex);
-                  if (mencoes) {
-                      mencoes.forEach(async (mentionStr) => {
-                          const nomeMencionado = mentionStr.substring(1).toLowerCase(); 
-                          const usuarioAlvo = equipe.find(u => u.nome.toLowerCase().includes(nomeMencionado));
-                          
-                          if (usuarioAlvo && usuarioAlvo.id !== usuarioLogado.id) {
-                              await supabase.from('notificacoes').insert({
-                                  user_id: usuarioAlvo.id,
-                                  remetente: usuarioLogado.nome.split(' ')[0],
-                                  mensagem: `Mencionou você no chat da conta: ${formData.nome_cliente.toUpperCase()}`,
-                                  link: `/pipeline?op_id=${opId}`
-                              });
-                          }
-                      });
-                  }
-              }
-          }
-      }
-
       fecharModalELimparURL();
-      setChatInput("");
-      setMensagensPendentes([]); 
+      setNovaNotaInput("");
       carregarOportunidades(usuarioLogado); 
     } else { 
       alert(`Erro ao salvar: ${error.message}`); 
@@ -1128,7 +1034,8 @@ function PipelineContent() {
                 frete_tipo: op.frete_tipo || 'CIF',
                 frete_transportadora: op.frete_transportadora || 'Correios',
                 frete_previsao: op.frete_previsao || '',
-                condicoes_pagamento: op.condicoes_pagamento || ''
+                condicoes_pagamento: op.condicoes_pagamento || '',
+                observacoes_proposta: op.observacoes_proposta || ''
             }));
             
             let contatosCarregados = [{
@@ -1147,9 +1054,6 @@ function PipelineContent() {
 
             setIsRepLocked(false); 
             setNovaNotaInput(""); 
-            setChatInput(""); 
-            setChatMsgs([]); 
-            setMensagensPendentes([]); 
             setModalOpen(true); 
         }} className={`p-4 rounded-2xl border-2 cursor-pointer shadow-sm transition hover:shadow-md ${bgClass} ${borderClass}`}>
             <div className="flex justify-between items-start mb-2">
@@ -1255,9 +1159,6 @@ function PipelineContent() {
                     setFormData({cnpj: '', nome_cliente: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', data_lembrete_sdr: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', endereco: '', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || '', tipo_negociacao: 'estrategica', itens_cotacao: '[]', frete_tipo: 'CIF', frete_transportadora: 'Correios', frete_previsao: '', condicoes_pagamento: ''}); 
                     setContatosList([{ nome: '', cargo: 'Comprador(a)', telefone: '', email: '' }]); 
                     setNovaNotaInput(""); 
-                    setChatInput("");
-                    setChatMsgs([]);
-                    setMensagensPendentes([]);
                     setModalOpen(true); 
                 }} className="flex-1 sm:flex-none bg-blue-600 text-white px-3 md:px-4 py-3 md:py-2.5 rounded-xl font-bold shadow-lg transition active:scale-95 whitespace-nowrap text-xs md:text-sm flex items-center justify-center gap-2 hover:bg-blue-700">
                     <Plus size={16} /> Nova Op.
@@ -1284,7 +1185,7 @@ function PipelineContent() {
 
       {modalOpen && mounted && createPortal(
         <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-end md:items-center justify-center md:p-4">
-          <div className="bg-white w-full h-[95vh] md:h-auto md:max-h-[95vh] md:max-w-6xl rounded-t-3xl md:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-200">
+          <div className="bg-white w-full h-[95vh] md:h-auto md:max-h-[95vh] max-w-5xl md:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-200 mx-auto">
             
             <div className="bg-[#1e293b] p-4 md:p-6 flex justify-between items-center text-white shrink-0 border-b-4 border-blue-500">
               <div className="overflow-hidden mr-2">
@@ -1303,10 +1204,10 @@ function PipelineContent() {
               </div>
             </div>
 
-            <div className="p-4 md:p-8 grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6 overflow-y-auto bg-slate-50 flex-1 custom-scrollbar">
+            <div className="p-4 md:p-8 overflow-y-auto bg-slate-50 flex-1 custom-scrollbar">
               
-              {/* LADO ESQUERDO (Formulário) */}
-              <div className="lg:col-span-8 grid grid-cols-1 md:grid-cols-4 gap-4 md:gap-6 content-start">
+              {/* FORMULÁRIO ÚNICO (SEM CHAT LATERAL) */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 md:gap-6 content-start">
                   
                   {/* SEÇÃO 1: IDENTIFICAÇÃO E ATRIBUIÇÃO */}
                   <div className="md:col-span-4 flex items-center gap-2 mb-1 md:mb-2">
@@ -1347,40 +1248,44 @@ function PipelineContent() {
                           <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1"><Users size={14}/> Contatos da Farmácia</label>
                       </div>
                       
-                      {contatosList.map((contato, idx) => (
-                          <div key={idx} className="p-4 bg-white border border-slate-200 rounded-xl mb-3 relative shadow-sm hover:border-blue-300 transition-colors">
-                              {idx > 0 && (
-                                  <button type="button" onClick={() => removeContato(idx)} className="absolute top-2 right-2 text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 p-2 rounded-lg transition" title="Remover Contato">
-                                      <Trash2 size={16}/>
-                                  </button>
-                              )}
-                              <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-4">
-                                  {idx === 0 ? '⭐ Contato Principal (Aparece no PDF)' : `👤 Contato Adicional ${idx + 1}`}
-                              </h4>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                  <div>
-                                      <label className="text-xs font-bold text-slate-700 mb-1.5 block">Nome do Contato</label>
-                                      <input className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm transition" value={contato.nome} onChange={e => updateContato(idx, 'nome', e.target.value.toUpperCase())} placeholder="EX: DRA. JULIA"/>
-                                  </div>
-                                  <div>
-                                      <label className="text-xs font-bold text-slate-700 mb-1.5 block">Cargo / Papel</label>
-                                      <select className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer transition" value={contato.cargo} onChange={e => updateContato(idx, 'cargo', e.target.value)}>
-                                          {OPCOES_CARGO_CONTATO.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                                      </select>
-                                  </div>
-                                  <div>
-                                      <label className="text-xs font-bold text-slate-700 mb-1.5 block">WhatsApp / Tel</label>
-                                      <input className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-bold outline-none shadow-sm transition" value={contato.telefone} onChange={e => updateContato(idx, 'telefone', e.target.value)} placeholder="(11) 99999-9999"/>
-                                  </div>
-                                  <div>
-                                      <label className="text-xs font-bold text-slate-700 mb-1.5 block">E-mail</label>
-                                      <input type="email" className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-medium outline-none shadow-sm transition" value={contato.email} onChange={e => updateContato(idx, 'email', e.target.value.toLowerCase())} placeholder="email@farmacia.com"/>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {contatosList.map((contato, idx) => (
+                              <div key={idx} className="p-4 bg-white border border-slate-200 rounded-xl relative shadow-sm hover:border-blue-300 transition-colors">
+                                  {idx > 0 && (
+                                      <button type="button" onClick={() => removeContato(idx)} className="absolute top-2 right-2 text-slate-400 hover:text-red-500 bg-slate-50 hover:bg-red-50 p-2 rounded-lg transition" title="Remover Contato">
+                                          <Trash2 size={16}/>
+                                      </button>
+                                  )}
+                                  <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-4">
+                                      {idx === 0 ? '⭐ Contato Principal (Aparece no PDF)' : `👤 Contato Adicional ${idx + 1}`}
+                                  </h4>
+                                  <div className="space-y-3">
+                                      <div>
+                                          <label className="text-xs font-bold text-slate-700 mb-1.5 block">Nome do Contato</label>
+                                          <input className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-bold uppercase outline-none shadow-sm transition" value={contato.nome} onChange={e => updateContato(idx, 'nome', e.target.value.toUpperCase())} placeholder="EX: DRA. JULIA"/>
+                                      </div>
+                                      <div>
+                                          <label className="text-xs font-bold text-slate-700 mb-1.5 block">Cargo / Papel</label>
+                                          <select className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer transition" value={contato.cargo} onChange={e => updateContato(idx, 'cargo', e.target.value)}>
+                                              {OPCOES_CARGO_CONTATO.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                          </select>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-2">
+                                          <div>
+                                              <label className="text-[10px] font-bold text-slate-700 mb-1.5 block">WhatsApp</label>
+                                              <input className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-bold outline-none shadow-sm transition" value={contato.telefone} onChange={e => updateContato(idx, 'telefone', e.target.value)} placeholder="(11) 99999-9999"/>
+                                          </div>
+                                          <div>
+                                              <label className="text-[10px] font-bold text-slate-700 mb-1.5 block">E-mail</label>
+                                              <input type="email" className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl p-3 text-sm font-medium outline-none shadow-sm transition" value={contato.email} onChange={e => updateContato(idx, 'email', e.target.value.toLowerCase())} placeholder="@farmacia.com"/>
+                                          </div>
+                                      </div>
                                   </div>
                               </div>
-                          </div>
-                      ))}
+                          ))}
+                      </div>
                       
-                      <button type="button" onClick={addContato} className="mt-1 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-4 py-2.5 rounded-xl transition flex items-center gap-2 active:scale-95">
+                      <button type="button" onClick={addContato} className="mt-4 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-2 active:scale-95 w-full md:w-auto">
                           <UserPlus size={14}/> Adicionar Outro Contato
                       </button>
                   </div>
@@ -1402,7 +1307,7 @@ function PipelineContent() {
                   </div>
 
 
-                  {/* SEÇÃO 2: PRODUTO E PRECIFICAÇÃO (COM CHAVE SELETORA) */}
+                  {/* SEÇÃO 2: PRODUTO E PRECIFICAÇÃO */}
                   <div className="md:col-span-4 flex items-center gap-2 mb-1 md:mb-2 mt-4 md:mt-6">
                       <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-black text-xs md:text-sm">2</div>
                       <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Produto e Precificação</h3>
@@ -1426,10 +1331,10 @@ function PipelineContent() {
                       </button>
                   </div>
 
-                  {/* RENDERIZAÇÃO CONDICIONAL */}
+                  {/* RENDERIZAÇÃO CONDICIONAL DA TABELA/FORMULÁRIO */}
                   {formData.tipo_negociacao === 'estrategica' ? (
                       <>
-                          {/* CAMPOS ORIGINAIS DA ESTRATÉGICA */}
+                          {/* ESTRATÉGICA */}
                           <div className="md:col-span-2">
                               <label className="text-xs font-bold text-slate-700 mb-1.5 flex justify-between">Ativo a Negociar <Loader2 size={12} className={loadingProdutos ? "animate-spin text-blue-500" : "hidden"}/></label>
                               <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold disabled:opacity-50 outline-none shadow-sm cursor-pointer" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})} disabled={loadingProdutos}>
@@ -1458,7 +1363,7 @@ function PipelineContent() {
                       </>
                   ) : (
                       <>
-                          {/* NOVOS CAMPOS DA COTAÇÃO PADRÃO */}
+                          {/* COTAÇÃO MÚLTIPLA */}
                           <div className="md:col-span-4 bg-slate-50 border border-slate-200 p-4 rounded-xl shadow-sm">
                               <div className="flex justify-between items-center mb-4 border-b border-slate-200 pb-3">
                                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1"><Package size={14}/> Itens da Cotação</h4>
@@ -1471,7 +1376,11 @@ function PipelineContent() {
                                   {getItensCotacao().length === 0 ? (
                                       <p className="text-xs text-slate-400 italic text-center py-4">Nenhum insumo adicionado à cotação.</p>
                                   ) : (
-                                      getItensCotacao().map((item: any) => (
+                                      getItensCotacao().map((item: any) => {
+                                          // Puxa os dados do produto selecionado nesta linha para popular o dropdown de embalagem
+                                          const produtoDaLinha = produtosDisponiveis.find(p => p.ativo === item.insumo);
+
+                                          return (
                                           <div key={item.id} className="grid grid-cols-12 gap-3 bg-white p-3 rounded-lg border border-slate-200 relative items-end">
                                               
                                               <button type="button" onClick={() => removerItemCotacao(item.id)} className="absolute -top-2 -right-2 bg-red-100 text-red-600 hover:bg-red-500 hover:text-white rounded-full p-1 shadow-sm transition"><X size={12}/></button>
@@ -1485,8 +1394,13 @@ function PipelineContent() {
                                               </div>
 
                                               <div className="col-span-12 md:col-span-2">
-                                                  <label className="text-[10px] font-bold text-slate-500 block mb-1">Embalagem (g/kg)</label>
-                                                  <input type="text" placeholder="Ex: 500g" className="w-full border border-slate-200 rounded p-2 text-xs font-bold text-slate-700 outline-none focus:border-purple-500" value={item.fracionamento} onChange={e => atualizarItemCotacao(item.id, 'fracionamento', e.target.value)} />
+                                                  <label className="text-[10px] font-bold text-slate-500 block mb-1">Embalagem</label>
+                                                  <select className="w-full border border-slate-200 rounded p-2 text-xs font-bold text-slate-700 outline-none focus:border-purple-500 disabled:bg-slate-50 disabled:text-slate-400" value={item.fracionamento} onChange={e => atualizarItemCotacao(item.id, 'fracionamento', e.target.value)} disabled={!item.insumo}>
+                                                      <option value="">Selecione...</option>
+                                                      {produtoDaLinha && produtoDaLinha.opcoes.map((op: any, index: number) => (
+                                                          <option key={op.fracionamento + index} value={op.fracionamento}>{op.fracionamento}</option>
+                                                      ))}
+                                                  </select>
                                               </div>
 
                                               <div className="col-span-6 md:col-span-2">
@@ -1514,50 +1428,65 @@ function PipelineContent() {
                                                   </div>
                                               </div>
                                           </div>
-                                      ))
+                                      )})
                                   )}
-                              </div>
-                          </div>
-
-                          <div className="md:col-span-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mt-2">
-                              <div>
-                                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Frete (Tipo)</label>
-                                  <select className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-700 outline-none shadow-sm" value={formData.frete_tipo} onChange={e => setFormData({...formData, frete_tipo: e.target.value})}>
-                                      <option value="CIF">CIF (Pago pela Yellow)</option>
-                                      <option value="FOB">FOB (Pago pelo Cliente)</option>
-                                  </select>
-                              </div>
-                              <div>
-                                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Transportadora</label>
-                                  <select className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-700 outline-none shadow-sm" value={formData.frete_transportadora} onChange={e => setFormData({...formData, frete_transportadora: e.target.value})}>
-                                      <option value="Correios">Correios</option>
-                                      <option value="Quality">Quality</option>
-                                      <option value="Braspress">Braspress</option>
-                                  </select>
-                              </div>
-                              <div>
-                                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Previsão (Dias)</label>
-                                  <input type="text" placeholder="Ex: 10 dias úteis" className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-700 outline-none shadow-sm" value={formData.frete_previsao} onChange={e => setFormData({...formData, frete_previsao: e.target.value})} />
-                              </div>
-                              <div>
-                                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Condições Pagamento</label>
-                                  <input type="text" placeholder="Ex: 30/60/90, Boleto..." className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-700 outline-none shadow-sm" value={formData.condicoes_pagamento} onChange={e => setFormData({...formData, condicoes_pagamento: e.target.value})} />
                               </div>
                           </div>
                       </>
                   )}
 
+                  {/* LOGÍSTICA E FATURAMENTO (SEMPRE VISÍVEL PARA AMBOS) */}
+                  <div className="md:col-span-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mt-2 bg-slate-50 border border-slate-200 p-4 rounded-xl shadow-sm">
+                      <div className="md:col-span-4 mb-2">
+                          <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1"><Building2 size={14}/> Faturamento e Logística (Sai no PDF)</h4>
+                      </div>
+                      <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Frete (Tipo)</label>
+                          <select className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-700 outline-none shadow-sm focus:border-blue-500" value={formData.frete_tipo} onChange={e => setFormData({...formData, frete_tipo: e.target.value})}>
+                              <option value="CIF">CIF (Pago pela Yellow)</option>
+                              <option value="FOB">FOB (Pago pelo Cliente)</option>
+                          </select>
+                      </div>
+                      <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Transportadora</label>
+                          <select className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-700 outline-none shadow-sm focus:border-blue-500" value={formData.frete_transportadora} onChange={e => setFormData({...formData, frete_transportadora: e.target.value})}>
+                              <option value="Correios">Correios</option>
+                              <option value="Quality">Quality</option>
+                              <option value="Braspress">Braspress</option>
+                          </select>
+                      </div>
+                      <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Previsão de Postagem</label>
+                          <input type="text" placeholder="Ex: 10 dias úteis" className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-700 outline-none shadow-sm focus:border-blue-500" value={formData.frete_previsao} onChange={e => setFormData({...formData, frete_previsao: e.target.value})} />
+                      </div>
+                      <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Condições Pagamento</label>
+                          <input type="text" placeholder="Ex: 30/60/90, Boleto..." className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-700 outline-none shadow-sm focus:border-blue-500" value={formData.condicoes_pagamento} onChange={e => setFormData({...formData, condicoes_pagamento: e.target.value})} />
+                      </div>
+                  </div>
 
                   <div className="md:col-span-4 bg-slate-800 p-4 rounded-2xl flex items-center justify-between text-white mt-2 shadow-lg">
                       <span className="text-xs font-black uppercase tracking-widest text-slate-300">Total Proposta</span>
                       <span className="text-xl md:text-2xl font-black text-[#82D14D]">{formatCurrency(formData.valor)}</span>
                   </div>
 
+                  {/* OBSERVAÇÕES DA PROPOSTA (NOVO CAMPO PARA O PDF) */}
+                  <div className="md:col-span-4 mt-2">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2">
+                          <FileText size={14}/> Observações da Proposta (Aparece no PDF)
+                      </label>
+                      <textarea 
+                          className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-4 outline-none text-sm text-slate-700 font-medium shadow-sm transition resize-none min-h-[100px] custom-scrollbar" 
+                          placeholder="Digite aqui observações adicionais que você quer que o cliente veja na página da cotação..." 
+                          value={formData.observacoes_proposta} 
+                          onChange={(e) => setFormData({...formData, observacoes_proposta: e.target.value})} 
+                      />
+                  </div>
 
-                  {/* SEÇÃO 3: FOLLOW-UP CLÁSSICO */}
+                  {/* SEÇÃO 3: FOLLOW-UP CLÁSSICO E HISTÓRICO INTERNO */}
                   <div className="md:col-span-4 flex items-center gap-2 mb-1 md:mb-2 mt-4 md:mt-6">
                       <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-black text-xs md:text-sm">3</div>
-                      <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Follow-up Clássico</h3>
+                      <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Follow-up e Histórico Interno</h3>
                   </div>
                   
                   <div className="md:col-span-1">
@@ -1577,7 +1506,7 @@ function PipelineContent() {
                   {/* BLOCO ORIGINAL DE ANOTAÇÕES - SEMPRE VISÍVEL */}
                   <div className="md:col-span-4 space-y-3 mt-4">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2">
-                          <MessageSquare size={14}/> Nova Anotação
+                          <MessageSquare size={14}/> Nova Anotação Interna (Não vai para o PDF)
                       </label>
                       
                       <div className="flex flex-col gap-2 bg-blue-50/50 p-3 border border-blue-100 rounded-2xl">
@@ -1604,78 +1533,6 @@ function PipelineContent() {
                   </div>
 
               </div>
-
-              {/* LADO DIREITO (Chat Novo) */}
-              <div className="lg:col-span-4 flex flex-col h-[500px] lg:h-full min-h-[400px] bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                  <div className="bg-slate-100 p-3 border-b border-slate-200 shrink-0">
-                      <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
-                          <MessageSquare size={16} className="text-blue-500"/> Discussão da Conta
-                      </h3>
-                  </div>
-
-                  <div className="flex-1 overflow-y-auto p-4 bg-slate-50 flex flex-col gap-3 custom-scrollbar" ref={chatScrollRef}>
-                      {chatMsgs.length === 0 ? (
-                          <div className="m-auto text-center p-4">
-                              <MessageCircle size={32} className="mx-auto text-slate-300 mb-2"/>
-                              <p className="text-xs text-slate-500 font-medium">Inicie a discussão desta proposta. Use @ para notificar a equipe.</p>
-                          </div>
-                      ) : (
-                          chatMsgs.map(msg => {
-                              const isMe = msg.user_id === usuarioLogado?.id;
-                              return (
-                                  <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[90%] ${isMe ? 'self-end' : 'self-start'}`}>
-                                      <span className="text-[9px] font-bold text-slate-400 mb-1 ml-1">{msg.perfis?.nome?.split(' ')[0] || 'Usuário'} • {new Date(msg.created_at).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}</span>
-                                      <div className={`p-3 rounded-2xl text-sm shadow-sm whitespace-pre-wrap leading-relaxed ${isMe ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white text-slate-700 border border-slate-200 rounded-tl-none'}`}>
-                                          {/* Renderiza as menções em negrito */}
-                                          {msg.texto.split(/(@\w+)/g).map((part: string, i: number) => 
-                                              part.startsWith('@') ? <span key={i} className={isMe ? "text-yellow-300 font-black" : "text-blue-600 font-black"}>{part}</span> : part
-                                          )}
-                                      </div>
-                                  </div>
-                              )
-                          })
-                      )}
-                  </div>
-
-                  <div className="p-3 bg-white border-t border-slate-200 shrink-0 relative">
-                      {showMentions && mentionQuery !== "" && (
-                          <div className="absolute bottom-full mb-2 left-3 right-3 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden">
-                              <div className="p-2 bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-500 uppercase tracking-widest">Mencionar Usuário</div>
-                              <ul className="max-h-40 overflow-y-auto custom-scrollbar p-1">
-                                  {equipe.filter(u => u.nome.toLowerCase().includes(mentionQuery) || u.cargo.toLowerCase().includes(mentionQuery)).map(u => (
-                                      <li key={u.id} onClick={() => inserirMencao(u.nome)} className="p-2 hover:bg-blue-50 text-xs font-bold text-slate-700 cursor-pointer rounded-lg flex justify-between items-center transition">
-                                          {u.nome} <span className="text-[9px] text-slate-400 font-medium bg-white px-1.5 py-0.5 rounded border border-slate-100">{u.cargo}</span>
-                                      </li>
-                                  ))}
-                              </ul>
-                          </div>
-                      )}
-                      
-                      <div className="relative">
-                          <textarea 
-                              disabled={!editingOp}
-                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl p-3 pr-12 text-sm text-slate-700 font-medium outline-none resize-none min-h-[80px] transition custom-scrollbar disabled:opacity-50"
-                              placeholder={editingOp ? "Digite sua mensagem... (Use @ para marcar)" : "Salve a oportunidade primeiro."}
-                              value={chatInput}
-                              onChange={handleChatInputChange}
-                              onKeyDown={(e) => {
-                                  if (e.key === 'Enter' && !e.shiftKey) {
-                                      e.preventDefault();
-                                      enviarMensagemChat();
-                                  }
-                              }}
-                          />
-                          <button 
-                              disabled={!editingOp || !chatInput.trim()}
-                              onClick={enviarMensagemChat} 
-                              className="absolute bottom-3 right-3 w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center hover:bg-blue-700 transition disabled:opacity-50 shadow-sm"
-                          >
-                              <Send size={14}/>
-                          </button>
-                      </div>
-                  </div>
-              </div>
-
             </div>
 
             <div className="p-4 md:p-6 bg-white border-t border-slate-200 flex flex-col md:flex-row justify-between items-center shrink-0 gap-3">
