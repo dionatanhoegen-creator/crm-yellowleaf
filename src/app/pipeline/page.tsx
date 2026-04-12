@@ -7,7 +7,7 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users, Building2, UserPlus, Bell, AtSign
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users, Building2, UserPlus, Bell, AtSign, ListPlus
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
@@ -93,7 +93,13 @@ function PipelineContent() {
     status: 'prospeccao', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45',
     peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', 
     endereco: '', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0,
-    user_id: '' 
+    user_id: '',
+    tipo_negociacao: 'estrategica', // 'estrategica' ou 'cotacao'
+    itens_cotacao: '[]',
+    frete_tipo: 'CIF',
+    frete_transportadora: 'Correios',
+    frete_previsao: '',
+    condicoes_pagamento: ''
   });
 
   const cargoStrLogado = String(usuarioLogado?.cargo || "").toLowerCase();
@@ -154,7 +160,17 @@ function PipelineContent() {
 
           if (opEncontrada && (!editingOp || String(editingOp.id) !== opIdUrl)) {
               setEditingOp(opEncontrada);
-              setFormData(prev => ({...prev, ...opEncontrada, custo_fixo_operacional: opEncontrada.custo_fixo_operacional || '0'}));
+              setFormData(prev => ({
+                  ...prev, 
+                  ...opEncontrada, 
+                  custo_fixo_operacional: opEncontrada.custo_fixo_operacional || '0',
+                  tipo_negociacao: opEncontrada.tipo_negociacao || 'estrategica',
+                  itens_cotacao: opEncontrada.itens_cotacao || '[]',
+                  frete_tipo: opEncontrada.frete_tipo || 'CIF',
+                  frete_transportadora: opEncontrada.frete_transportadora || 'Correios',
+                  frete_previsao: opEncontrada.frete_previsao || '',
+                  condicoes_pagamento: opEncontrada.condicoes_pagamento || ''
+              }));
               
               let contatosCarregados = [{
                   nome: opEncontrada.contato || '',
@@ -401,7 +417,85 @@ function PipelineContent() {
     return !exclusividades.some(ex => ex.produto === nomeProduto && ex.uf === ufAtual && (ex.cidade === cidadeAtual || ex.cidade === 'TODAS') && ex.nome_cliente !== formData.nome_cliente);
   });
 
+  // =========================================================
+  // GESTÃO DE COTAÇÕES PADRÃO (MULTIPLOS ITENS)
+  // =========================================================
+  const getItensCotacao = () => {
+      try { return JSON.parse(formData.itens_cotacao || '[]'); } 
+      catch { return []; }
+  };
+
+  const setItensCotacao = (novosItens: any[]) => {
+      setFormData(prev => ({ ...prev, itens_cotacao: JSON.stringify(novosItens) }));
+  };
+
+  const adicionarItemCotacao = () => {
+      const itens = getItensCotacao();
+      itens.push({
+          id: Date.now().toString(),
+          insumo: '',
+          info_adicional: '',
+          fracionamento: '',
+          tipo_venda: 'Venda',
+          preco_g: 0,
+          preco_total: 0,
+          validade: '',
+          origem: 'China'
+      });
+      setItensCotacao(itens);
+  };
+
+  const removerItemCotacao = (id: string) => {
+      const itens = getItensCotacao().filter((it: any) => it.id !== id);
+      setItensCotacao(itens);
+  };
+
+  const atualizarItemCotacao = (id: string, campo: string, valor: any) => {
+      const itens = getItensCotacao().map((it: any) => {
+          if (it.id !== id) return it;
+          let novoItem = { ...it, [campo]: valor };
+
+          // Se trocou o insumo, puxa o preço e validade do Google
+          if (campo === 'insumo') {
+              const prod = produtosApi.find(p => p.ativo === valor);
+              if (prod) {
+                  novoItem.preco_g = prod.preco_grama;
+                  novoItem.validade = prod.validade || '';
+              }
+          }
+
+          // Se for bonificado, zera o total. Se for Venda, multiplica fracionamento * preco_g
+          if (campo === 'fracionamento' || campo === 'tipo_venda' || campo === 'insumo') {
+              const gramas = parseFloat(novoItem.fracionamento) || 0;
+              if (novoItem.tipo_venda === 'Bonificado') {
+                  novoItem.preco_total = 0;
+              } else {
+                  novoItem.preco_total = gramas * novoItem.preco_g;
+              }
+          }
+
+          return novoItem;
+      });
+      setItensCotacao(itens);
+  };
+
+  // Recálculo do Total Geral dependendo do tipo de negociação
   useEffect(() => {
+      if (formData.tipo_negociacao === 'cotacao') {
+          const itens = getItensCotacao();
+          const totalCotacao = itens.reduce((acc: number, it: any) => acc + (Number(it.preco_total) || 0), 0);
+          setFormData(prev => prev.valor === String(totalCotacao.toFixed(2)) ? prev : { ...prev, valor: String(totalCotacao.toFixed(2)) });
+      } else {
+          const precoG = parseMoney(formData.valor_g_tabela);
+          const kg = parseMoney(formData.kg_proposto);
+          const vTotal = (precoG * 1000 * kg).toFixed(2); 
+          setFormData(prev => prev.valor === vTotal ? prev : { ...prev, valor: vTotal });
+      }
+  }, [formData.tipo_negociacao, formData.itens_cotacao, formData.valor_g_tabela, formData.kg_proposto]);
+
+  // Regra do produto único para Oportunidades Estratégicas
+  useEffect(() => {
+    if (formData.tipo_negociacao === 'cotacao') return;
     if (!formData.produto) return;
     const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
     
@@ -415,7 +509,6 @@ function PipelineContent() {
                     peso_formula_g: prev.peso_formula_g || produtoSelecionado.peso_formula.toString()
                 };
             }
-            
             return {
                 ...prev,
                 validade_produto: produtoSelecionado.validade || '',
@@ -424,14 +517,8 @@ function PipelineContent() {
             };
         });
     }
-  }, [formData.produto, produtosApi, editingOp]);
+  }, [formData.produto, produtosApi, editingOp, formData.tipo_negociacao]);
 
-  useEffect(() => {
-    const precoG = parseMoney(formData.valor_g_tabela);
-    const kg = parseMoney(formData.kg_proposto);
-    const vTotal = (precoG * 1000 * kg).toFixed(2); 
-    setFormData(prev => prev.valor === vTotal ? prev : { ...prev, valor: vTotal });
-  }, [formData.valor_g_tabela, formData.kg_proposto]);
 
   const buscarDadosCNPJ = async () => {
     const cnpjLimpo = formData.cnpj?.replace(/\D/g, '');
@@ -628,7 +715,7 @@ function PipelineContent() {
   const gerarPropostaIndividualPDF = () => {
     if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
 
-    const doc = new jsPDF();
+    const doc = new jsPDF({ orientation: formData.tipo_negociacao === 'cotacao' ? 'landscape' : 'portrait' });
     const darkGreen = [18, 85, 48]; 
     const lightGreen = [0, 150, 0]; 
     
@@ -636,18 +723,26 @@ function PipelineContent() {
     catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 14, 10, 40, 16); } catch (err) {} }
 
     doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]); 
-    doc.text("PROPOSTA COMERCIAL", 196, 17, { align: "right" });
+    
+    // TÍTULO DINÂMICO
+    const isPedido = formData.status === 'fechado';
+    const tituloDoc = formData.tipo_negociacao === 'cotacao' 
+        ? (isPedido ? "PEDIDO COMERCIAL" : "ORÇAMENTO") 
+        : "PROPOSTA COMERCIAL";
+    
+    const pageWidth = doc.internal.pageSize.width || doc.internal.pageSize.getWidth();
+    doc.text(tituloDoc, pageWidth - 14, 17, { align: "right" });
 
     doc.setFontSize(9); doc.setTextColor(150, 150, 150);
-    doc.text(`Nº ${formatPropostaId(formData.numero_proposta)}`, 196, 22, { align: "right" });
-    doc.text("YellowLeaf – Nutraceuticals Company", 196, 26, { align: "right" });
+    doc.text(`Nº ${formatPropostaId(formData.numero_proposta)}`, pageWidth - 14, 22, { align: "right" });
+    doc.text("YellowLeaf – Nutraceuticals Company", pageWidth - 14, 26, { align: "right" });
 
     doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
     doc.setLineWidth(1.2);
-    doc.line(14, 31, 196, 31);
+    doc.line(14, 31, pageWidth - 14, 31);
 
     doc.setFillColor(248, 249, 250); 
-    doc.rect(14, 35, 182, 23, 'F');
+    doc.rect(14, 35, pageWidth - 28, 23, 'F');
 
     doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
     doc.text("DADOS DO CLIENTE", 18, 41);
@@ -659,110 +754,170 @@ function PipelineContent() {
     doc.text(`Contato: ${contatoPrincipal.nome || 'N/D'}   |   Tel: ${contatoPrincipal.telefone || 'N/D'}`, 18, 52);
     doc.text(`Cidade/UF: ${formData.cidade_exclusividade || '-'} / ${formData.uf_exclusividade || '-'}`, 18, 57);
 
-    const precoGrama = parseMoney(formData.valor_g_tabela);
-    const kgProposto = parseMoney(formData.kg_proposto);
-    const kgBonificado = parseMoney(formData.kg_bonificado);
-    const totalKg = kgProposto + kgBonificado;
-    const investimentoTotal = precoGrama * 1000 * kgProposto;
-    const precoGramaBonificado = totalKg > 0 ? investimentoTotal / (totalKg * 1000) : precoGrama;
-    const parcelas = parseInt(String(formData.parcelas)) || 1;
-    const valorParcela = parcelas > 0 ? investimentoTotal / parcelas : investimentoTotal;
-    const diasPrimeiraParcela = formData.dias_primeira_parcela || '30';
-    
-    const pesoFormula = parseMoney(formData.peso_formula_g) || 13.2;
-    const custoFixo = parseMoney(formData.custo_fixo_operacional) || 0;
-    const fatorLucro = parseMoney(formData.fator_lucro) || 5;
-    
-    const custoMP = precoGramaBonificado * pesoFormula;
-    const custoTotalFormula = custoMP + custoFixo;
-    const sugestaoVenda = (custoMP * fatorLucro) + custoFixo;
-    const qtdFormulasParaPagarParcela = sugestaoVenda > 0 ? (valorParcela / sugestaoVenda) : 0;
-    const viabilidadeDiaria = parseInt(String(diasPrimeiraParcela)) > 0 ? (qtdFormulasParaPagarParcela / parseInt(String(diasPrimeiraParcela))) : 0;
+    let finalY = 69;
 
-    doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 14, 66); 
+    if (formData.tipo_negociacao === 'cotacao') {
+        doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.text("ITENS DA COTAÇÃO", 14, 66); 
 
-    autoTable(doc, {
-        startY: 69,
-        head: [['DESCRIÇÃO', 'VALORES']],
-        body: [
-            ['Ativo/Insumo', formData.produto || 'N/D'],
-            ['Validade do Lote/Ativo', formData.validade_produto || 'Consulte Lote Atual'],
-            ['Preço por grama (g)', formatCurrency(precoGrama)],
-            ['Quantidade da proposta (kg)', `${kgProposto} kg`],
-            ['Quantidade bonificada (kg)', `${kgBonificado} kg`],
-            ['Investimento Total (R$)', formatCurrency(investimentoTotal)],
-            ['Preço do grama c/ bonificação (g)', formatCurrency(precoGramaBonificado)],
-            ['Condição de Pagamento', `${parcelas} parcelas de ${formatCurrency(valorParcela)}`],
-            ['Vencimento 1ª Parcela', `${diasPrimeiraParcela} dias`]
-        ],
-        theme: 'grid',
-        headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
-        styles: { fontSize: 9, cellPadding: 3, textColor: [60, 60, 60] },
-        columnStyles: { 0: { fontStyle: 'normal' }, 1: { fontStyle: 'bold', halign: 'right' } }
-    });
+        const itens = getItensCotacao();
+        const tableBody = itens.map((it: any) => [
+            'Nutracêutico',
+            it.insumo,
+            it.info_adicional || '-',
+            `${it.fracionamento}g`,
+            it.tipo_venda,
+            formatCurrency(it.preco_g),
+            formatCurrency(it.preco_total),
+            it.validade || '-',
+            it.origem || 'China'
+        ]);
 
-    let finalY = (doc as any).lastAutoTable.finalY || 130;
-
-    autoTable(doc, {
-        startY: finalY + 6,
-        head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
-        body: [
-            [`Custo Matéria-Prima (Dose ${pesoFormula}g)`, formatCurrency(custoMP)],
-            ['Custo Total por Fórmula (Manipulado)', formatCurrency(custoTotalFormula)],
-            [`Sugestão de Venda (Fator ${fatorLucro} no Ativo)`, formatCurrency(sugestaoVenda)],
-            ['META DE VIABILIDADE', `${viabilidadeDiaria.toFixed(2).replace('.', ',')} fórmulas/dia`]
-        ],
-        theme: 'grid',
-        headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
-        styles: { fontSize: 9, cellPadding: 3, textColor: [60, 60, 60] },
-        columnStyles: { 0: { fontStyle: 'normal' }, 1: { fontStyle: 'bold', halign: 'right' } },
-        didParseCell: (data) => {
-            if (data.section === 'body' && data.row.index === 3) {
-                data.cell.styles.fontStyle = 'bold';
-                if (data.column.index === 1) data.cell.styles.textColor = lightGreen;
+        autoTable(doc, {
+            startY: 69,
+            head: [['Tipo', 'Insumo', 'Info Adicional', 'Embalagem', 'Classificação', 'Preço(g)', 'Total', 'Validade', 'Origem']],
+            body: tableBody,
+            theme: 'grid',
+            headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
+            styles: { fontSize: 8, cellPadding: 3, textColor: [60, 60, 60] },
+            columnStyles: { 6: { fontStyle: 'bold', textColor: lightGreen } },
+            didParseCell: (data) => {
+                if (data.section === 'body' && data.column.index === 4) { // Classificação
+                    if (data.cell.raw === 'Bonificado') data.cell.styles.textColor = [34, 197, 94];
+                }
             }
+        });
+
+        finalY = (doc as any).lastAutoTable.finalY || 69;
+
+        // TOTAL DA COTAÇÃO
+        doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.text(`TOTAL: ${formatCurrency(formData.valor)}`, pageWidth - 14, finalY + 10, { align: "right" });
+
+        doc.setFontSize(10); doc.setTextColor(80, 80, 80); doc.setFont("helvetica", "normal");
+        
+        if (!isPedido) {
+            doc.text("Pague no cartão de crédito é muito mais facilidade no seu dia a dia.", 14, finalY + 15);
+            finalY += 20;
+        } else {
+            doc.setFont("helvetica", "bold");
+            doc.text("DADOS DE FATURAMENTO E LOGÍSTICA:", 14, finalY + 15);
+            doc.setFont("helvetica", "normal");
+            doc.text(`Condições de Pagamento: ${formData.condicoes_pagamento || '-'}`, 14, finalY + 22);
+            doc.text(`Frete: ${formData.frete_tipo} via ${formData.frete_transportadora} (Prev: ${formData.frete_previsao} dias)`, 14, finalY + 27);
+            finalY += 32;
         }
-    });
 
-    finalY = (doc as any).lastAutoTable.finalY || 165;
+    } else {
+        const precoG = parseMoney(formData.valor_g_tabela);
+        const kg = parseMoney(formData.kg_proposto);
+        const kgBonificado = parseMoney(formData.kg_bonificado);
+        const totalKg = kgProposto + kgBonificado;
+        const investimentoTotal = precoGrama * 1000 * kgProposto;
+        const precoGramaBonificado = totalKg > 0 ? investimentoTotal / (totalKg * 1000) : precoGrama;
+        const parcelas = parseInt(String(formData.parcelas)) || 1;
+        const valorParcela = parcelas > 0 ? investimentoTotal / parcelas : investimentoTotal;
+        const diasPrimeiraParcela = formData.dias_primeira_parcela || '30';
+        
+        const pesoFormula = parseMoney(formData.peso_formula_g) || 13.2;
+        const custoFixo = parseMoney(formData.custo_fixo_operacional) || 0;
+        const fatorLucro = parseMoney(formData.fator_lucro) || 5;
+        
+        const custoMP = precoGramaBonificado * pesoFormula;
+        const custoTotalFormula = custoMP + custoFixo;
+        const sugestaoVenda = (custoMP * fatorLucro) + custoFixo;
+        const qtdFormulasParaPagarParcela = sugestaoVenda > 0 ? (valorParcela / sugestaoVenda) : 0;
+        const viabilidadeDiaria = parseInt(String(diasPrimeiraParcela)) > 0 ? (qtdFormulasParaPagarParcela / parseInt(String(diasPrimeiraParcela))) : 0;
 
+        doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 14, 66); 
+
+        autoTable(doc, {
+            startY: 69,
+            head: [['DESCRIÇÃO', 'VALORES']],
+            body: [
+                ['Ativo/Insumo', formData.produto || 'N/D'],
+                ['Validade do Lote/Ativo', formData.validade_produto || 'Consulte Lote Atual'],
+                ['Preço por grama (g)', formatCurrency(precoGrama)],
+                ['Quantidade da proposta (kg)', `${kgProposto} kg`],
+                ['Quantidade bonificada (kg)', `${kgBonificado} kg`],
+                ['Investimento Total (R$)', formatCurrency(investimentoTotal)],
+                ['Preço do grama c/ bonificação (g)', formatCurrency(precoGramaBonificado)],
+                ['Condição de Pagamento', `${parcelas} parcelas de ${formatCurrency(valorParcela)}`],
+                ['Vencimento 1ª Parcela', `${diasPrimeiraParcela} dias`]
+            ],
+            theme: 'grid',
+            headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
+            styles: { fontSize: 9, cellPadding: 3, textColor: [60, 60, 60] },
+            columnStyles: { 0: { fontStyle: 'normal' }, 1: { fontStyle: 'bold', halign: 'right' } }
+        });
+
+        finalY = (doc as any).lastAutoTable.finalY || 130;
+
+        autoTable(doc, {
+            startY: finalY + 6,
+            head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
+            body: [
+                [`Custo Matéria-Prima (Dose ${pesoFormula}g)`, formatCurrency(custoMP)],
+                ['Custo Total por Fórmula (Manipulado)', formatCurrency(custoTotalFormula)],
+                [`Sugestão de Venda (Fator ${fatorLucro} no Ativo)`, formatCurrency(sugestaoVenda)],
+                ['META DE VIABILIDADE', `${viabilidadeDiaria.toFixed(2).replace('.', ',')} fórmulas/dia`]
+            ],
+            theme: 'grid',
+            headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
+            styles: { fontSize: 9, cellPadding: 3, textColor: [60, 60, 60] },
+            columnStyles: { 0: { fontStyle: 'normal' }, 1: { fontStyle: 'bold', halign: 'right' } },
+            didParseCell: (data) => {
+                if (data.section === 'body' && data.row.index === 3) {
+                    data.cell.styles.fontStyle = 'bold';
+                    if (data.column.index === 1) data.cell.styles.textColor = lightGreen;
+                }
+            }
+        });
+
+        finalY = (doc as any).lastAutoTable.finalY || 165;
+    }
+
+    // RODAPÉ FIXO PARA AMBOS
     doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", 105, finalY + 12, { align: "center" });
+    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", pageWidth / 2, finalY + 12, { align: "center" });
 
     doc.setFontSize(8); doc.setTextColor(100, 100, 100); doc.setFont("helvetica", "normal");
     const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e\npromovemos sua comercialização com responsabilidade e ética.";
-    doc.text(textQualidade, 105, finalY + 17, { align: "center", lineHeightFactor: 1.5 });
+    doc.text(textQualidade, pageWidth / 2, finalY + 17, { align: "center", lineHeightFactor: 1.5 });
 
     let imagemAdicionada = false;
     const logoY = finalY + 23;
     try { 
-        doc.addImage("/selo.jpg", "JPEG", 65, logoY, 80, 16); 
+        doc.addImage("/selo.jpg", "JPEG", (pageWidth / 2) - 40, logoY, 80, 16); 
         imagemAdicionada = true; 
     } catch (e1) {
-        try { doc.addImage("/selo.png", "PNG", 65, logoY, 80, 16); imagemAdicionada = true; } catch (e2) {}
+        try { doc.addImage("/selo.png", "PNG", (pageWidth / 2) - 40, logoY, 80, 16); imagemAdicionada = true; } catch (e2) {}
     }
     
     if (!imagemAdicionada) {
         doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", 105, logoY + 8, { align: "center" });
+        doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", pageWidth / 2, logoY + 8, { align: "center" });
     }
 
     doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.setLineWidth(1); doc.line(14, 275, 196, 275);
+    doc.setLineWidth(1); 
+    const bottomLineY = doc.internal.pageSize.height - 15;
+    doc.line(14, bottomLineY, pageWidth - 14, bottomLineY);
 
     doc.setFontSize(8); doc.setTextColor(150, 150, 150); doc.setFont("helvetica", "normal");
-    doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, 280);
-    doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 14, 284);
+    doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, bottomLineY + 5);
+    doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 14, bottomLineY + 9);
 
     const representante = equipe.find(u => u.id === formData.user_id);
     const responsavelNome = representante?.nome || usuarioLogado?.nome || 'Comercial YellowLeaf';
     const responsavelTel = representante?.telefone || '(44) 99102-7642';
 
-    doc.text(`${responsavelNome} - Comercial YellowLeaf`, 196, 280, { align: "right" });
-    doc.text(`WhatsApp: ${responsavelTel}`, 196, 284, { align: "right" });
+    doc.text(`${responsavelNome} - Comercial YellowLeaf`, pageWidth - 14, bottomLineY + 5, { align: "right" });
+    doc.text(`WhatsApp: ${responsavelTel}`, pageWidth - 14, bottomLineY + 9, { align: "right" });
 
-    doc.save(`Proposta_${formData.nome_cliente.replace(/\s+/g, '_')}_${formatPropostaId(formData.numero_proposta)}.pdf`);
+    const fileNamePrefix = formData.tipo_negociacao === 'cotacao' ? (isPedido ? 'Pedido' : 'Orcamento') : 'Proposta';
+    doc.save(`${fileNamePrefix}_${formData.nome_cliente.replace(/\s+/g, '_')}_${formatPropostaId(formData.numero_proposta)}.pdf`);
   };
 
   const gerarRelatorioGeral = () => {
@@ -778,12 +933,13 @@ function PipelineContent() {
     let dadosOrdenados = [...oportunidades];
     dadosOrdenados.sort((a, b) => (b.numero_proposta || 0) - (a.numero_proposta || 0));
 
-    const headers = ['Nº', 'DATA', 'FARMÁCIA', 'PRODUTO', 'REPRESENTANTE', 'ESTÁGIO', 'VALOR (R$)'];
+    const headers = ['Nº', 'DATA', 'FARMÁCIA', 'PRODUTO/ITENS', 'REPRESENTANTE', 'ESTÁGIO', 'VALOR (R$)'];
     const tableBody = dadosOrdenados.map(op => {
         const responsavelNome = equipe.find(u => u.id === op.user_id)?.nome || 'N/A';
         const dataFormatada = op.data_entrada ? op.data_entrada.split('-').reverse().join('/') : '-';
         const estagioNome = ESTAGIOS.find(e => e.id === op.status)?.label || op.status;
-        const row = [formatPropostaId(op.numero_proposta), dataFormatada, op.nome_cliente, op.produto || '-', responsavelNome, estagioNome, formatCurrency(op.valor)];
+        const descricao = op.tipo_negociacao === 'cotacao' ? 'Cotação Múltipla' : (op.produto || '-');
+        const row = [formatPropostaId(op.numero_proposta), dataFormatada, op.nome_cliente, descricao, responsavelNome, estagioNome, formatCurrency(op.valor)];
         (row as any)._statusId = op.status;
         return row;
     });
@@ -854,7 +1010,14 @@ function PipelineContent() {
         data_entrada: formData.data_entrada || getLocalData(), 
         canal_contato: formData.canal_contato, 
         observacoes: formData.observacoes, 
-        observacoes_proposta: formData.observacoes_proposta 
+        observacoes_proposta: formData.observacoes_proposta,
+        // NOVOS CAMPOS:
+        tipo_negociacao: formData.tipo_negociacao,
+        itens_cotacao: formData.itens_cotacao,
+        frete_tipo: formData.frete_tipo,
+        frete_transportadora: formData.frete_transportadora,
+        frete_previsao: formData.frete_previsao,
+        condicoes_pagamento: formData.condicoes_pagamento
     };
 
     const { data: savedOpData, error } = editingOp 
@@ -965,11 +1128,22 @@ function PipelineContent() {
     }
 
     const nomeResponsavel = equipe.find(u => u.id === op.user_id)?.nome || 'N/A';
+    const tipoLabel = op.tipo_negociacao === 'cotacao' ? 'Cotação Múltipla' : op.produto;
     
     return (
         <div key={op.id} onClick={() => { 
             setEditingOp(op); 
-            setFormData({...formData, ...op, custo_fixo_operacional: op.custo_fixo_operacional || '0'});
+            setFormData(prev => ({
+                ...prev, 
+                ...op, 
+                custo_fixo_operacional: op.custo_fixo_operacional || '0',
+                tipo_negociacao: op.tipo_negociacao || 'estrategica',
+                itens_cotacao: op.itens_cotacao || '[]',
+                frete_tipo: op.frete_tipo || 'CIF',
+                frete_transportadora: op.frete_transportadora || 'Correios',
+                frete_previsao: op.frete_previsao || '',
+                condicoes_pagamento: op.condicoes_pagamento || ''
+            }));
             
             let contatosCarregados = [{
                 nome: op.contato || '',
@@ -1013,7 +1187,9 @@ function PipelineContent() {
             </div>
 
             <div className="flex justify-between items-center py-3 border-y border-slate-100 mb-3">
-                <span className="text-[10px] bg-blue-50 border border-blue-100 text-blue-700 px-2 py-0.5 rounded uppercase tracking-wider font-black truncate max-w-[50%]">{op.produto}</span>
+                <span className={`text-[10px] border px-2 py-0.5 rounded uppercase tracking-wider font-black truncate max-w-[50%] ${op.tipo_negociacao === 'cotacao' ? 'bg-purple-50 border-purple-100 text-purple-700' : 'bg-blue-50 border-blue-100 text-blue-700'}`}>
+                    {tipoLabel}
+                </span>
                 <span className="text-sm font-black text-slate-700">{formatCurrency(op.valor)}</span>
             </div>
             
@@ -1090,7 +1266,7 @@ function PipelineContent() {
                 <button onClick={() => { 
                     setEditingOp(null); 
                     setIsRepLocked(false); 
-                    setFormData({cnpj: '', nome_cliente: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', data_lembrete_sdr: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', endereco: '', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || ''}); 
+                    setFormData({cnpj: '', nome_cliente: '', produto: '', validade_produto: '', aplicacao: '', valor: '', data_entrada: getLocalData(), status: 'prospeccao', data_lembrete: '', data_lembrete_sdr: '', observacoes: '', observacoes_proposta: '', canal_contato: 'WhatsApp', kg_proposto: '1', kg_bonificado: '0', parcelas: '1', dias_primeira_parcela: '45', peso_formula_g: '13.2', fator_lucro: '5', custo_fixo_operacional: '0', endereco: '', cidade_exclusividade: '', uf_exclusividade: '', valor_g_tabela: '0', numero_proposta: 0, user_id: usuarioLogado?.id || '', tipo_negociacao: 'estrategica', itens_cotacao: '[]', frete_tipo: 'CIF', frete_transportadora: 'Correios', frete_previsao: '', condicoes_pagamento: ''}); 
                     setContatosList([{ nome: '', cargo: 'Comprador(a)', telefone: '', email: '' }]); 
                     setNovaNotaInput(""); 
                     setChatInput("");
@@ -1241,31 +1417,145 @@ function PipelineContent() {
                       <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-black text-xs md:text-sm">2</div>
                       <h3 className="text-xs md:text-sm font-black text-slate-800 uppercase tracking-widest">Produto e Precificação</h3>
                   </div>
-                  <div className="md:col-span-2">
-                      <label className="text-xs font-bold text-slate-700 mb-1.5 flex justify-between">Ativo a Negociar <Loader2 size={12} className={loadingProdutos ? "animate-spin text-blue-500" : "hidden"}/></label>
-                      <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold disabled:opacity-50 outline-none shadow-sm cursor-pointer" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})} disabled={loadingProdutos}>
-                          <option value="">Selecione...</option>
-                          {produtosDisponiveis.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}
-                      </select>
-                  </div>
-                  <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Validade do Ativo</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm text-slate-500" value={formData.validade_produto} onChange={e => setFormData({...formData, validade_produto: e.target.value})} placeholder="Mês/Ano ou Lote" /></div>
-                  
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:col-span-4">
-                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Preço/g (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-black text-emerald-700 outline-none shadow-sm" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} /></div>
-                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Proposto</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
-                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Bonificado</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
-                      <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Parcelas</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
-                  </div>
-                  <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Dias para 1ª Parcela</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
 
-                  <div className="md:col-span-4 border-t border-slate-200 my-2 md:my-4 pt-4">
-                      <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Variáveis do Payback (Para o PDF)</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Peso da Fórmula (g)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.peso_formula_g} onChange={e => setFormData({...formData, peso_formula_g: e.target.value})}/></div>
-                          <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Fator de Lucro</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.fator_lucro} onChange={e => setFormData({...formData, fator_lucro: e.target.value})}/></div>
-                          <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Custo Fixo / Fórm. (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.custo_fixo_operacional} onChange={e => setFormData({...formData, custo_fixo_operacional: e.target.value})}/></div>
-                      </div>
+                  {/* NOVO: CHAVE TIPO DE NEGOCIAÇÃO */}
+                  <div className="md:col-span-4 bg-slate-100 p-1.5 rounded-xl flex">
+                      <button 
+                         type="button"
+                         onClick={() => setFormData({...formData, tipo_negociacao: 'estrategica'})}
+                         className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${formData.tipo_negociacao === 'estrategica' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                         Proposta Estratégica (Exclusividade)
+                      </button>
+                      <button 
+                         type="button"
+                         onClick={() => setFormData({...formData, tipo_negociacao: 'cotacao'})}
+                         className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${formData.tipo_negociacao === 'cotacao' ? 'bg-white text-purple-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                         Cotação Padrão (Múltiplos Itens)
+                      </button>
                   </div>
+
+                  {/* RENDERIZAÇÃO CONDICIONAL BASEADA NO TIPO */}
+                  {formData.tipo_negociacao === 'estrategica' ? (
+                      <>
+                          {/* CAMPOS ANTIGOS DA ESTRATÉGICA */}
+                          <div className="md:col-span-2">
+                              <label className="text-xs font-bold text-slate-700 mb-1.5 flex justify-between">Ativo a Negociar <Loader2 size={12} className={loadingProdutos ? "animate-spin text-blue-500" : "hidden"}/></label>
+                              <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold disabled:opacity-50 outline-none shadow-sm cursor-pointer" value={formData.produto} onChange={e => setFormData({...formData, produto: e.target.value})} disabled={loadingProdutos}>
+                                  <option value="">Selecione...</option>
+                                  {produtosDisponiveis.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}
+                              </select>
+                          </div>
+                          <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Validade do Ativo</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm text-slate-500" value={formData.validade_produto} onChange={e => setFormData({...formData, validade_produto: e.target.value})} placeholder="Mês/Ano ou Lote" /></div>
+                          
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:col-span-4">
+                              <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Preço/g (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-black text-emerald-700 outline-none shadow-sm" value={formData.valor_g_tabela} onChange={e => setFormData({...formData, valor_g_tabela: e.target.value})} /></div>
+                              <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Proposto</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_proposto} onChange={e => setFormData({...formData, kg_proposto: e.target.value})}/></div>
+                              <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Bonificado</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
+                              <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Parcelas</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
+                          </div>
+                          <div className="md:col-span-2"><label className="text-xs font-bold text-slate-700 mb-1.5 block">Dias para 1ª Parcela</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/></div>
+
+                          <div className="md:col-span-4 border-t border-slate-200 my-2 md:my-4 pt-4">
+                              <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Variáveis do Payback (Para o PDF)</h4>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                  <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Peso da Fórmula (g)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.peso_formula_g} onChange={e => setFormData({...formData, peso_formula_g: e.target.value})}/></div>
+                                  <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Fator de Lucro</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.fator_lucro} onChange={e => setFormData({...formData, fator_lucro: e.target.value})}/></div>
+                                  <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Custo Fixo / Fórm. (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold outline-none shadow-sm" value={formData.custo_fixo_operacional} onChange={e => setFormData({...formData, custo_fixo_operacional: e.target.value})}/></div>
+                              </div>
+                          </div>
+                      </>
+                  ) : (
+                      <>
+                          {/* NOVOS CAMPOS DA COTAÇÃO PADRÃO */}
+                          <div className="md:col-span-4 bg-slate-50 border border-slate-200 p-4 rounded-xl shadow-sm">
+                              <div className="flex justify-between items-center mb-4 border-b border-slate-200 pb-3">
+                                 <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1"><Package size={14}/> Itens da Cotação</h4>
+                                 <button type="button" onClick={adicionarItemCotacao} className="text-xs font-bold text-purple-700 bg-purple-50 border border-purple-200 hover:bg-purple-100 px-3 py-1.5 rounded-lg flex items-center gap-1 transition">
+                                     <ListPlus size={14}/> Adicionar Insumo
+                                 </button>
+                              </div>
+
+                              <div className="space-y-3">
+                                  {getItensCotacao().length === 0 ? (
+                                      <p className="text-xs text-slate-400 italic text-center py-4">Nenhum insumo adicionado à cotação.</p>
+                                  ) : (
+                                      getItensCotacao().map((item: any, idx: number) => (
+                                          <div key={item.id} className="grid grid-cols-12 gap-3 bg-white p-3 rounded-lg border border-slate-200 relative items-end">
+                                              
+                                              <button type="button" onClick={() => removerItemCotacao(item.id)} className="absolute -top-2 -right-2 bg-red-100 text-red-600 hover:bg-red-500 hover:text-white rounded-full p-1 shadow-sm transition"><X size={12}/></button>
+
+                                              <div className="col-span-12 md:col-span-3">
+                                                  <label className="text-[10px] font-bold text-slate-500 block mb-1">Insumo</label>
+                                                  <select className="w-full border border-slate-200 rounded p-2 text-xs font-bold text-slate-700 outline-none focus:border-purple-500" value={item.insumo} onChange={e => atualizarItemCotacao(item.id, 'insumo', e.target.value)}>
+                                                      <option value="">Selecione...</option>
+                                                      {produtosDisponiveis.map(p => <option key={p.ativo} value={p.ativo}>{p.ativo}</option>)}
+                                                  </select>
+                                              </div>
+
+                                              <div className="col-span-12 md:col-span-2">
+                                                  <label className="text-[10px] font-bold text-slate-500 block mb-1">Fracionamento (g)</label>
+                                                  <input type="number" placeholder="Ex: 500" className="w-full border border-slate-200 rounded p-2 text-xs font-bold text-slate-700 outline-none focus:border-purple-500" value={item.fracionamento} onChange={e => atualizarItemCotacao(item.id, 'fracionamento', e.target.value)} />
+                                              </div>
+
+                                              <div className="col-span-6 md:col-span-2">
+                                                  <label className="text-[10px] font-bold text-slate-500 block mb-1">Tipo</label>
+                                                  <select className={`w-full border rounded p-2 text-xs font-bold outline-none ${item.tipo_venda === 'Bonificado' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-white border-slate-200 text-slate-700 focus:border-purple-500'}`} value={item.tipo_venda} onChange={e => atualizarItemCotacao(item.id, 'tipo_venda', e.target.value)}>
+                                                      <option value="Venda">Venda</option>
+                                                      <option value="Bonificado">Bonificado</option>
+                                                  </select>
+                                              </div>
+
+                                              <div className="col-span-6 md:col-span-1">
+                                                  <label className="text-[10px] font-bold text-slate-500 block mb-1" title="Puxado da Planilha">Preço/g</label>
+                                                  <input type="text" readOnly className="w-full bg-slate-50 border border-slate-100 rounded p-2 text-xs font-mono text-slate-500 outline-none" value={formatCurrency(item.preco_g)} />
+                                              </div>
+
+                                              <div className="col-span-12 md:col-span-2">
+                                                  <label className="text-[10px] font-bold text-slate-500 block mb-1">Info Adicional</label>
+                                                  <input type="text" placeholder="..." className="w-full border border-slate-200 rounded p-2 text-xs font-medium text-slate-700 outline-none focus:border-purple-500" value={item.info_adicional} onChange={e => atualizarItemCotacao(item.id, 'info_adicional', e.target.value)} />
+                                              </div>
+
+                                              <div className="col-span-12 md:col-span-2">
+                                                  <label className="text-[10px] font-black text-slate-700 block mb-1 text-right">Total Linha</label>
+                                                  <div className={`w-full p-2 rounded text-xs font-black text-right border ${item.tipo_venda === 'Bonificado' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-slate-100 text-slate-800 border-slate-200'}`}>
+                                                      {formatCurrency(item.preco_total)}
+                                                  </div>
+                                              </div>
+                                          </div>
+                                      ))
+                                  )}
+                              </div>
+                          </div>
+
+                          <div className="md:col-span-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+                              <div>
+                                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Frete (Tipo)</label>
+                                  <select className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-700 outline-none shadow-sm" value={formData.frete_tipo} onChange={e => setFormData({...formData, frete_tipo: e.target.value})}>
+                                      <option value="CIF">CIF (Pago pela Yellow)</option>
+                                      <option value="FOB">FOB (Pago pelo Cliente)</option>
+                                  </select>
+                              </div>
+                              <div>
+                                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Transportadora</label>
+                                  <select className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-700 outline-none shadow-sm" value={formData.frete_transportadora} onChange={e => setFormData({...formData, frete_transportadora: e.target.value})}>
+                                      <option value="Correios">Correios</option>
+                                      <option value="Quality">Quality</option>
+                                      <option value="Braspress">Braspress</option>
+                                  </select>
+                              </div>
+                              <div>
+                                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Previsão (Dias)</label>
+                                  <input type="text" placeholder="Ex: 10 dias úteis" className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-700 outline-none shadow-sm" value={formData.frete_previsao} onChange={e => setFormData({...formData, frete_previsao: e.target.value})} />
+                              </div>
+                              <div>
+                                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Condições Pagamento</label>
+                                  <input type="text" placeholder="Ex: 30/60/90, Boleto..." className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-700 outline-none shadow-sm" value={formData.condicoes_pagamento} onChange={e => setFormData({...formData, condicoes_pagamento: e.target.value})} />
+                              </div>
+                          </div>
+                      </>
+                  )}
 
                   <div className="md:col-span-4 bg-slate-800 p-4 rounded-2xl flex items-center justify-between text-white mt-2 shadow-lg">
                       <span className="text-xs font-black uppercase tracking-widest text-slate-300">Total Proposta</span>
@@ -1291,38 +1581,23 @@ function PipelineContent() {
                       <select className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-medium outline-none shadow-sm cursor-pointer" value={formData.canal_contato} onChange={e => setFormData({...formData, canal_contato: e.target.value})}>{CANAIS_CONTATO.map(c => <option key={c} value={c}>{c}</option>)}</select>
                   </div>
 
-                  {/* BLOCO ORIGINAL RESTAURADO EXATAMENTE COMO PEDIDO */}
-                  <div className="md:col-span-4 space-y-3 mt-4">
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2">
-                          <MessageSquare size={14}/> Nova Anotação
-                      </label>
-                      
-                      <div className="flex flex-col gap-2 bg-blue-50/50 p-3 border border-blue-100 rounded-2xl">
+                  {/* RESTAURANDO O HISTÓRICO ANTIGO AQUI (Visível Apenas se Existir) */}
+                  {formData.observacoes && formData.observacoes.trim() !== "" && (
+                      <div className="md:col-span-4 mt-6 p-4 bg-slate-100/50 border border-slate-200 rounded-2xl shadow-inner">
+                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-2">
+                              <History size={14}/> Histórico de Anotações (Legado)
+                          </label>
                           <textarea 
-                              className="w-full bg-white border border-slate-200 focus:border-blue-500 rounded-xl p-3 outline-none text-sm text-slate-700 font-medium shadow-sm transition resize-none min-h-[80px] custom-scrollbar" 
-                              placeholder="Escreva sua anotação aqui... (Use a tecla 'Enter' para pular linhas e formatar o texto livremente)" 
-                              value={novaNotaInput} 
-                              onChange={(e) => setNovaNotaInput(e.target.value)} 
+                              className="w-full bg-transparent resize-none text-xs text-slate-700 font-mono leading-relaxed outline-none h-40 custom-scrollbar" 
+                              value={formData.observacoes} 
+                              readOnly 
                           />
-                          <button type="button" onClick={adicionarNotaAoHistorico} className="self-end bg-blue-600 text-white px-5 py-2.5 rounded-xl hover:bg-blue-700 transition font-bold shadow-md active:scale-95 flex items-center gap-2 text-xs">
-                              <Send size={14}/> Registrar no Histórico
-                          </button>
                       </div>
-
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mt-4 mb-2">
-                          <History size={14}/> Histórico Imutável
-                      </label>
-                      <textarea 
-                          className="w-full bg-slate-100 border border-slate-200 rounded-xl p-4 h-48 resize-none text-xs text-slate-700 font-mono leading-relaxed shadow-inner outline-none custom-scrollbar" 
-                          value={formData.observacoes} 
-                          readOnly 
-                          placeholder="Todo o histórico de conversas será registrado aqui com data e hora e não poderá ser alterado..."
-                      />
-                  </div>
+                  )}
 
               </div>
 
-              {/* LADO DIREITO (Chat Novo) */}
+              {/* LADO DIREITO (Chat e Histórico Novo) */}
               <div className="lg:col-span-4 flex flex-col h-[500px] lg:h-full min-h-[400px] bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                   <div className="bg-slate-100 p-3 border-b border-slate-200 shrink-0">
                       <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
@@ -1370,8 +1645,9 @@ function PipelineContent() {
                       
                       <div className="relative">
                           <textarea 
-                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl p-3 pr-12 text-sm text-slate-700 font-medium outline-none resize-none min-h-[80px] transition custom-scrollbar"
-                              placeholder="Digite sua mensagem... (Use @ para marcar a equipe)"
+                              disabled={!editingOp}
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 rounded-xl p-3 pr-12 text-sm text-slate-700 font-medium outline-none resize-none min-h-[80px] transition custom-scrollbar disabled:opacity-50"
+                              placeholder={editingOp ? "Digite sua mensagem... (Use @ para marcar)" : "Salve a oportunidade primeiro."}
                               value={chatInput}
                               onChange={handleChatInputChange}
                               onKeyDown={(e) => {
@@ -1382,7 +1658,7 @@ function PipelineContent() {
                               }}
                           />
                           <button 
-                              disabled={!chatInput.trim()}
+                              disabled={!editingOp || !chatInput.trim()}
                               onClick={enviarMensagemChat} 
                               className="absolute bottom-3 right-3 w-8 h-8 bg-blue-600 text-white rounded-lg flex items-center justify-center hover:bg-blue-700 transition disabled:opacity-50 shadow-sm"
                           >
