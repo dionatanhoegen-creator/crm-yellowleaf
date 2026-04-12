@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, Suspense, useRef } from 'react';
 import { createPortal } from 'react-dom'; 
 import { useSearchParams, useRouter } from 'next/navigation';
 import { 
@@ -12,6 +12,10 @@ import {
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
+import dynamic from 'next/dynamic';
+const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
+import 'react-quill-new/dist/quill.snow.css';
 
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 const API_CLIENTES_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
@@ -247,7 +251,7 @@ function PipelineContent() {
     } catch (e) {}
   };
 
-  // INTELIGÊNCIA: Agrupando produtos e seus respectivos fracionamentos
+  // INTELIGÊNCIA: Agrupando produtos e seus respectivos fracionamentos com base nas colunas 100G, 250G, 1000G, etc.
   const carregarProdutosDaAPI = async () => {
     setLoadingProdutos(true);
     try {
@@ -258,28 +262,47 @@ function PipelineContent() {
             
             json.data.forEach((p: any) => {
                 let ativo = p.ativo ? p.ativo.trim() : 'Sem Nome';
-                let preco_grama = parseMoney(p.preco_grama);
+                let preco_grama = parseMoney(p.preco_grama || p['preço/grama'] || p.Preco);
                 let validadeBruta = p.validade || p.data_validade || p.vencimento || p['validade do ativo'] || p['Validade'] || '';
                 let validade = formatarDataPlanilha(validadeBruta);
-                let fracionamento = String(p.fracionamento || p.embalagem || p.peso || p.tamanho || '1000g').trim();
                 let peso_formula = parseMoney(p.peso_formula) || 13.2;
 
                 if (!mapProdutos.has(ativo)) {
                     mapProdutos.set(ativo, { 
                         ativo, 
-                        preco_grama, // Guarda o preço base para a proposta estratégica
+                        preco_grama, // Preço base para estratégia
                         peso_formula,
                         validade_base: validade,
                         opcoes: [] 
                     });
                 }
                 
-                // Adiciona o fracionamento na lista daquele insumo
-                mapProdutos.get(ativo).opcoes.push({
-                    fracionamento,
-                    preco_grama,
-                    validade
+                // Mapeamento dinâmico das colunas da planilha (100G, 250G, 500G, 1000G, 2500G)
+                const pacotesDisponiveis = ['100G', '250G', '500G', '1000G', '2500G'];
+                pacotesDisponiveis.forEach(pacoteStr => {
+                    const keyLower = pacoteStr.toLowerCase();
+                    const qty = p[pacoteStr] !== undefined ? p[pacoteStr] : (p[keyLower] !== undefined ? p[keyLower] : null);
+                    
+                    if (qty !== null && qty !== '') {
+                        mapProdutos.get(ativo).opcoes.push({
+                            fracionamento: pacoteStr.replace('G', 'g'), // Exibe bonitinho "250g" em vez de "250G"
+                            estoque: parseInt(qty) || 0,
+                            preco_grama: preco_grama,
+                            validade: validade
+                        });
+                    }
                 });
+
+                // Fallback caso a linha não tenha nenhuma das colunas (para não quebrar produtos antigos)
+                if (mapProdutos.get(ativo).opcoes.length === 0) {
+                    let fracionamentoAntigo = String(p.fracionamento || p.embalagem || p.peso || p.tamanho || '1000g').trim();
+                    mapProdutos.get(ativo).opcoes.push({
+                        fracionamento: fracionamentoAntigo,
+                        estoque: 99, 
+                        preco_grama: preco_grama,
+                        validade: validade
+                    });
+                }
             });
 
             const produtosAgrupados = Array.from(mapProdutos.values()).sort((a: any, b: any) => a.ativo.localeCompare(b.ativo));
@@ -350,13 +373,19 @@ function PipelineContent() {
           if (it.id !== id) return it;
           let novoItem = { ...it, [campo]: valor };
 
-          // Se trocou o insumo, pega a primeira opção de embalagem como padrão
+          // Se editou manualmente o preço/g
+          if (campo === 'preco_g') {
+              novoItem.preco_g = parseFloat(valor) || 0;
+          }
+
+          // Se trocou o insumo, pega a primeira opção de embalagem COM ESTOQUE como padrão
           if (campo === 'insumo') {
               const prod = produtosApi.find(p => p.ativo === valor);
               if (prod && prod.opcoes.length > 0) {
-                  novoItem.fracionamento = prod.opcoes[0].fracionamento;
-                  novoItem.preco_g = prod.opcoes[0].preco_grama;
-                  novoItem.validade = prod.opcoes[0].validade;
+                  const opComEstoque = prod.opcoes.find((o: any) => o.estoque > 0) || prod.opcoes[0];
+                  novoItem.fracionamento = opComEstoque.fracionamento;
+                  novoItem.preco_g = opComEstoque.preco_grama;
+                  novoItem.validade = opComEstoque.validade;
               } else {
                   novoItem.fracionamento = '';
                   novoItem.preco_g = 0;
@@ -364,7 +393,7 @@ function PipelineContent() {
               }
           }
 
-          // Se trocou o fracionamento específico, atualiza o preço e validade daquela embalagem
+          // Se trocou o fracionamento específico, atualiza o preço e validade daquela embalagem do Google
           if (campo === 'fracionamento') {
               const prod = produtosApi.find(p => p.ativo === novoItem.insumo);
               if (prod) {
@@ -377,8 +406,8 @@ function PipelineContent() {
           }
 
           // Recalcula o total da linha
-          if (campo === 'fracionamento' || campo === 'tipo_venda' || campo === 'insumo') {
-              const numStr = String(novoItem.fracionamento).replace(/\D/g, ''); // Tira o "g" ou "kg" para fazer a conta
+          if (campo === 'fracionamento' || campo === 'tipo_venda' || campo === 'insumo' || campo === 'preco_g') {
+              const numStr = String(novoItem.fracionamento).replace(/\D/g, ''); // Tira letras para fazer a conta
               const gramas = parseFloat(numStr) || 0;
               if (novoItem.tipo_venda === 'Bonificado') {
                   novoItem.preco_total = 0;
@@ -660,7 +689,6 @@ function PipelineContent() {
 
     const contatoPrincipal = contatosList[0] || { nome: '', telefone: '' };
     
-    // NOVO: ENDEREÇO COMPLETO NO PDF
     const enderecoFormatadoPDF = `${formData.endereco || 'N/D'} - ${formData.cidade_exclusividade || ''} / ${formData.uf_exclusividade || ''}`;
 
     doc.setFontSize(9); doc.setTextColor(80, 80, 80); doc.setFont("helvetica", "normal");
@@ -691,7 +719,7 @@ function PipelineContent() {
             body: tableBody,
             theme: 'grid',
             headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
-            styles: { fontSize: 7, cellPadding: 2, textColor: [60, 60, 60] }, // Fonte um pouco menor para caber em Retrato
+            styles: { fontSize: 7, cellPadding: 2, textColor: [60, 60, 60] }, 
             columnStyles: { 5: { fontStyle: 'bold', textColor: lightGreen } },
             didParseCell: (data) => {
                 if (data.section === 'body' && data.column.index === 3) { 
@@ -714,7 +742,7 @@ function PipelineContent() {
             finalY += 15;
         }
 
-        // NOVO: LOGÍSTICA SEMPRE VISÍVEL
+        // LOGÍSTICA SEMPRE VISÍVEL
         doc.setFont("helvetica", "bold");
         doc.text("DADOS DE FATURAMENTO E LOGÍSTICA:", 14, finalY);
         doc.setFont("helvetica", "normal");
@@ -724,7 +752,7 @@ function PipelineContent() {
         
         finalY += 27;
 
-        // NOVO: OBSERVAÇÕES
+        // OBSERVAÇÕES NO PDF
         if (formData.observacoes_proposta && formData.observacoes_proposta.trim() !== '') {
             doc.setFont("helvetica", "bold");
             doc.text("OBSERVAÇÕES:", 14, finalY);
@@ -1398,9 +1426,16 @@ function PipelineContent() {
                                                   <select className="w-full border border-slate-200 rounded p-2 text-xs font-bold text-slate-700 outline-none focus:border-purple-500 disabled:bg-slate-50 disabled:text-slate-400" value={item.fracionamento} onChange={e => atualizarItemCotacao(item.id, 'fracionamento', e.target.value)} disabled={!item.insumo}>
                                                       <option value="">Selecione...</option>
                                                       {produtoDaLinha && produtoDaLinha.opcoes.map((op: any, index: number) => (
-                                                          <option key={op.fracionamento + index} value={op.fracionamento}>{op.fracionamento}</option>
+                                                          <option key={op.fracionamento + index} value={op.fracionamento} disabled={op.estoque <= 0}>
+                                                              {op.fracionamento} {op.estoque <= 0 ? '(Sem Estoque)' : ''}
+                                                          </option>
                                                       ))}
                                                   </select>
+                                                  {produtoDaLinha && item.fracionamento && (
+                                                      <span className="text-[9px] text-blue-600 font-black mt-1 block">
+                                                          Estoque: {produtoDaLinha.opcoes.find((o: any) => o.fracionamento === item.fracionamento)?.estoque || 0} pct(s)
+                                                      </span>
+                                                  )}
                                               </div>
 
                                               <div className="col-span-6 md:col-span-2">
@@ -1412,8 +1447,14 @@ function PipelineContent() {
                                               </div>
 
                                               <div className="col-span-6 md:col-span-1">
-                                                  <label className="text-[10px] font-bold text-slate-500 block mb-1" title="Puxado da Planilha">Preço/g</label>
-                                                  <input type="text" readOnly className="w-full bg-slate-50 border border-slate-100 rounded p-2 text-xs font-mono text-slate-500 outline-none" value={formatCurrency(item.preco_g)} />
+                                                  <label className="text-[10px] font-bold text-slate-500 block mb-1" title="Puxado da Planilha">Preço/g (Editável)</label>
+                                                  <input 
+                                                      type="number" 
+                                                      step="0.001"
+                                                      className="w-full bg-white border border-slate-200 rounded p-2 text-xs font-mono text-slate-700 outline-none focus:border-purple-500" 
+                                                      value={item.preco_g} 
+                                                      onChange={e => atualizarItemCotacao(item.id, 'preco_g', e.target.value)} 
+                                                  />
                                               </div>
 
                                               <div className="col-span-12 md:col-span-2">
@@ -1423,7 +1464,7 @@ function PipelineContent() {
 
                                               <div className="col-span-12 md:col-span-2">
                                                   <label className="text-[10px] font-black text-slate-700 block mb-1 text-right">Total Linha</label>
-                                                  <div className={`w-full p-2 rounded text-xs font-black text-right border ${item.tipo_venda === 'Bonificado' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-slate-100 text-slate-800 border-slate-200'}`}>
+                                                  <div className={`w-full p-2 rounded text-xs font-black text-right border h-[34px] flex items-center justify-end ${item.tipo_venda === 'Bonificado' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-slate-100 text-slate-800 border-slate-200'}`}>
                                                       {formatCurrency(item.preco_total)}
                                                   </div>
                                               </div>
