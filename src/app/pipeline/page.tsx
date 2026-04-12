@@ -275,30 +275,31 @@ function PipelineContent() {
                     });
                 }
                 
-                const pacotesBase = [10, 30, 50, 100, 250, 500, 1000, 2500, 5000];
+                const embalagensPadrao = [
+                    { chave: 'estoque_10g', label: '10g' },
+                    { chave: 'estoque_30g', label: '30g' },
+                    { chave: 'estoque_50g', label: '50g' },
+                    { chave: 'estoque_100g', label: '100g' },
+                    { chave: 'estoque_250g', label: '250g' },
+                    { chave: 'estoque_500g', label: '500g' },
+                    { chave: 'estoque_1000g', label: '1000g' },
+                    { chave: 'estoque_2500g', label: '2500g' },
+                    { chave: 'estoque_5000g', label: '5000g' }
+                ];
 
                 let achouFracionamento = false;
 
-                Object.keys(p).forEach(key => {
-                    const cleanKey = String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
-
-                    pacotesBase.forEach(gramatura => {
-                        if (cleanKey === `${gramatura}g` || cleanKey === String(gramatura)) {
-                            const qty = p[key];
-                            if (qty !== null && qty !== undefined && String(qty).trim() !== '') {
-                                const jaExiste = mapProdutos.get(ativo).opcoes.find((o: any) => o.fracionamento === `${gramatura}g`);
-                                if (!jaExiste) {
-                                    mapProdutos.get(ativo).opcoes.push({
-                                        fracionamento: `${gramatura}g`,
-                                        estoque: parseInt(qty) || 0,
-                                        preco_grama: preco_grama,
-                                        validade: validade
-                                    });
-                                }
-                                achouFracionamento = true;
-                            }
-                        }
-                    });
+                embalagensPadrao.forEach(emb => {
+                    const qty = p[emb.chave];
+                    if (qty !== undefined && qty !== null && String(qty).trim() !== '') {
+                        mapProdutos.get(ativo).opcoes.push({
+                            fracionamento: emb.label,
+                            estoque: parseInt(qty) || 0,
+                            preco_grama: preco_grama,
+                            validade: validade
+                        });
+                        achouFracionamento = true;
+                    }
                 });
 
                 if (!achouFracionamento) {
@@ -312,10 +313,6 @@ function PipelineContent() {
             });
 
             const produtosAgrupados = Array.from(mapProdutos.values()).sort((a: any, b: any) => a.ativo.localeCompare(b.ativo));
-            produtosAgrupados.forEach(prod => {
-                prod.opcoes.sort((a: any, b: any) => parseInt(a.fracionamento) - parseInt(b.fracionamento));
-            });
-            
             setProdutosApi(produtosAgrupados);
         }
     } catch (e) {}
@@ -446,7 +443,6 @@ function PipelineContent() {
     if (formData.tipo_negociacao === 'cotacao') return;
     if (!formData.produto) return;
     const produtoSelecionado = produtosApi.find(p => p.ativo === formData.produto);
-    
     if (produtoSelecionado) {
         setFormData(prev => {
             if (editingOp && editingOp.produto === prev.produto) {
@@ -653,9 +649,7 @@ function PipelineContent() {
     if (!novaNotaInput.trim()) return;
     const dataHora = new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     const autor = usuarioLogado?.nome ? usuarioLogado.nome.split(' ')[0] : 'Usuário';
-    
     const notaFormatada = `📅 ${dataHora} | 👤 ${autor}\n${novaNotaInput}\n────────────────────────────────────────\n${formData.observacoes || ''}`;
-    
     setFormData({ ...formData, observacoes: notaFormatada });
     setNovaNotaInput(""); 
   };
@@ -756,33 +750,36 @@ function PipelineContent() {
 
         finalY += 18;
 
-        // NOVO: CONDIÇÕES COMERCIAIS (TÓPICOS IGUAL AO SISTEMA)
+        // NOVO: CONDIÇÕES COMERCIAIS (TÓPICOS IGUAL AO SISTEMA ALINHADOS)
         doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("CONDIÇÕES COMERCIAIS E LOGÍSTICA", 14, finalY);
+        doc.text("CONDIÇÕES COMERCIAIS:", 14, finalY);
         
         doc.setFontSize(9);
         
-        doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
-        doc.text("PAGAMENTO:", 14, finalY + 7);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
-        doc.text(`${formData.condicoes_pagamento || 'A combinar'}`, 40, finalY + 7);
+        const drawRow = (label: string, value: string, y: number) => {
+            doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
+            doc.text(label, 14, y);
+            const labelWidth = doc.getTextWidth(label);
+            doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+            doc.text(` ${value}`, 14 + labelWidth, y);
+        };
 
-        doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
-        doc.text("TRANSPORTADORA:", 14, finalY + 12);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
-        doc.text(`${formData.frete_transportadora || '-'}`, 53, finalY + 12);
+        drawRow("PAGAMENTO:", formData.condicoes_pagamento || 'A combinar', finalY + 7);
+        drawRow("TRANSPORTADORA:", formData.frete_transportadora || '-', finalY + 12);
 
-        doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
-        doc.text("PRAZO DE ENTREGA:", 14, finalY + 17);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
-        const prazoStr = formData.frete_previsao && formData.frete_previsao.trim() !== '' ? `${formData.frete_previsao} dias` : 'A combinar';
-        doc.text(`Postagem + ${prazoStr} após confirmação.`, 53, finalY + 17);
+        const pDias = formData.frete_previsao ? formData.frete_previsao.trim() : '';
+        let prazoStr = 'A combinar';
+        if (pDias) {
+            if (pDias.toLowerCase().includes('dia')) {
+                prazoStr = pDias;
+            } else {
+                prazoStr = pDias === '1' ? '1 dia' : `${pDias} dias`;
+            }
+        }
+        drawRow("PRAZO DE ENTREGA:", `Postagem + ${prazoStr} após confirmação.`, finalY + 17);
 
-        doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
-        doc.text("FRETE:", 14, finalY + 22);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
         const freteTexto = formData.frete_tipo === 'CIF' ? 'CIF - Por conta da YellowLeaf' : (formData.frete_tipo === 'FOB' ? 'FOB - Por conta do Cliente' : '-');
-        doc.text(freteTexto, 28, finalY + 22);
+        drawRow("FRETE:", freteTexto, finalY + 22);
         
         finalY += 32;
 
