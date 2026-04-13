@@ -53,23 +53,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   };
 
   useEffect(() => {
-    // --- TRUQUE DE MESTRE: INJEÇÃO FORÇADA DO PWA ---
-    // Obriga o navegador a ler o manifest e acionar o botão de "Instalar App"
-    if (typeof window !== 'undefined') {
-        if (!document.querySelector('link[rel="manifest"]')) {
-            const link = document.createElement('link');
-            link.rel = 'manifest';
-            link.href = '/manifest.json';
-            document.head.appendChild(link);
-        }
-        
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js')
-              .then(() => console.log('Robô PWA ativado com sucesso!'))
-              .catch((err) => console.log('Erro no robô PWA', err));
-        }
+    // Liga o Robô do PWA silenciosamente
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch((err) => console.log('Erro no SW', err));
     }
-    // ------------------------------------------------
 
     let intervalId: NodeJS.Timeout;
 
@@ -160,9 +147,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     return (
       <html lang="pt-br">
         <head>
-          <link rel="manifest" href="/manifest.json" />
+          <link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjoiWWVsbG93TGVhZiBDUk0iLCJzaG9ydF9uYW1lIjoiWWVsbG93TGVhZiIsInN0YXJ0X3VybCI6Ii8iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsImJhY2tncm91bmRfY29sb3ciOiIjZmZmZmZmIiwidGhlbWVfY29sb3ciOiIjMGYzOTJiIiwiaWNvbnMiOlt7InNyYyI6Ii9pY29uLTE5MngxOTIucG5nIiwic2l6ZXMiOiIxOTJ4MTkyIiwidHlwZSI6ImltYWdlL3BuZyJ9LHsic3JjIjoiL2ljb24tNTEyeDUxMi5wbmciLCJzaXplcyI6IjUxMng1MTIiLCJ0eXBlIjoiaW1hZ2UvcG5nIn1dfQ==" />
           <meta name="theme-color" content="#0f392b" />
-          <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+          <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+          <meta name="mobile-web-app-capable" content="yes" />
+          <meta name="apple-mobile-web-app-capable" content="yes" />
         </head>
         <body className={`${outfit.className} bg-slate-50 text-slate-700`}>
           {children}
@@ -183,9 +172,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pt-br">
       <head>
-        <link rel="manifest" href="/manifest.json" />
+        <link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjoiWWVsbG93TGVhZiBDUk0iLCJzaG9ydF9uYW1lIjoiWWVsbG93TGVhZiIsInN0YXJ0X3VybCI6Ii8iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsImJhY2tncm91bmRfY29sb3ciOiIjZmZmZmZmIiwidGhlbWVfY29sb3ciOiIjMGYzOTJiIiwiaWNvbnMiOlt7InNyYyI6Ii9pY29uLTE5MngxOTIucG5nIiwic2l6ZXMiOiIxOTJ4MTkyIiwidHlwZSI6ImltYWdlL3BuZyJ9LHsic3JjIjoiL2ljb24tNTEyeDUxMi5wbmciLCJzaXplcyI6IjUxMng1MTIiLCJ0eXBlIjoiaW1hZ2UvcG5nIn1dfQ==" />
         <meta name="theme-color" content="#0f392b" />
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
       </head>
       <body className={`${outfit.className} bg-slate-50 text-slate-700 overflow-x-hidden`}>
         
