@@ -142,6 +142,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   if (isLoginPage) {
     return (
       <html lang="pt-br">
+        <head>
+          <link rel="manifest" href="/manifest.json" />
+          <meta name="theme-color" content="#0f392b" />
+          <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+        </head>
         <body className={`${outfit.className} bg-slate-50 text-slate-700`}>
           {children}
         </body>
@@ -160,6 +165,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <html lang="pt-br">
+      <head>
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#0f392b" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+      </head>
       <body className={`${outfit.className} bg-slate-50 text-slate-700 overflow-x-hidden`}>
         
         <header className="fixed top-0 left-0 right-0 h-16 bg-white border-b border-slate-200 z-[40] flex items-center px-4 justify-between shadow-sm">
