@@ -53,9 +53,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   };
 
   useEffect(() => {
-    // Liga o Robô do PWA silenciosamente
+    // Registo Limpo do Service Worker com Quebra-Cache
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').catch((err) => console.log('Erro no SW', err));
+        navigator.serviceWorker.register('/sw.js?v=2').catch((err) => console.log('Erro no SW', err));
     }
 
     let intervalId: NodeJS.Timeout;
@@ -147,7 +147,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     return (
       <html lang="pt-br">
         <head>
-          <link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjoiWWVsbG93TGVhZiBDUk0iLCJzaG9ydF9uYW1lIjoiWWVsbG93TGVhZiIsInN0YXJ0X3VybCI6Ii8iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsImJhY2tncm91bmRfY29sb3ciOiIjZmZmZmZmIiwidGhlbWVfY29sb3ciOiIjMGYzOTJiIiwiaWNvbnMiOlt7InNyYyI6Ii9pY29uLTE5MngxOTIucG5nIiwic2l6ZXMiOiIxOTJ4MTkyIiwidHlwZSI6ImltYWdlL3BuZyJ9LHsic3JjIjoiL2ljb24tNTEyeDUxMi5wbmciLCJzaXplcyI6IjUxMng1MTIiLCJ0eXBlIjoiaW1hZ2UvcG5nIn1dfQ==" />
+          <link rel="manifest" href="/manifest.json?v=2" />
           <meta name="theme-color" content="#0f392b" />
           <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
           <meta name="mobile-web-app-capable" content="yes" />
@@ -172,7 +172,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pt-br">
       <head>
-        <link rel="manifest" href="data:application/manifest+json;base64,eyJuYW1lIjoiWWVsbG93TGVhZiBDUk0iLCJzaG9ydF9uYW1lIjoiWWVsbG93TGVhZiIsInN0YXJ0X3VybCI6Ii8iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsImJhY2tncm91bmRfY29sb3ciOiIjZmZmZmZmIiwidGhlbWVfY29sb3ciOiIjMGYzOTJiIiwiaWNvbnMiOlt7InNyYyI6Ii9pY29uLTE5MngxOTIucG5nIiwic2l6ZXMiOiIxOTJ4MTkyIiwidHlwZSI6ImltYWdlL3BuZyJ9LHsic3JjIjoiL2ljb24tNTEyeDUxMi5wbmciLCJzaXplcyI6IjUxMng1MTIiLCJ0eXBlIjoiaW1hZ2UvcG5nIn1dfQ==" />
+        <link rel="manifest" href="/manifest.json?v=2" />
         <meta name="theme-color" content="#0f392b" />
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
         <meta name="mobile-web-app-capable" content="yes" />
