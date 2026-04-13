@@ -16,7 +16,6 @@ const outfit = Outfit({ subsets: ["latin"] });
 
 const MENU_BASE = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard, key: 'faturamento', section: 'Visão Geral' },
-  // { name: 'Análise de Vendas', path: '/analise-vendas', icon: TrendingUp, key: 'faturamento', section: 'Visão Geral' }, // <-- OCULTADO TEMPORARIAMENTE
   { name: 'Faturamento', path: '/faturamento', icon: BarChart3, key: 'faturamento', section: 'Visão Geral' },
   { name: 'Relatórios', path: '/relatorios', icon: FileText, key: 'relatorios', section: 'Visão Geral' },
   { name: 'Prospecção', path: '/prospeccao', icon: Target, key: 'pipeline', section: 'Vendas & Comercial' },
@@ -54,6 +53,24 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   };
 
   useEffect(() => {
+    // --- TRUQUE DE MESTRE: INJEÇÃO FORÇADA DO PWA ---
+    // Obriga o navegador a ler o manifest e acionar o botão de "Instalar App"
+    if (typeof window !== 'undefined') {
+        if (!document.querySelector('link[rel="manifest"]')) {
+            const link = document.createElement('link');
+            link.rel = 'manifest';
+            link.href = '/manifest.json';
+            document.head.appendChild(link);
+        }
+        
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js')
+              .then(() => console.log('Robô PWA ativado com sucesso!'))
+              .catch((err) => console.log('Erro no robô PWA', err));
+        }
+    }
+    // ------------------------------------------------
+
     let intervalId: NodeJS.Timeout;
 
     const carregarAcessos = async () => {
