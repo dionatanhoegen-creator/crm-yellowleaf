@@ -1,7 +1,13 @@
-self.addEventListener('install', function(event) {
+self.addEventListener('install', (e) => {
   self.skipWaiting();
 });
 
-self.addEventListener('fetch', function(event) {
-  // Esse bloco vazio é o segredo! O Chrome exige que ele exista para liberar o botão de "Instalar Aplicativo".
+self.addEventListener('activate', (e) => {
+  e.waitUntil(self.clients.claim());
+});
+
+self.addEventListener('fetch', (e) => {
+  e.respondWith(
+    fetch(e.request).catch(() => new Response('O CRM está offline.'))
+  );
 });
