@@ -44,7 +44,9 @@ const quillModules = {
     [{ 'header': [1, 2, 3, false] }],
     ['bold', 'italic', 'underline', 'strike'],
     [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-    ['clean'] // Removi imagem e cor por enquanto para focar no texto puro e evitar quebra no gerador nativo
+    ['link', 'image'],
+    [{ 'color': [] }, { 'background': [] }],
+    ['clean']
   ],
 };
 
@@ -84,6 +86,7 @@ function PipelineContent() {
   // --- ESTADOS DA SEGUNDA PÁGINA ---
   const [incluirSegundaPagina, setIncluirSegundaPagina] = useState(false);
   const [conteudoRichText, setConteudoRichText] = useState("");
+  const richTextRef = useRef<HTMLDivElement>(null);
 
   const getLocalData = () => {
     const now = new Date();
@@ -179,7 +182,7 @@ function PipelineContent() {
                   condicoes_pagamento: opEncontrada.condicoes_pagamento || '',
                   observacoes_proposta: opEncontrada.observacoes_proposta || ''
               }));
-
+              
               if (opEncontrada.conteudo_pagina_2 && opEncontrada.conteudo_pagina_2 !== '<p><br></p>') {
                   setConteudoRichText(opEncontrada.conteudo_pagina_2);
                   setIncluirSegundaPagina(true);
@@ -187,7 +190,7 @@ function PipelineContent() {
                   setConteudoRichText("");
                   setIncluirSegundaPagina(false);
               }
-              
+
               let contatosCarregados = [{
                   nome: opEncontrada.contato || '',
                   cargo: opEncontrada.cargo_contato || 'Comprador(a)',
@@ -683,7 +686,6 @@ function PipelineContent() {
     setNovaNotaInput(""); 
   };
 
-  // --- GERADOR DE PDF NATIVO (SEM HTML2CANVAS) ---
   const gerarPropostaIndividualPDF = async () => {
     try {
         if (!editingOp) {
@@ -892,20 +894,32 @@ function PipelineContent() {
         doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
         doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 8);
         
-        // --- NOVA: PÁGINA 2 (ANEXOS LIVRES COM PARSER NATIVO) ---
-        if (incluirSegundaPagina && conteudoRichText && conteudoRichText.trim() !== '' && conteudoRichText !== '<p><br></p>') {
+        // --- NOVA: PÁGINA 2 COM HTML2CANVAS (PROTEGIDO) ---
+        if (incluirSegundaPagina && richTextRef.current && conteudoRichText.trim() !== '' && conteudoRichText !== '<p><br></p>') {
             doc.addPage();
+            
+            const html2canvasModule = await import('html2canvas');
+            const html2canvas = html2canvasModule.default || html2canvasModule;
+            
+            const canvas = await html2canvas(richTextRef.current, { 
+                scale: 2, 
+                useCORS: true, 
+                logging: false
+            });
+            
+            const imgData = canvas.toDataURL('image/png');
+            
+            const imgWidth = pageWidth - 28; 
+            let imgHeight = (canvas.height * imgWidth) / canvas.width;
+            
+            if (isNaN(imgHeight) || imgHeight <= 0) {
+                console.warn("Erro ao calcular a proporção da imagem. Forçando altura padrão.");
+                imgHeight = 100;
+            }
+            
             doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
             doc.text("ANEXOS E INFORMAÇÕES ADICIONAIS", 14, 20);
-            
-            // Cria um conversor temporário para limpar o HTML (tira as tags HTML para imprimir no PDF)
-            const tempDiv = document.createElement("div");
-            tempDiv.innerHTML = conteudoRichText;
-            const textoLimpo = tempDiv.innerText || tempDiv.textContent || "";
-            
-            doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(60, 60, 60);
-            const linhasFormatadas = doc.splitTextToSize(textoLimpo, pageWidth - 28);
-            doc.text(linhasFormatadas, 14, 30);
+            doc.addImage(imgData, 'PNG', 14, 26, imgWidth, imgHeight);
         }
 
         // --- RODAPÉ ---
@@ -1305,7 +1319,33 @@ function PipelineContent() {
                       </div>
 
                       {incluirSegundaPagina && (
-                          <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden bg-white">
+                          <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden bg-white relative">
+                              
+                              {/* GAVETA ISOLADA: Força um CSS inline extremamente restrito para evitar vazamento do Tailwind e resolver o problema da cor LAB */}
+                              <div style={{ position: 'absolute', width: '800px', left: '-9999px', top: 0, backgroundColor: '#ffffff', color: '#333333', padding: '30px' }} ref={richTextRef}>
+                                  <style dangerouslySetInnerHTML={{ __html: `
+                                      .pdf-safe-area { all: initial; font-family: Helvetica, Arial, sans-serif; font-size: 14px; color: #333333; line-height: 1.5; }
+                                      .pdf-safe-area * { all: unset; display: block; font-family: inherit; }
+                                      .pdf-safe-area p { margin-bottom: 1em; }
+                                      .pdf-safe-area strong, .pdf-safe-area b { font-weight: bold; display: inline; }
+                                      .pdf-safe-area em, .pdf-safe-area i { font-style: italic; display: inline; }
+                                      .pdf-safe-area u { text-decoration: underline; display: inline; }
+                                      .pdf-safe-area table { display: table; width: 100%; border-collapse: collapse; margin-bottom: 1em; }
+                                      .pdf-safe-area tbody { display: table-row-group; }
+                                      .pdf-safe-area tr { display: table-row; }
+                                      .pdf-safe-area td, .pdf-safe-area th { display: table-cell; border: 1px solid #cccccc; padding: 8px; text-align: left; }
+                                      .pdf-safe-area img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+                                      .pdf-safe-area h1, .pdf-safe-area h2, .pdf-safe-area h3 { font-weight: bold; margin-bottom: 0.5em; display: block; color: #125530; }
+                                      .pdf-safe-area h1 { font-size: 24px; }
+                                      .pdf-safe-area h2 { font-size: 20px; }
+                                      .pdf-safe-area h3 { font-size: 16px; }
+                                      .pdf-safe-area ul, .pdf-safe-area ol { margin-left: 20px; margin-bottom: 1em; display: block; }
+                                      .pdf-safe-area li { display: list-item; margin-bottom: 0.5em; }
+                                      .pdf-safe-area span[style] { display: inline !important; }
+                                  `}} />
+                                  <div className="pdf-safe-area ql-editor" dangerouslySetInnerHTML={{ __html: conteudoRichText }}></div>
+                              </div>
+                              
                               <ReactQuill 
                                   theme="snow" 
                                   value={conteudoRichText} 
