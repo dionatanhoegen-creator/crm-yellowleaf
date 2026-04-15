@@ -688,271 +688,281 @@ function PipelineContent() {
     setNovaNotaInput(""); 
   };
 
-  const gerarPropostaIndividualPDF = async () => {
-    if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
-
-    const doc = new jsPDF({ orientation: 'portrait' });
-    const darkGreen = [18, 85, 48]; 
-    const lightGreen = [0, 150, 0]; 
-    const pageWidth = doc.internal.pageSize.width || doc.internal.pageSize.getWidth();
-    
-    try { doc.addImage("/logo.png", "PNG", 14, 10, 40, 16); } 
-    catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 14, 10, 40, 16); } catch (err) {} }
-
-    doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]); 
-    
-    const isPedido = formData.status === 'fechado';
-    const tituloDoc = formData.tipo_negociacao === 'cotacao' 
-        ? (isPedido ? "PEDIDO COMERCIAL" : "ORÇAMENTO") 
-        : "PROPOSTA COMERCIAL";
-    
-    doc.text(tituloDoc, pageWidth - 14, 17, { align: "right" });
-
-    doc.setFontSize(9); doc.setTextColor(150, 150, 150);
-    doc.text(`Nº ${formatPropostaId(formData.numero_proposta)}`, pageWidth - 14, 22, { align: "right" });
-    
-    const dataEmissao = new Date().toLocaleDateString('pt-BR');
-    const validadeBase = new Date();
-    validadeBase.setDate(validadeBase.getDate() + 7); 
-    const dataValidade = validadeBase.toLocaleDateString('pt-BR');
-
-    doc.text(`Emissão: ${dataEmissao}  |  Validade: ${dataValidade}`, pageWidth - 14, 26, { align: "right" });
-
-    doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.setLineWidth(1.2);
-    doc.line(14, 31, pageWidth - 14, 31);
-
-    doc.setFillColor(248, 249, 250); 
-    doc.rect(14, 35, pageWidth - 28, 25, 'F');
-
-    doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.text("DADOS DO CLIENTE", 18, 41);
-
-    const contatoPrincipal = contatosList[0] || { nome: '', telefone: '' };
-    const enderecoFormatadoPDF = `${formData.endereco || 'N/D'} - ${formData.cidade_exclusividade || ''} / ${formData.uf_exclusividade || ''}`;
-
-    doc.setFontSize(8.5); doc.setTextColor(80, 80, 80); doc.setFont("helvetica", "normal");
-    doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 18, 46.5);
-    
-    let clienteY = 51;
-    if (contatoPrincipal.nome && contatoPrincipal.nome.trim() !== '') {
-        doc.text(`Contato: ${contatoPrincipal.nome}`, 18, clienteY);
-        clienteY += 4.5;
-    }
-    if (contatoPrincipal.telefone && contatoPrincipal.telefone.trim() !== '') {
-        doc.text(`Telefone: ${contatoPrincipal.telefone}`, 18, clienteY);
-        clienteY += 4.5;
-    }
-    doc.text(`Endereço: ${enderecoFormatadoPDF}`, 18, clienteY);
-
-    let finalY = 67;
-
-    if (formData.tipo_negociacao === 'cotacao') {
-        doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("ITENS DA COTAÇÃO", 14, finalY); 
-
-        const itens = getItensCotacao();
-        const tableBody = itens.map((it: any) => [
-            it.insumo,
-            it.info_adicional || '-',
-            `${it.fracionamento}`,
-            it.tipo_venda,
-            formatCurrency(it.preco_g),
-            formatCurrency(it.preco_total),
-            it.validade || '-'
-        ]);
-
-        autoTable(doc, {
-            startY: finalY + 2,
-            head: [['Insumo', 'Info Adicional', 'Embalagem', 'Classificação', 'Preço/g', 'Total', 'Validade']],
-            body: tableBody,
-            theme: 'grid',
-            headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
-            styles: { fontSize: 7, cellPadding: 2, textColor: [60, 60, 60] }, 
-            columnStyles: { 5: { fontStyle: 'bold', textColor: lightGreen } },
-            didParseCell: (data) => {
-                if (data.section === 'body' && data.column.index === 3) { 
-                    if (data.cell.raw === 'Bonificado') data.cell.styles.textColor = [34, 197, 94];
-                }
-            }
-        });
-
-        finalY = (doc as any).lastAutoTable.finalY;
-        doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text(`TOTAL: ${formatCurrency(formData.valor)}`, pageWidth - 14, finalY + 8, { align: "right" });
-        finalY += 14;
-
-    } else {
-        const precoG = parseMoney(formData.valor_g_tabela);
-        const kg = parseMoney(formData.kg_proposto);
-        const kgBonificado = parseMoney(formData.kg_bonificado);
-        const totalKg = kg + kgBonificado;
-        const investimentoTotal = precoG * 1000 * kg;
-        const precoGramaBonificado = totalKg > 0 ? investimentoTotal / (totalKg * 1000) : precoG;
-        const parcelas = parseInt(String(formData.parcelas)) || 1;
-        const valorParcela = parcelas > 0 ? investimentoTotal / parcelas : investimentoTotal;
-        const diasPrimeiraParcela = formData.dias_primeira_parcela || '30';
-        const pesoFormula = parseMoney(formData.peso_formula_g) || 13.2;
-        const custoFixo = parseMoney(formData.custo_fixo_operacional) || 0;
-        const fatorLucro = parseMoney(formData.fator_lucro) || 5;
-        const custoMP = precoGramaBonificado * pesoFormula;
-        const custoTotalFormula = custoMP + custoFixo;
-        const sugestaoVenda = (custoMP * fatorLucro) + custoFixo;
-        const qtdFormulasParaPagarParcela = sugestaoVenda > 0 ? (valorParcela / sugestaoVenda) : 0;
-        const viabilidadeDiaria = parseInt(String(diasPrimeiraParcela)) > 0 ? (qtdFormulasParaPagarParcela / parseInt(String(diasPrimeiraParcela))) : 0;
-
-        doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 14, finalY); 
-        
-        autoTable(doc, {
-            startY: finalY + 2,
-            head: [['DESCRIÇÃO', 'VALORES']],
-            body: [
-                ['Ativo/Insumo', formData.produto || 'N/D'],
-                ['Validade do Lote/Ativo', formData.validade_produto || 'Consulte Lote Atual'],
-                ['Preço por grama (g)', formatCurrency(precoG)],
-                ['Quantidade da proposta (kg)', `${kg} kg`],
-                ['Quantidade bonificada (kg)', `${kgBonificado} kg`],
-                ['Investimento Total (R$)', formatCurrency(investimentoTotal)],
-                ['Preço do grama c/ bonificação (g)', formatCurrency(precoGramaBonificado)],
-                ['Condição de Pagamento', `${parcelas} parcelas de ${formatCurrency(valorParcela)}`],
-                ['Vencimento 1ª Parcela', `${diasPrimeiraParcela} dias`]
-            ],
-            theme: 'grid',
-            headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
-            styles: { fontSize: 8.5, cellPadding: 2, textColor: [60, 60, 60] },
-            columnStyles: { 0: { cellWidth: 120, fontStyle: 'normal' }, 1: { cellWidth: 62, fontStyle: 'bold', halign: 'right' } }
-        });
-
-        finalY = (doc as any).lastAutoTable.finalY;
-        
-        autoTable(doc, {
-            startY: finalY + 4,
-            head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
-            body: [
-                [`Custo Matéria-Prima (Dose ${pesoFormula}g)`, formatCurrency(custoMP)],
-                ['Custo Total por Fórmula (Manipulado)', formatCurrency(custoTotalFormula)],
-                [`Sugestão de Venda (Fator ${fatorLucro} no Ativo)`, formatCurrency(sugestaoVenda)],
-                ['META DE VIABILIDADE', `${viabilidadeDiaria.toFixed(2).replace('.', ',')} fórmulas/dia`]
-            ],
-            theme: 'grid',
-            headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
-            styles: { fontSize: 8.5, cellPadding: 2, textColor: [60, 60, 60] },
-            columnStyles: { 0: { cellWidth: 120, fontStyle: 'normal' }, 1: { cellWidth: 62, fontStyle: 'bold', halign: 'right' } }
-        });
-        
-        finalY = (doc as any).lastAutoTable.finalY;
-        finalY += 8; 
-    }
-
-    if (finalY > 235) {
-        doc.addPage();
-        finalY = 20;
-    }
-
-    // --- 1. BLOCO DE LOGÍSTICA ---
-    doc.setFontSize(9.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.text("CONDIÇÕES COMERCIAIS:", 14, finalY);
-    
-    const drawRow = (label: string, value: string, y: number) => {
-        doc.setFontSize(8.5); doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
-        doc.text(label, 14, y);
-        const labelWidth = doc.getTextWidth(label);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
-        doc.text(` ${value}`, 14 + labelWidth, y);
-    };
-
-    drawRow("PAGAMENTO:", formData.condicoes_pagamento || 'A combinar', finalY + 5);
-    drawRow("TRANSPORTADORA:", formData.frete_transportadora || '-', finalY + 9.5);
-
-    const pDias = formData.frete_previsao ? formData.frete_previsao.trim() : '';
-    let prazoStr = 'A combinar';
-    if (pDias) {
-        prazoStr = pDias.toLowerCase().includes('dia') ? pDias : (pDias === '1' ? '1 dia' : `${pDias} dias`);
-    }
-    drawRow("PRAZO DE ENTREGA:", `Postagem + ${prazoStr} após confirmação.`, finalY + 14);
-
-    const freteTexto = formData.frete_tipo === 'CIF' ? 'CIF - Por conta da YellowLeaf' : (formData.frete_tipo === 'FOB' ? 'FOB - Por conta do Cliente' : '-');
-    drawRow("FRETE:", freteTexto, finalY + 18.5);
-    
-    finalY += 25;
-
-    // --- 2. OBSERVAÇÕES ADICIONAIS ---
-    if (formData.observacoes_proposta && formData.observacoes_proposta.trim() !== '') {
-        doc.setFontSize(9.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("OBSERVAÇÕES ADICIONAIS:", 14, finalY);
-        doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
-        const splitObs = doc.splitTextToSize(formData.observacoes_proposta, pageWidth - 28);
-        doc.text(splitObs, 14, finalY + 5);
-        finalY += (splitObs.length * 4) + 6; 
-    }
-
-    // --- 3. BLOCO DE CARTÃO DE CRÉDITO ---
-    doc.setFillColor(232, 245, 233); 
-    doc.rect(14, finalY, pageWidth - 28, 10, 'F');
-    doc.setFontSize(8.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.text("NOVIDADE NA YELLOWLEAF!", 18, finalY + 4.5);
-    doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
-    doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 8);
-    
-
-    // --- NOVA: PÁGINA 2 (ANEXOS LIVRES) COM IMPORTAÇÃO DINÂMICA ---
-    if (incluirSegundaPagina && richTextRef.current && conteudoRichText.trim() !== '' && conteudoRichText !== '<p><br></p>') {
-        doc.addPage();
-        
-        // TRUQUE MÁGICO: Importar o html2canvas APENAS na hora de gerar o PDF!
-        const html2canvas = (await import('html2canvas')).default;
-        
-        // Tira uma foto (canvas) do que o usuário formatou no ReactQuill
-        const canvas = await html2canvas(richTextRef.current, { scale: 2, useCORS: true });
-        const imgData = canvas.toDataURL('image/png');
-        
-        // Calcula a proporção da imagem para caber na página A4
-        const imgWidth = pageWidth - 28; // Margens laterais de 14
-        const imgHeight = (canvas.height * imgWidth) / canvas.width;
-        
-        // Adiciona um título opcional e cola a imagem gerada
-        doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("ANEXOS E INFORMAÇÕES ADICIONAIS", 14, 20);
-        doc.addImage(imgData, 'PNG', 14, 26, imgWidth, imgHeight);
-    }
-
-    // --- RODAPÉ COM SELOS (EM TODAS AS PÁGINAS) ---
-    const pageCount = (doc as any).internal.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i);
-        
-        doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", pageWidth / 2, 258, { align: "center" });
-        doc.setFontSize(8); doc.setTextColor(100, 100, 100); doc.setFont("helvetica", "normal");
-        const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e\npromovemos sua comercialização com responsabilidade e ética.";
-        doc.text(textQualidade, pageWidth / 2, 263, { align: "center", lineHeightFactor: 1.5 }); 
-
-        let imagemAdicionada = false;
-        try { doc.addImage("/selo.jpg", "JPEG", (pageWidth / 2) - 40, 269, 80, 13); imagemAdicionada = true; } 
-        catch (e1) { try { doc.addImage("/selo.png", "PNG", (pageWidth / 2) - 40, 269, 80, 13); imagemAdicionada = true; } catch (e2) {} }
-        
-        if (!imagemAdicionada) {
-            doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-            doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", pageWidth / 2, 276, { align: "center" });
+ const gerarPropostaIndividualPDF = async () => {
+    try {
+        if (!editingOp) {
+            alert("Salve a proposta primeiro antes de gerar o PDF.");
+            return;
         }
 
-        doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.setLineWidth(1); 
-        const bottomLineY = 289;
-        doc.line(14, bottomLineY - 4, pageWidth - 14, bottomLineY - 4); 
-
-        doc.setFontSize(7.5); doc.setTextColor(150, 150, 150); doc.setFont("helvetica", "normal");
-        doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, bottomLineY);
+        const doc = new jsPDF({ orientation: 'portrait' });
+        const darkGreen = [18, 85, 48]; 
+        const lightGreen = [0, 150, 0]; 
+        const pageWidth = doc.internal.pageSize.width || doc.internal.pageSize.getWidth();
         
-        const representante = equipe.find(u => u.id === formData.user_id);
-        const responsavelNome = representante?.nome || usuarioLogado?.nome || 'Comercial YellowLeaf';
-        const responsavelTel = representante?.telefone || '(44) 99102-7642';
-        doc.text(`${responsavelNome} - WhatsApp: ${responsavelTel}`, pageWidth - 14, bottomLineY, { align: "right" });
-    }
+        try { doc.addImage("/logo.png", "PNG", 14, 10, 40, 16); } 
+        catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 14, 10, 40, 16); } catch (err) {} }
 
-    const fileNamePrefix = formData.tipo_negociacao === 'cotacao' ? (isPedido ? 'Pedido' : 'Orcamento') : 'Proposta';
-    doc.save(`${fileNamePrefix}_${formData.nome_cliente.replace(/\s+/g, '_')}_${formatPropostaId(formData.numero_proposta)}.pdf`);
+        doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]); 
+        
+        const isPedido = formData.status === 'fechado';
+        const tituloDoc = formData.tipo_negociacao === 'cotacao' 
+            ? (isPedido ? "PEDIDO COMERCIAL" : "ORÇAMENTO") 
+            : "PROPOSTA COMERCIAL";
+        
+        doc.text(tituloDoc, pageWidth - 14, 17, { align: "right" });
+
+        doc.setFontSize(9); doc.setTextColor(150, 150, 150);
+        doc.text(`Nº ${formatPropostaId(formData.numero_proposta)}`, pageWidth - 14, 22, { align: "right" });
+        
+        const dataEmissao = new Date().toLocaleDateString('pt-BR');
+        const validadeBase = new Date();
+        validadeBase.setDate(validadeBase.getDate() + 7); 
+        const dataValidade = validadeBase.toLocaleDateString('pt-BR');
+
+        doc.text(`Emissão: ${dataEmissao}  |  Validade: ${dataValidade}`, pageWidth - 14, 26, { align: "right" });
+
+        doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.setLineWidth(1.2);
+        doc.line(14, 31, pageWidth - 14, 31);
+
+        doc.setFillColor(248, 249, 250); 
+        doc.rect(14, 35, pageWidth - 28, 25, 'F');
+
+        doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.text("DADOS DO CLIENTE", 18, 41);
+
+        const contatoPrincipal = contatosList[0] || { nome: '', telefone: '' };
+        const enderecoFormatadoPDF = `${formData.endereco || 'N/D'} - ${formData.cidade_exclusividade || ''} / ${formData.uf_exclusividade || ''}`;
+
+        doc.setFontSize(8.5); doc.setTextColor(80, 80, 80); doc.setFont("helvetica", "normal");
+        doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 18, 46.5);
+        
+        let clienteY = 51;
+        if (contatoPrincipal.nome && contatoPrincipal.nome.trim() !== '') {
+            doc.text(`Contato: ${contatoPrincipal.nome}`, 18, clienteY);
+            clienteY += 4.5;
+        }
+        if (contatoPrincipal.telefone && contatoPrincipal.telefone.trim() !== '') {
+            doc.text(`Telefone: ${contatoPrincipal.telefone}`, 18, clienteY);
+            clienteY += 4.5;
+        }
+        doc.text(`Endereço: ${enderecoFormatadoPDF}`, 18, clienteY);
+
+        let finalY = 67;
+
+        if (formData.tipo_negociacao === 'cotacao') {
+            doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+            doc.text("ITENS DA COTAÇÃO", 14, finalY); 
+
+            const itens = getItensCotacao();
+            const tableBody = itens.map((it: any) => [
+                it.insumo,
+                it.info_adicional || '-',
+                `${it.fracionamento}`,
+                it.tipo_venda,
+                formatCurrency(it.preco_g),
+                formatCurrency(it.preco_total),
+                it.validade || '-'
+            ]);
+
+            autoTable(doc, {
+                startY: finalY + 2,
+                head: [['Insumo', 'Info Adicional', 'Embalagem', 'Classificação', 'Preço/g', 'Total', 'Validade']],
+                body: tableBody,
+                theme: 'grid',
+                headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
+                styles: { fontSize: 7, cellPadding: 2, textColor: [60, 60, 60] }, 
+                columnStyles: { 5: { fontStyle: 'bold', textColor: lightGreen } },
+                didParseCell: (data) => {
+                    if (data.section === 'body' && data.column.index === 3) { 
+                        if (data.cell.raw === 'Bonificado') data.cell.styles.textColor = [34, 197, 94];
+                    }
+                }
+            });
+
+            finalY = (doc as any).lastAutoTable.finalY;
+            doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+            doc.text(`TOTAL: ${formatCurrency(formData.valor)}`, pageWidth - 14, finalY + 8, { align: "right" });
+            finalY += 14;
+
+        } else {
+            const precoG = parseMoney(formData.valor_g_tabela);
+            const kg = parseMoney(formData.kg_proposto);
+            const kgBonificado = parseMoney(formData.kg_bonificado);
+            const totalKg = kg + kgBonificado;
+            const investimentoTotal = precoG * 1000 * kg;
+            const precoGramaBonificado = totalKg > 0 ? investimentoTotal / (totalKg * 1000) : precoG;
+            const parcelas = parseInt(String(formData.parcelas)) || 1;
+            const valorParcela = parcelas > 0 ? investimentoTotal / parcelas : investimentoTotal;
+            const diasPrimeiraParcela = formData.dias_primeira_parcela || '30';
+            const pesoFormula = parseMoney(formData.peso_formula_g) || 13.2;
+            const custoFixo = parseMoney(formData.custo_fixo_operacional) || 0;
+            const fatorLucro = parseMoney(formData.fator_lucro) || 5;
+            const custoMP = precoGramaBonificado * pesoFormula;
+            const custoTotalFormula = custoMP + custoFixo;
+            const sugestaoVenda = (custoMP * fatorLucro) + custoFixo;
+            const qtdFormulasParaPagarParcela = sugestaoVenda > 0 ? (valorParcela / sugestaoVenda) : 0;
+            const viabilidadeDiaria = parseInt(String(diasPrimeiraParcela)) > 0 ? (qtdFormulasParaPagarParcela / parseInt(String(diasPrimeiraParcela))) : 0;
+
+            doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+            doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 14, finalY); 
+            
+            autoTable(doc, {
+                startY: finalY + 2,
+                head: [['DESCRIÇÃO', 'VALORES']],
+                body: [
+                    ['Ativo/Insumo', formData.produto || 'N/D'],
+                    ['Validade do Lote/Ativo', formData.validade_produto || 'Consulte Lote Atual'],
+                    ['Preço por grama (g)', formatCurrency(precoG)],
+                    ['Quantidade da proposta (kg)', `${kg} kg`],
+                    ['Quantidade bonificada (kg)', `${kgBonificado} kg`],
+                    ['Investimento Total (R$)', formatCurrency(investimentoTotal)],
+                    ['Preço do grama c/ bonificação (g)', formatCurrency(precoGramaBonificado)],
+                    ['Condição de Pagamento', `${parcelas} parcelas de ${formatCurrency(valorParcela)}`],
+                    ['Vencimento 1ª Parcela', `${diasPrimeiraParcela} dias`]
+                ],
+                theme: 'grid',
+                headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
+                styles: { fontSize: 8.5, cellPadding: 2, textColor: [60, 60, 60] },
+                columnStyles: { 0: { cellWidth: 120, fontStyle: 'normal' }, 1: { cellWidth: 62, fontStyle: 'bold', halign: 'right' } }
+            });
+
+            finalY = (doc as any).lastAutoTable.finalY;
+            
+            autoTable(doc, {
+                startY: finalY + 4,
+                head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
+                body: [
+                    [`Custo Matéria-Prima (Dose ${pesoFormula}g)`, formatCurrency(custoMP)],
+                    ['Custo Total por Fórmula (Manipulado)', formatCurrency(custoTotalFormula)],
+                    [`Sugestão de Venda (Fator ${fatorLucro} no Ativo)`, formatCurrency(sugestaoVenda)],
+                    ['META DE VIABILIDADE', `${viabilidadeDiaria.toFixed(2).replace('.', ',')} fórmulas/dia`]
+                ],
+                theme: 'grid',
+                headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
+                styles: { fontSize: 8.5, cellPadding: 2, textColor: [60, 60, 60] },
+                columnStyles: { 0: { cellWidth: 120, fontStyle: 'normal' }, 1: { cellWidth: 62, fontStyle: 'bold', halign: 'right' } }
+            });
+            
+            finalY = (doc as any).lastAutoTable.finalY;
+            finalY += 8; 
+        }
+
+        if (finalY > 235) {
+            doc.addPage();
+            finalY = 20;
+        }
+
+        doc.setFontSize(9.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.text("CONDIÇÕES COMERCIAIS:", 14, finalY);
+        
+        const drawRow = (label: string, value: string, y: number) => {
+            doc.setFontSize(8.5); doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
+            doc.text(label, 14, y);
+            const labelWidth = doc.getTextWidth(label);
+            doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+            doc.text(` ${value}`, 14 + labelWidth, y);
+        };
+
+        drawRow("PAGAMENTO:", formData.condicoes_pagamento || 'A combinar', finalY + 5);
+        drawRow("TRANSPORTADORA:", formData.frete_transportadora || '-', finalY + 9.5);
+
+        const pDias = formData.frete_previsao ? formData.frete_previsao.trim() : '';
+        let prazoStr = 'A combinar';
+        if (pDias) {
+            prazoStr = pDias.toLowerCase().includes('dia') ? pDias : (pDias === '1' ? '1 dia' : `${pDias} dias`);
+        }
+        drawRow("PRAZO DE ENTREGA:", `Postagem + ${prazoStr} após confirmação.`, finalY + 14);
+
+        const freteTexto = formData.frete_tipo === 'CIF' ? 'CIF - Por conta da YellowLeaf' : (formData.frete_tipo === 'FOB' ? 'FOB - Por conta do Cliente' : '-');
+        drawRow("FRETE:", freteTexto, finalY + 18.5);
+        
+        finalY += 25;
+
+        if (formData.observacoes_proposta && formData.observacoes_proposta.trim() !== '') {
+            doc.setFontSize(9.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+            doc.text("OBSERVAÇÕES ADICIONAIS:", 14, finalY);
+            doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+            const splitObs = doc.splitTextToSize(formData.observacoes_proposta, pageWidth - 28);
+            doc.text(splitObs, 14, finalY + 5);
+            finalY += (splitObs.length * 4) + 6; 
+        }
+
+        doc.setFillColor(232, 245, 233); 
+        doc.rect(14, finalY, pageWidth - 28, 10, 'F');
+        doc.setFontSize(8.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.text("NOVIDADE NA YELLOWLEAF!", 18, finalY + 4.5);
+        doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
+        doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 8);
+        
+        // --- NOVA: PÁGINA 2 (ANEXOS LIVRES) COM PROTEÇÃO ---
+        if (incluirSegundaPagina && richTextRef.current && conteudoRichText.trim() !== '' && conteudoRichText !== '<p><br></p>') {
+            doc.addPage();
+            
+            // Importação blindada
+            const html2canvasModule = await import('html2canvas');
+            const html2canvas = html2canvasModule.default || html2canvasModule;
+            
+            // Tira a foto (sem logs no console para não pesar)
+            const canvas = await html2canvas(richTextRef.current, { scale: 2, useCORS: true, logging: false });
+            const imgData = canvas.toDataURL('image/png');
+            
+            const imgWidth = pageWidth - 28; 
+            let imgHeight = (canvas.height * imgWidth) / canvas.width;
+            
+            // Proteção contra a falha silenciosa de tamanho zero (NaN)
+            if (isNaN(imgHeight) || imgHeight <= 0) {
+                console.warn("Erro ao calcular a proporção da imagem. Forçando altura padrão.");
+                imgHeight = 100;
+            }
+            
+            doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+            doc.text("ANEXOS E INFORMAÇÕES ADICIONAIS", 14, 20);
+            doc.addImage(imgData, 'PNG', 14, 26, imgWidth, imgHeight);
+        }
+
+        // --- RODAPÉ ---
+        const pageCount = (doc as any).internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+            doc.setPage(i);
+            
+            doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+            doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", pageWidth / 2, 258, { align: "center" });
+            doc.setFontSize(8); doc.setTextColor(100, 100, 100); doc.setFont("helvetica", "normal");
+            const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e\npromovemos sua comercialização com responsabilidade e ética.";
+            doc.text(textQualidade, pageWidth / 2, 263, { align: "center", lineHeightFactor: 1.5 }); 
+
+            let imagemAdicionada = false;
+            try { doc.addImage("/selo.jpg", "JPEG", (pageWidth / 2) - 40, 269, 80, 13); imagemAdicionada = true; } 
+            catch (e1) { try { doc.addImage("/selo.png", "PNG", (pageWidth / 2) - 40, 269, 80, 13); imagemAdicionada = true; } catch (e2) {} }
+            
+            if (!imagemAdicionada) {
+                doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+                doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", pageWidth / 2, 276, { align: "center" });
+            }
+
+            doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+            doc.setLineWidth(1); 
+            const bottomLineY = 289;
+            doc.line(14, bottomLineY - 4, pageWidth - 14, bottomLineY - 4); 
+
+            doc.setFontSize(7.5); doc.setTextColor(150, 150, 150); doc.setFont("helvetica", "normal");
+            doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, bottomLineY);
+            
+            const representante = equipe.find(u => u.id === formData.user_id);
+            const responsavelNome = representante?.nome || usuarioLogado?.nome || 'Comercial YellowLeaf';
+            const responsavelTel = representante?.telefone || '(44) 99102-7642';
+            doc.text(`${responsavelNome} - WhatsApp: ${responsavelTel}`, pageWidth - 14, bottomLineY, { align: "right" });
+        }
+
+        const fileNamePrefix = formData.tipo_negociacao === 'cotacao' ? (isPedido ? 'Pedido' : 'Orcamento') : 'Proposta';
+        doc.save(`${fileNamePrefix}_${formData.nome_cliente.replace(/\s+/g, '_')}_${formatPropostaId(formData.numero_proposta)}.pdf`);
+        
+    } catch (error: any) {
+        console.error("Erro Crítico ao gerar PDF:", error);
+        alert(`Erro ao gerar o PDF. Motivo: ${error.message}`);
+    }
   };
 
   // --- RELATÓRIO GERAL ATUALIZADO COM COLUNA ANEXO ---
