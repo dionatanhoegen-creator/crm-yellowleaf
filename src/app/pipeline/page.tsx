@@ -44,9 +44,7 @@ const quillModules = {
     [{ 'header': [1, 2, 3, false] }],
     ['bold', 'italic', 'underline', 'strike'],
     [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-    ['link', 'image'],
-    [{ 'color': [] }, { 'background': [] }],
-    ['clean']
+    ['clean'] // Removi imagem e cor por enquanto para focar no texto puro e evitar quebra no gerador nativo
   ],
 };
 
@@ -86,7 +84,6 @@ function PipelineContent() {
   // --- ESTADOS DA SEGUNDA PÁGINA ---
   const [incluirSegundaPagina, setIncluirSegundaPagina] = useState(false);
   const [conteudoRichText, setConteudoRichText] = useState("");
-  const richTextRef = useRef<HTMLDivElement>(null);
 
   const getLocalData = () => {
     const now = new Date();
@@ -183,7 +180,6 @@ function PipelineContent() {
                   observacoes_proposta: opEncontrada.observacoes_proposta || ''
               }));
 
-              // --- CARREGANDO OS DADOS DA SEGUNDA PÁGINA DO BANCO ---
               if (opEncontrada.conteudo_pagina_2 && opEncontrada.conteudo_pagina_2 !== '<p><br></p>') {
                   setConteudoRichText(opEncontrada.conteudo_pagina_2);
                   setIncluirSegundaPagina(true);
@@ -191,7 +187,6 @@ function PipelineContent() {
                   setConteudoRichText("");
                   setIncluirSegundaPagina(false);
               }
-              // --------------------------------------------------------
               
               let contatosCarregados = [{
                   nome: opEncontrada.contato || '',
@@ -688,6 +683,7 @@ function PipelineContent() {
     setNovaNotaInput(""); 
   };
 
+  // --- GERADOR DE PDF NATIVO (SEM HTML2CANVAS) ---
   const gerarPropostaIndividualPDF = async () => {
     try {
         if (!editingOp) {
@@ -896,30 +892,20 @@ function PipelineContent() {
         doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
         doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 8);
         
-        // --- NOVA: PÁGINA 2 (ANEXOS LIVRES) COM PROTEÇÃO E ESCUDO CSS ---
-        if (incluirSegundaPagina && richTextRef.current && conteudoRichText.trim() !== '' && conteudoRichText !== '<p><br></p>') {
+        // --- NOVA: PÁGINA 2 (ANEXOS LIVRES COM PARSER NATIVO) ---
+        if (incluirSegundaPagina && conteudoRichText && conteudoRichText.trim() !== '' && conteudoRichText !== '<p><br></p>') {
             doc.addPage();
-            
-            // Importação blindada
-            const html2canvasModule = await import('html2canvas');
-            const html2canvas = html2canvasModule.default || html2canvasModule;
-            
-            // Tira a foto (sem logs no console para não pesar)
-            const canvas = await html2canvas(richTextRef.current, { scale: 2, useCORS: true, logging: false });
-            const imgData = canvas.toDataURL('image/png');
-            
-            const imgWidth = pageWidth - 28; 
-            let imgHeight = (canvas.height * imgWidth) / canvas.width;
-            
-            // Proteção contra a falha silenciosa de tamanho zero (NaN)
-            if (isNaN(imgHeight) || imgHeight <= 0) {
-                console.warn("Erro ao calcular a proporção da imagem. Forçando altura padrão.");
-                imgHeight = 100;
-            }
-            
             doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
             doc.text("ANEXOS E INFORMAÇÕES ADICIONAIS", 14, 20);
-            doc.addImage(imgData, 'PNG', 14, 26, imgWidth, imgHeight);
+            
+            // Cria um conversor temporário para limpar o HTML (tira as tags HTML para imprimir no PDF)
+            const tempDiv = document.createElement("div");
+            tempDiv.innerHTML = conteudoRichText;
+            const textoLimpo = tempDiv.innerText || tempDiv.textContent || "";
+            
+            doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(60, 60, 60);
+            const linhasFormatadas = doc.splitTextToSize(textoLimpo, pageWidth - 28);
+            doc.text(linhasFormatadas, 14, 30);
         }
 
         // --- RODAPÉ ---
@@ -965,7 +951,6 @@ function PipelineContent() {
     }
   };
 
-  // --- RELATÓRIO GERAL ATUALIZADO COM COLUNA ANEXO ---
   const gerarRelatorioGeral = () => {
     const doc = new jsPDF({ orientation: "landscape" });
     try { doc.addImage("/logo.png", "PNG", 14, 10, 40, 15); } 
@@ -978,7 +963,6 @@ function PipelineContent() {
     let dadosOrdenados = [...oportunidades];
     dadosOrdenados.sort((a, b) => (b.numero_proposta || 0) - (a.numero_proposta || 0));
     
-    // NOVA COLUNA "ANEXO"
     const headers = ['Nº', 'DATA', 'FARMÁCIA', 'PRODUTO/ITENS', 'REPRESENTANTE', 'ESTÁGIO', 'VALOR (R$)', 'ANEXO'];
     
     const tableBody = dadosOrdenados.map(op => {
@@ -987,7 +971,6 @@ function PipelineContent() {
         const estagioNome = ESTAGIOS.find(e => e.id === op.status)?.label || op.status;
         const descricao = op.tipo_negociacao === 'cotacao' ? 'Cotação Múltipla' : (op.produto || '-');
         
-        // VERIFICA SE TEM A SEGUNDA PÁGINA
         const temAnexo = (op.conteudo_pagina_2 && op.conteudo_pagina_2 !== '<p><br></p>') ? 'Sim' : 'Não';
 
         return [formatPropostaId(op.numero_proposta), dataFormatada, op.nome_cliente, descricao, responsavelNome, estagioNome, formatCurrency(op.valor), temAnexo];
@@ -1018,7 +1001,6 @@ function PipelineContent() {
     const contatoPrincipal = contatosList[0] || { nome: '', cargo: 'Comprador(a)', telefone: '', email: '' };
     const contatosExtras = contatosList.slice(1);
     
-    // --- DADOS SALVOS NO BANCO AGORA INCLUEM A SEGUNDA PÁGINA ---
     const dadosSalvar = {
         ...formData, 
         user_id: formData.user_id, 
@@ -1055,7 +1037,7 @@ function PipelineContent() {
         frete_transportadora: formData.frete_transportadora,
         frete_previsao: formData.frete_previsao,
         condicoes_pagamento: formData.condicoes_pagamento,
-        conteudo_pagina_2: incluirSegundaPagina ? conteudoRichText : null // NOVO CAMPO
+        conteudo_pagina_2: incluirSegundaPagina ? conteudoRichText : null 
     };
 
     const { data: savedOpData, error } = editingOp 
@@ -1097,7 +1079,6 @@ function PipelineContent() {
         <div key={op.id} onClick={() => { 
             setEditingOp(op); setFormData({...formData, ...op}); 
             
-            // --- RECARREGA A SEGUNDA PÁGINA AO CLICAR NO CARD ---
             if (op.conteudo_pagina_2 && op.conteudo_pagina_2 !== '<p><br></p>') {
                 setConteudoRichText(op.conteudo_pagina_2);
                 setIncluirSegundaPagina(true);
@@ -1315,7 +1296,7 @@ function PipelineContent() {
                       <div className="flex items-center justify-between mb-4">
                           <div>
                               <h4 className="text-sm font-black text-blue-900 flex items-center gap-2"><Edit3 size={18}/> Anexos Livres (Página 2)</h4>
-                              <p className="text-[10px] font-bold text-slate-500 mt-1">Habilite para adicionar prints, tabelas e formatação livre em uma segunda página do PDF.</p>
+                              <p className="text-[10px] font-bold text-slate-500 mt-1">Habilite para adicionar textos formatados (tabelas e listas) na segunda página do PDF.</p>
                           </div>
                           <label className="relative inline-flex items-center cursor-pointer">
                               <input type="checkbox" className="sr-only peer" checked={incluirSegundaPagina} onChange={() => setIncluirSegundaPagina(!incluirSegundaPagina)} />
@@ -1324,32 +1305,14 @@ function PipelineContent() {
                       </div>
 
                       {incluirSegundaPagina && (
-                          <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden bg-white relative">
-                              
-                              {/* GAVETA ISOLADA: Com estilo CSS forte para forçar Hexadecimal nas bordas e impedir o erro 'lab' do Tailwind v4 */}
-                              <div style={{ position: 'absolute', width: '800px', left: '-9999px', top: 0, backgroundColor: '#ffffff', color: '#000000', padding: '30px' }} ref={richTextRef}>
-                                  <style dangerouslySetInnerHTML={{ __html: `
-                                      .pdf-safe-area, .pdf-safe-area * {
-                                          border-color: #cccccc !important;
-                                          outline-color: #cccccc !important;
-                                          text-decoration-color: #000000 !important;
-                                          --tw-shadow: 0 0 transparent !important;
-                                          --tw-ring-color: transparent !important;
-                                      }
-                                      .pdf-safe-area table { width: 100%; border-collapse: collapse; }
-                                      .pdf-safe-area td, .pdf-safe-area th { border: 1px solid #cccccc; padding: 8px; }
-                                      .pdf-safe-area img { max-width: 100%; height: auto; }
-                                  `}} />
-                                  <div className="pdf-safe-area ql-editor" dangerouslySetInnerHTML={{ __html: conteudoRichText }} style={{ fontFamily: 'Helvetica, Arial, sans-serif', fontSize: '14px', backgroundColor: '#ffffff' }}></div>
-                              </div>
-                              
+                          <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden bg-white">
                               <ReactQuill 
                                   theme="snow" 
                                   value={conteudoRichText} 
                                   onChange={setConteudoRichText}
                                   modules={quillModules}
                                   className="bg-white min-h-[300px]"
-                                  placeholder="Cole prints (Ctrl+V), crie tabelas ou digite observações longas..."
+                                  placeholder="Digite seu texto, crie listas ou tabelas..."
                               />
                           </div>
                       )}
