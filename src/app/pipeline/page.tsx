@@ -890,7 +890,7 @@ function PipelineContent() {
     doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 8);
     
 
-  // --- NOVA: PÁGINA 2 (ANEXOS LIVRES) ---
+// --- NOVA: PÁGINA 2 (ANEXOS LIVRES) ---
     if (incluirSegundaPagina && richTextRef.current && conteudoRichText.trim() !== '' && conteudoRichText !== '<p><br></p>') {
         doc.addPage();
         
