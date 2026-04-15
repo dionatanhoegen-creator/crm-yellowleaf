@@ -654,12 +654,13 @@ function PipelineContent() {
     setNovaNotaInput(""); 
   };
 
-  const gerarPropostaIndividualPDF = () => {
+ const gerarPropostaIndividualPDF = () => {
     if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
 
     const doc = new jsPDF({ orientation: 'portrait' });
     const darkGreen = [18, 85, 48]; 
     const lightGreen = [0, 150, 0]; 
+    const pageWidth = doc.internal.pageSize.width || doc.internal.pageSize.getWidth();
     
     try { doc.addImage("/logo.png", "PNG", 14, 10, 40, 16); } 
     catch (e) { try { doc.addImage("/logo.jpg", "JPEG", 14, 10, 40, 16); } catch (err) {} }
@@ -671,7 +672,6 @@ function PipelineContent() {
         ? (isPedido ? "PEDIDO COMERCIAL" : "ORÇAMENTO") 
         : "PROPOSTA COMERCIAL";
     
-    const pageWidth = doc.internal.pageSize.width || doc.internal.pageSize.getWidth();
     doc.text(tituloDoc, pageWidth - 14, 17, { align: "right" });
 
     doc.setFontSize(9); doc.setTextColor(150, 150, 150);
@@ -748,7 +748,7 @@ function PipelineContent() {
         doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
         doc.text(`TOTAL: ${formatCurrency(formData.valor)}`, pageWidth - 14, finalY + 10, { align: "right" });
 
-        finalY += 18;
+        finalY += 15;
 
     } else {
         const precoG = parseMoney(formData.valor_g_tabela);
@@ -788,7 +788,6 @@ function PipelineContent() {
             theme: 'grid',
             headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
             styles: { fontSize: 9, cellPadding: 3, textColor: [60, 60, 60] },
-            // AQUI ESTÁ O ALINHAMENTO EXATO DAS COLUNAS (120mm + 62mm = 182mm)
             columnStyles: { 0: { cellWidth: 120, fontStyle: 'normal' }, 1: { cellWidth: 62, fontStyle: 'bold', halign: 'right' } }
         });
 
@@ -806,17 +805,19 @@ function PipelineContent() {
             theme: 'grid',
             headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
             styles: { fontSize: 9, cellPadding: 3, textColor: [60, 60, 60] },
-            // MESMO ALINHAMENTO PARA A SEGUNDA TABELA
             columnStyles: { 0: { cellWidth: 120, fontStyle: 'normal' }, 1: { cellWidth: 62, fontStyle: 'bold', halign: 'right' } }
         });
         
         finalY = (doc as any).lastAutoTable.finalY || 165;
-        finalY += 15;
+        
+        // AJUSTE 1: Redução do espaço em branco para não forçar quebra de página
+        finalY += 8; 
     }
 
     // --- BLOCO COMUM PARA AMBAS AS PROPOSTAS (LOGÍSTICA E OBSERVAÇÕES) ---
-    // Impede que as informações fiquem cortadas no final da página
-    if (finalY > 230) {
+    // AJUSTE 2: Quebra de página controlada. O rodapé ocupa até o Y=255. 
+    // Se o bloco começar depois de 210, vai sobrepor. Então quebramos a página.
+    if (finalY > 210) {
         doc.addPage();
         finalY = 20;
     }
@@ -834,8 +835,8 @@ function PipelineContent() {
         doc.text(` ${value}`, 14 + labelWidth, y);
     };
 
-    drawRow("PAGAMENTO:", formData.condicoes_pagamento || 'A combinar', finalY + 7);
-    drawRow("TRANSPORTADORA:", formData.frete_transportadora || '-', finalY + 12);
+    drawRow("PAGAMENTO:", formData.condicoes_pagamento || 'A combinar', finalY + 6);
+    drawRow("TRANSPORTADORA:", formData.frete_transportadora || '-', finalY + 11);
 
     const pDias = formData.frete_previsao ? formData.frete_previsao.trim() : '';
     let prazoStr = 'A combinar';
@@ -846,12 +847,12 @@ function PipelineContent() {
             prazoStr = pDias === '1' ? '1 dia' : `${pDias} dias`;
         }
     }
-    drawRow("PRAZO DE ENTREGA:", `Postagem + ${prazoStr} após confirmação.`, finalY + 17);
+    drawRow("PRAZO DE ENTREGA:", `Postagem + ${prazoStr} após confirmação.`, finalY + 16);
 
     const freteTexto = formData.frete_tipo === 'CIF' ? 'CIF - Por conta da YellowLeaf' : (formData.frete_tipo === 'FOB' ? 'FOB - Por conta do Cliente' : '-');
-    drawRow("FRETE:", freteTexto, finalY + 22);
+    drawRow("FRETE:", freteTexto, finalY + 21);
     
-    finalY += 32;
+    finalY += 28;
 
     // BLOCO DE CARTÃO DE CRÉDITO
     doc.setFillColor(232, 245, 233); 
@@ -861,7 +862,7 @@ function PipelineContent() {
     doc.setFontSize(8); doc.setFont("helvetica", "normal");
     doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 9);
     
-    finalY += 20;
+    finalY += 18;
 
     if (formData.observacoes_proposta && formData.observacoes_proposta.trim() !== '') {
         doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
@@ -869,37 +870,42 @@ function PipelineContent() {
         doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
         const splitObs = doc.splitTextToSize(formData.observacoes_proposta, pageWidth - 28);
         doc.text(splitObs, 14, finalY + 6);
-        finalY += (splitObs.length * 5) + 10;
     }
 
-    // --- RODAPÉ ---
-    doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", pageWidth / 2, 260, { align: "center" });
-    doc.setFontSize(8); doc.setTextColor(100, 100, 100); doc.setFont("helvetica", "normal");
-    const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e\npromovemos sua comercialização com responsabilidade e ética.";
-    doc.text(textQualidade, pageWidth / 2, 265, { align: "center", lineHeightFactor: 1.5 });
-
-    let imagemAdicionada = false;
-    try { doc.addImage("/selo.jpg", "JPEG", (pageWidth / 2) - 40, 270, 80, 16); imagemAdicionada = true; } 
-    catch (e1) { try { doc.addImage("/selo.png", "PNG", (pageWidth / 2) - 40, 270, 80, 16); imagemAdicionada = true; } catch (e2) {} }
-    
-    if (!imagemAdicionada) {
+    // AJUSTE 3: RODAPÉ EM TODAS AS PÁGINAS
+    // Este loop volta em todas as páginas criadas (1 ou 2) e desenha o selo e contatos em todas.
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        
         doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", pageWidth / 2, 278, { align: "center" });
+        doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", pageWidth / 2, 262, { align: "center" });
+        doc.setFontSize(8); doc.setTextColor(100, 100, 100); doc.setFont("helvetica", "normal");
+        const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e\npromovemos sua comercialização com responsabilidade e ética.";
+        doc.text(textQualidade, pageWidth / 2, 267, { align: "center", lineHeightFactor: 1.5 });
+
+        let imagemAdicionada = false;
+        try { doc.addImage("/selo.jpg", "JPEG", (pageWidth / 2) - 40, 273, 80, 15); imagemAdicionada = true; } 
+        catch (e1) { try { doc.addImage("/selo.png", "PNG", (pageWidth / 2) - 40, 273, 80, 15); imagemAdicionada = true; } catch (e2) {} }
+        
+        if (!imagemAdicionada) {
+            doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+            doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", pageWidth / 2, 280, { align: "center" });
+        }
+
+        doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.setLineWidth(1); 
+        const bottomLineY = 289;
+        doc.line(14, bottomLineY - 4, pageWidth - 14, bottomLineY - 4);
+
+        doc.setFontSize(8); doc.setTextColor(150, 150, 150); doc.setFont("helvetica", "normal");
+        doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, bottomLineY);
+        
+        const representante = equipe.find(u => u.id === formData.user_id);
+        const responsavelNome = representante?.nome || usuarioLogado?.nome || 'Comercial YellowLeaf';
+        const responsavelTel = representante?.telefone || '(44) 99102-7642';
+        doc.text(`${responsavelNome} - WhatsApp: ${responsavelTel}`, pageWidth - 14, bottomLineY, { align: "right" });
     }
-
-    doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.setLineWidth(1); 
-    const bottomLineY = doc.internal.pageSize.height - 10;
-    doc.line(14, bottomLineY - 3, pageWidth - 14, bottomLineY - 3);
-
-    doc.setFontSize(8); doc.setTextColor(150, 150, 150); doc.setFont("helvetica", "normal");
-    doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, bottomLineY);
-    
-    const representante = equipe.find(u => u.id === formData.user_id);
-    const responsavelNome = representante?.nome || usuarioLogado?.nome || 'Comercial YellowLeaf';
-    const responsavelTel = representante?.telefone || '(44) 99102-7642';
-    doc.text(`${responsavelNome} - WhatsApp: ${responsavelTel}`, pageWidth - 14, bottomLineY, { align: "right" });
 
     const fileNamePrefix = formData.tipo_negociacao === 'cotacao' ? (isPedido ? 'Pedido' : 'Orcamento') : 'Proposta';
     doc.save(`${fileNamePrefix}_${formData.nome_cliente.replace(/\s+/g, '_')}_${formatPropostaId(formData.numero_proposta)}.pdf`);
