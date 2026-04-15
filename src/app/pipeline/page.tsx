@@ -182,7 +182,7 @@ function PipelineContent() {
                   condicoes_pagamento: opEncontrada.condicoes_pagamento || '',
                   observacoes_proposta: opEncontrada.observacoes_proposta || ''
               }));
-              
+
               // --- CARREGANDO OS DADOS DA SEGUNDA PÁGINA DO BANCO ---
               if (opEncontrada.conteudo_pagina_2 && opEncontrada.conteudo_pagina_2 !== '<p><br></p>') {
                   setConteudoRichText(opEncontrada.conteudo_pagina_2);
@@ -192,7 +192,7 @@ function PipelineContent() {
                   setIncluirSegundaPagina(false);
               }
               // --------------------------------------------------------
-
+              
               let contatosCarregados = [{
                   nome: opEncontrada.contato || '',
                   cargo: opEncontrada.cargo_contato || 'Comprador(a)',
@@ -688,7 +688,7 @@ function PipelineContent() {
     setNovaNotaInput(""); 
   };
 
- const gerarPropostaIndividualPDF = async () => {
+  const gerarPropostaIndividualPDF = async () => {
     try {
         if (!editingOp) {
             alert("Salve a proposta primeiro antes de gerar o PDF.");
@@ -896,7 +896,7 @@ function PipelineContent() {
         doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
         doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 8);
         
-        // --- NOVA: PÁGINA 2 (ANEXOS LIVRES) COM PROTEÇÃO ---
+        // --- NOVA: PÁGINA 2 (ANEXOS LIVRES) COM PROTEÇÃO E ESCUDO CSS ---
         if (incluirSegundaPagina && richTextRef.current && conteudoRichText.trim() !== '' && conteudoRichText !== '<p><br></p>') {
             doc.addPage();
             
@@ -1325,9 +1325,22 @@ function PipelineContent() {
 
                       {incluirSegundaPagina && (
                           <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden bg-white relative">
-                            {/* Esta div invisível é onde o HTML fica puro para o html2canvas ler perfeitamente (FORÇANDO CORES HEX PARA EVITAR O ERRO 'LAB' DO TAILWIND) */}
-                              <div style={{ position: 'absolute', width: '800px', left: '-9999px', top: 0, backgroundColor: '#ffffff', color: '#222222', padding: '30px' }} ref={richTextRef}>
-                                  <div dangerouslySetInnerHTML={{ __html: conteudoRichText }} className="ql-editor" style={{ fontFamily: 'Helvetica, Arial, sans-serif', fontSize: '14px', backgroundColor: '#ffffff' }}></div>
+                              
+                              {/* GAVETA ISOLADA: Com estilo CSS forte para forçar Hexadecimal nas bordas e impedir o erro 'lab' do Tailwind v4 */}
+                              <div style={{ position: 'absolute', width: '800px', left: '-9999px', top: 0, backgroundColor: '#ffffff', color: '#000000', padding: '30px' }} ref={richTextRef}>
+                                  <style dangerouslySetInnerHTML={{ __html: `
+                                      .pdf-safe-area, .pdf-safe-area * {
+                                          border-color: #cccccc !important;
+                                          outline-color: #cccccc !important;
+                                          text-decoration-color: #000000 !important;
+                                          --tw-shadow: 0 0 transparent !important;
+                                          --tw-ring-color: transparent !important;
+                                      }
+                                      .pdf-safe-area table { width: 100%; border-collapse: collapse; }
+                                      .pdf-safe-area td, .pdf-safe-area th { border: 1px solid #cccccc; padding: 8px; }
+                                      .pdf-safe-area img { max-width: 100%; height: auto; }
+                                  `}} />
+                                  <div className="pdf-safe-area ql-editor" dangerouslySetInnerHTML={{ __html: conteudoRichText }} style={{ fontFamily: 'Helvetica, Arial, sans-serif', fontSize: '14px', backgroundColor: '#ffffff' }}></div>
                               </div>
                               
                               <ReactQuill 
@@ -1336,7 +1349,7 @@ function PipelineContent() {
                                   onChange={setConteudoRichText}
                                   modules={quillModules}
                                   className="bg-white min-h-[300px]"
-                                  placeholder="Cole prints (Ctrl+V), crie listas ou digite observações longas..."
+                                  placeholder="Cole prints (Ctrl+V), crie tabelas ou digite observações longas..."
                               />
                           </div>
                       )}
