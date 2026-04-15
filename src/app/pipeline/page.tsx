@@ -654,7 +654,7 @@ function PipelineContent() {
     setNovaNotaInput(""); 
   };
 
-const gerarPropostaIndividualPDF = () => {
+  const gerarPropostaIndividualPDF = () => {
     if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
 
     const doc = new jsPDF({ orientation: 'portrait' });
@@ -711,7 +711,7 @@ const gerarPropostaIndividualPDF = () => {
     }
     doc.text(`Endereço: ${enderecoFormatadoPDF}`, 18, clienteY);
 
-    let finalY = 67; // Subimos um pouco o início das tabelas
+    let finalY = 67;
 
     if (formData.tipo_negociacao === 'cotacao') {
         doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
@@ -786,7 +786,6 @@ const gerarPropostaIndividualPDF = () => {
             ],
             theme: 'grid',
             headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
-            // Reduzimos o padding e a fonte para compactar
             styles: { fontSize: 8.5, cellPadding: 2, textColor: [60, 60, 60] },
             columnStyles: { 0: { cellWidth: 120, fontStyle: 'normal' }, 1: { cellWidth: 62, fontStyle: 'bold', halign: 'right' } }
         });
@@ -794,7 +793,7 @@ const gerarPropostaIndividualPDF = () => {
         finalY = (doc as any).lastAutoTable.finalY;
         
         autoTable(doc, {
-            startY: finalY + 4, // Espaço menor entre as tabelas
+            startY: finalY + 4,
             head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
             body: [
                 [`Custo Matéria-Prima (Dose ${pesoFormula}g)`, formatCurrency(custoMP)],
@@ -809,16 +808,15 @@ const gerarPropostaIndividualPDF = () => {
         });
         
         finalY = (doc as any).lastAutoTable.finalY;
-        finalY += 8; // Espaço exato puxando as condições para cima
+        finalY += 8; 
     }
 
-    // Quebra a página apenas se houver risco real de sobrepor o rodapé principal
     if (finalY > 235) {
         doc.addPage();
         finalY = 20;
     }
 
-    // --- BLOCO DE LOGÍSTICA COMPACTADO ---
+    // --- 1. BLOCO DE LOGÍSTICA ---
     doc.setFontSize(9.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
     doc.text("CONDIÇÕES COMERCIAIS:", 14, finalY);
     
@@ -843,51 +841,50 @@ const gerarPropostaIndividualPDF = () => {
     const freteTexto = formData.frete_tipo === 'CIF' ? 'CIF - Por conta da YellowLeaf' : (formData.frete_tipo === 'FOB' ? 'FOB - Por conta do Cliente' : '-');
     drawRow("FRETE:", freteTexto, finalY + 18.5);
     
-    finalY += 24;
+    finalY += 25;
 
-    // --- BLOCO DE CARTÃO DE CRÉDITO COMPACTADO ---
-    doc.setFillColor(232, 245, 233); 
-    doc.rect(14, finalY, pageWidth - 28, 10, 'F'); // Altura reduzida para 10
-    doc.setFontSize(8.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.text("NOVIDADE NA YELLOWLEAF!", 18, finalY + 4.5);
-    doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
-    doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 8);
-    
-    finalY += 15;
-
-    // --- OBSERVAÇÕES ---
+    // --- 2. OBSERVAÇÕES ADICIONAIS (AGORA VEM ANTES DO CARTÃO) ---
     if (formData.observacoes_proposta && formData.observacoes_proposta.trim() !== '') {
         doc.setFontSize(9.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
         doc.text("OBSERVAÇÕES ADICIONAIS:", 14, finalY);
         doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
         const splitObs = doc.splitTextToSize(formData.observacoes_proposta, pageWidth - 28);
         doc.text(splitObs, 14, finalY + 5);
+        finalY += (splitObs.length * 4) + 6; // Empurra o Y para baixo conforme o tamanho do texto
     }
 
-    // --- RODAPÉ GARANTIDO EM TODAS AS PÁGINAS ---
+    // --- 3. BLOCO DE CARTÃO DE CRÉDITO (AGORA VEM DEPOIS) ---
+    doc.setFillColor(232, 245, 233); 
+    doc.rect(14, finalY, pageWidth - 28, 10, 'F');
+    doc.setFontSize(8.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+    doc.text("NOVIDADE NA YELLOWLEAF!", 18, finalY + 4.5);
+    doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
+    doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 8);
+    
+    // --- RODAPÉ COM SELOS (MOVIDO MAIS PARA CIMA) ---
     const pageCount = (doc as any).internal.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
         
         doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", pageWidth / 2, 262, { align: "center" });
+        doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", pageWidth / 2, 258, { align: "center" }); // Subiu 4pts
         doc.setFontSize(8); doc.setTextColor(100, 100, 100); doc.setFont("helvetica", "normal");
         const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e\npromovemos sua comercialização com responsabilidade e ética.";
-        doc.text(textQualidade, pageWidth / 2, 267, { align: "center", lineHeightFactor: 1.5 });
+        doc.text(textQualidade, pageWidth / 2, 263, { align: "center", lineHeightFactor: 1.5 }); // Subiu 4pts
 
         let imagemAdicionada = false;
-        try { doc.addImage("/selo.jpg", "JPEG", (pageWidth / 2) - 40, 273, 80, 15); imagemAdicionada = true; } 
-        catch (e1) { try { doc.addImage("/selo.png", "PNG", (pageWidth / 2) - 40, 273, 80, 15); imagemAdicionada = true; } catch (e2) {} }
+        try { doc.addImage("/selo.jpg", "JPEG", (pageWidth / 2) - 40, 269, 80, 13); imagemAdicionada = true; } // Subiu e ficou mais estreito
+        catch (e1) { try { doc.addImage("/selo.png", "PNG", (pageWidth / 2) - 40, 269, 80, 13); imagemAdicionada = true; } catch (e2) {} }
         
         if (!imagemAdicionada) {
             doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-            doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", pageWidth / 2, 280, { align: "center" });
+            doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", pageWidth / 2, 276, { align: "center" });
         }
 
         doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
         doc.setLineWidth(1); 
         const bottomLineY = 289;
-        doc.line(14, bottomLineY - 4, pageWidth - 14, bottomLineY - 4);
+        doc.line(14, bottomLineY - 4, pageWidth - 14, bottomLineY - 4); // A linha de baixo fica intacta
 
         doc.setFontSize(7.5); doc.setTextColor(150, 150, 150); doc.setFont("helvetica", "normal");
         doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, bottomLineY);
@@ -1210,7 +1207,21 @@ const gerarPropostaIndividualPDF = () => {
                   </div>
 
                   <div className="md:col-span-4 bg-slate-800 p-4 rounded-2xl flex items-center justify-between text-white mt-2 shadow-lg"><span className="text-xs font-black uppercase text-slate-300">Total Proposta</span><span className="text-xl md:text-2xl font-black text-[#82D14D]">{formatCurrency(formData.valor)}</span></div>
-                  <div className="md:col-span-4 mt-2"><label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2 mb-2"><FileText size={14}/> Observações (PDF)</label><textarea className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-4 outline-none text-sm text-slate-700 font-medium shadow-sm transition resize-none min-h-[100px] custom-scrollbar" value={formData.observacoes_proposta} onChange={(e) => setFormData({...formData, observacoes_proposta: e.target.value})} /></div>
+                  
+                  <div className="md:col-span-4 mt-2">
+                      <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2 mb-2"><FileText size={14}/> Observações (PDF)</label>
+                      <div className="relative">
+                          <textarea 
+                              maxLength={250}
+                              className="w-full bg-white border border-slate-300 focus:border-blue-500 rounded-xl p-4 outline-none text-sm text-slate-700 font-medium shadow-sm transition resize-none min-h-[100px] custom-scrollbar" 
+                              value={formData.observacoes_proposta} 
+                              onChange={(e) => setFormData({...formData, observacoes_proposta: e.target.value})} 
+                          />
+                          <p className="text-[9px] font-bold text-slate-400 absolute bottom-3 right-4">
+                              {(formData.observacoes_proposta || '').length}/250 caracteres
+                          </p>
+                      </div>
+                  </div>
                   
                   <div className="md:col-span-4 flex items-center gap-2 mb-1 md:mb-2 mt-4 md:mt-6"><div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-black text-sm">3</div><h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Follow-up Interno</h3></div>
                   <div className="md:col-span-1"><label className="text-[10px] font-black text-red-600 uppercase flex items-center gap-1 mb-1.5"><Clock size={12}/> Próx. Contato</label><input type="date" className="w-full bg-white border border-red-200 rounded-xl p-3 text-sm font-bold text-red-900 outline-none" value={formData.data_lembrete} onChange={e => setFormData({...formData, data_lembrete: e.target.value})} /></div>
