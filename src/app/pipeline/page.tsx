@@ -13,7 +13,7 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// IMPORTAÇÃO DINÂMICA DO REACT-QUILL-NEW (Corrigido para não dar erro no React)
+// IMPORTAÇÃO DINÂMICA DO REACT-QUILL-NEW
 import dynamic from 'next/dynamic';
 const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
 import 'react-quill-new/dist/quill.snow.css';
@@ -183,6 +183,16 @@ function PipelineContent() {
                   observacoes_proposta: opEncontrada.observacoes_proposta || ''
               }));
               
+              // --- CARREGANDO OS DADOS DA SEGUNDA PÁGINA DO BANCO ---
+              if (opEncontrada.conteudo_pagina_2 && opEncontrada.conteudo_pagina_2 !== '<p><br></p>') {
+                  setConteudoRichText(opEncontrada.conteudo_pagina_2);
+                  setIncluirSegundaPagina(true);
+              } else {
+                  setConteudoRichText("");
+                  setIncluirSegundaPagina(false);
+              }
+              // --------------------------------------------------------
+
               let contatosCarregados = [{
                   nome: opEncontrada.contato || '',
                   cargo: opEncontrada.cargo_contato || 'Comprador(a)',
@@ -945,6 +955,7 @@ function PipelineContent() {
     doc.save(`${fileNamePrefix}_${formData.nome_cliente.replace(/\s+/g, '_')}_${formatPropostaId(formData.numero_proposta)}.pdf`);
   };
 
+  // --- RELATÓRIO GERAL ATUALIZADO COM COLUNA ANEXO ---
   const gerarRelatorioGeral = () => {
     const doc = new jsPDF({ orientation: "landscape" });
     try { doc.addImage("/logo.png", "PNG", 14, 10, 40, 15); } 
@@ -953,16 +964,25 @@ function PipelineContent() {
     doc.text("RELATÓRIO DE PIPELINE E OPORTUNIDADES", 14, 35);
     doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(100);
     doc.text(`Extraído em: ${new Date().toLocaleString('pt-BR')} por ${usuarioLogado?.nome || 'Sistema'}`, 14, 41);
+    
     let dadosOrdenados = [...oportunidades];
     dadosOrdenados.sort((a, b) => (b.numero_proposta || 0) - (a.numero_proposta || 0));
-    const headers = ['Nº', 'DATA', 'FARMÁCIA', 'PRODUTO/ITENS', 'REPRESENTANTE', 'ESTÁGIO', 'VALOR (R$)'];
+    
+    // NOVA COLUNA "ANEXO"
+    const headers = ['Nº', 'DATA', 'FARMÁCIA', 'PRODUTO/ITENS', 'REPRESENTANTE', 'ESTÁGIO', 'VALOR (R$)', 'ANEXO'];
+    
     const tableBody = dadosOrdenados.map(op => {
         const responsavelNome = equipe.find(u => u.id === op.user_id)?.nome || 'N/A';
         const dataFormatada = op.data_entrada ? op.data_entrada.split('-').reverse().join('/') : '-';
         const estagioNome = ESTAGIOS.find(e => e.id === op.status)?.label || op.status;
         const descricao = op.tipo_negociacao === 'cotacao' ? 'Cotação Múltipla' : (op.produto || '-');
-        return [formatPropostaId(op.numero_proposta), dataFormatada, op.nome_cliente, descricao, responsavelNome, estagioNome, formatCurrency(op.valor)];
+        
+        // VERIFICA SE TEM A SEGUNDA PÁGINA
+        const temAnexo = (op.conteudo_pagina_2 && op.conteudo_pagina_2 !== '<p><br></p>') ? 'Sim' : 'Não';
+
+        return [formatPropostaId(op.numero_proposta), dataFormatada, op.nome_cliente, descricao, responsavelNome, estagioNome, formatCurrency(op.valor), temAnexo];
     });
+
     autoTable(doc, {
         startY: 48,
         head: [headers],
@@ -987,6 +1007,8 @@ function PipelineContent() {
     const isRepasse = formData.user_id !== usuarioLogado?.id;
     const contatoPrincipal = contatosList[0] || { nome: '', cargo: 'Comprador(a)', telefone: '', email: '' };
     const contatosExtras = contatosList.slice(1);
+    
+    // --- DADOS SALVOS NO BANCO AGORA INCLUEM A SEGUNDA PÁGINA ---
     const dadosSalvar = {
         ...formData, 
         user_id: formData.user_id, 
@@ -1022,7 +1044,8 @@ function PipelineContent() {
         frete_tipo: formData.frete_tipo,
         frete_transportadora: formData.frete_transportadora,
         frete_previsao: formData.frete_previsao,
-        condicoes_pagamento: formData.condicoes_pagamento
+        condicoes_pagamento: formData.condicoes_pagamento,
+        conteudo_pagina_2: incluirSegundaPagina ? conteudoRichText : null // NOVO CAMPO
     };
 
     const { data: savedOpData, error } = editingOp 
@@ -1037,7 +1060,7 @@ function PipelineContent() {
       fecharModalELimparURL();
       setNovaNotaInput("");
       carregarOportunidades(usuarioLogado); 
-    } else { alert(`Erro ao salvar: ${error.message}`); }
+    } else { alert(`Erro ao salvar no banco. Você criou a coluna 'conteudo_pagina_2' no Supabase? Erro: ${error.message}`); }
   };
 
   const handleDelete = async () => {
@@ -1063,6 +1086,16 @@ function PipelineContent() {
     return (
         <div key={op.id} onClick={() => { 
             setEditingOp(op); setFormData({...formData, ...op}); 
+            
+            // --- RECARREGA A SEGUNDA PÁGINA AO CLICAR NO CARD ---
+            if (op.conteudo_pagina_2 && op.conteudo_pagina_2 !== '<p><br></p>') {
+                setConteudoRichText(op.conteudo_pagina_2);
+                setIncluirSegundaPagina(true);
+            } else {
+                setConteudoRichText("");
+                setIncluirSegundaPagina(false);
+            }
+
             let contatosCarregados = [{ nome: op.contato || '', cargo: op.cargo_contato || 'Comprador(a)', telefone: op.telefone || '', email: op.email || '' }];
             if (op.contatos_adicionais) { try { contatosCarregados = [...contatosCarregados, ...JSON.parse(op.contatos_adicionais)]; } catch (e) {} }
             setContatosList(contatosCarregados); setIsRepLocked(false); setNovaNotaInput(""); setModalOpen(true); 
