@@ -13,10 +13,10 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// IMPORTAÇÃO DINÂMICA DO REACT-QUILL (Para funcionar bem com Next.js)
+// IMPORTAÇÃO DINÂMICA DO REACT-QUILL-NEW (Corrigido para não dar erro no React)
 import dynamic from 'next/dynamic';
-const ReactQuill = dynamic(() => import('react-quill'), { ssr: false });
-import 'react-quill/dist/quill.snow.css';
+const ReactQuill = dynamic(() => import('react-quill-new'), { ssr: false });
+import 'react-quill-new/dist/quill.snow.css';
 
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 const API_CLIENTES_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
@@ -86,7 +86,7 @@ function PipelineContent() {
   // --- ESTADOS DA SEGUNDA PÁGINA ---
   const [incluirSegundaPagina, setIncluirSegundaPagina] = useState(false);
   const [conteudoRichText, setConteudoRichText] = useState("");
-  const richTextRef = useRef<HTMLDivElement>(null); // Referência para tirar a "foto" da div
+  const richTextRef = useRef<HTMLDivElement>(null);
 
   const getLocalData = () => {
     const now = new Date();
@@ -182,9 +182,6 @@ function PipelineContent() {
                   condicoes_pagamento: opEncontrada.condicoes_pagamento || '',
                   observacoes_proposta: opEncontrada.observacoes_proposta || ''
               }));
-
-              // Ao abrir uma proposta salva, se houver conteúdo no Rich Text (vou usar uma propriedade virtual ou adicionar na tabela depois), você pode carregar aqui.
-              // Como não temos a coluna no banco ainda, o campo inicia vazio.
               
               let contatosCarregados = [{
                   nome: opEncontrada.contato || '',
@@ -681,7 +678,6 @@ function PipelineContent() {
     setNovaNotaInput(""); 
   };
 
-  // --- GERADOR DE PDF MODIFICADO PARA LER O HTML2CANVAS ---
   const gerarPropostaIndividualPDF = async () => {
     if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
 
@@ -890,7 +886,7 @@ function PipelineContent() {
     doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 8);
     
 
-// --- NOVA: PÁGINA 2 (ANEXOS LIVRES) ---
+    // --- NOVA: PÁGINA 2 (ANEXOS LIVRES) COM IMPORTAÇÃO DINÂMICA ---
     if (incluirSegundaPagina && richTextRef.current && conteudoRichText.trim() !== '' && conteudoRichText !== '<p><br></p>') {
         doc.addPage();
         
@@ -1285,7 +1281,7 @@ function PipelineContent() {
                       </div>
 
                       {incluirSegundaPagina && (
-                          <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden bg-white">
+                          <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden bg-white relative">
                               {/* Esta div invisível é onde o HTML fica puro para o html2canvas ler perfeitamente */}
                               <div className="absolute opacity-0 pointer-events-none w-[800px] left-0 top-0 -z-50 bg-white p-6" ref={richTextRef}>
                                   <div dangerouslySetInnerHTML={{ __html: conteudoRichText }} className="prose prose-sm max-w-none prose-img:max-w-full prose-table:w-full prose-td:border prose-td:p-2 prose-th:bg-slate-100 prose-th:border prose-th:p-2"></div>
