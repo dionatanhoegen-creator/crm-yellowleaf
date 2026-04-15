@@ -7,11 +7,17 @@ import {
   Plus, Search, Calendar, User, Phone, DollarSign, 
   X, Tag, Beaker, MessageCircle, AlertCircle, 
   CheckCircle2, Trash2, Loader2, StickyNote, Download, MapPin, ShieldCheck, FileText,
-  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users, Building2, UserPlus, Bell, AtSign, ListPlus, Package
+  Clock, Eye, MessageSquare, AlertOctagon, ShieldAlert, Lock, Printer, AlertTriangle, Filter, ArrowUpDown, Send, History, Briefcase, Trello, Save, Users, Building2, UserPlus, Bell, AtSign, ListPlus, Package, Edit3
 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import html2canvas from 'html2canvas';
+
+// IMPORTAÇÃO DINÂMICA DO REACT-QUILL (Para funcionar bem com Next.js)
+import dynamic from 'next/dynamic';
+const ReactQuill = dynamic(() => import('react-quill'), { ssr: false });
+import 'react-quill/dist/quill.snow.css';
 
 const API_PRODUTOS_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
 const API_CLIENTES_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
@@ -32,6 +38,18 @@ const STAGE_COLORS: any = {
 
 const CANAIS_CONTATO = ['WhatsApp', 'Ligação', 'E-mail', 'Visita Presencial', 'Instagram'];
 const OPCOES_CARGO_CONTATO = ['Comprador(a)', 'Proprietário(a)', 'Sócio(a)', 'Representante Médico(a)', 'Farmacêutico(a) Responsável', 'Gerente', 'Outros'];
+
+// --- CONFIGURAÇÃO DO EDITOR QUILL ---
+const quillModules = {
+  toolbar: [
+    [{ 'header': [1, 2, 3, false] }],
+    ['bold', 'italic', 'underline', 'strike'],
+    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+    ['link', 'image'],
+    [{ 'color': [] }, { 'background': [] }],
+    ['clean']
+  ],
+};
 
 function PipelineContent() {
   const supabase = createClientComponentClient();
@@ -65,6 +83,11 @@ function PipelineContent() {
   const [isRepLocked, setIsRepLocked] = useState(false); 
   const [loadingCNPJ, setLoadingCNPJ] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  // --- ESTADOS DA SEGUNDA PÁGINA ---
+  const [incluirSegundaPagina, setIncluirSegundaPagina] = useState(false);
+  const [conteudoRichText, setConteudoRichText] = useState("");
+  const richTextRef = useRef<HTMLDivElement>(null); // Referência para tirar a "foto" da div
 
   const getLocalData = () => {
     const now = new Date();
@@ -160,6 +183,9 @@ function PipelineContent() {
                   condicoes_pagamento: opEncontrada.condicoes_pagamento || '',
                   observacoes_proposta: opEncontrada.observacoes_proposta || ''
               }));
+
+              // Ao abrir uma proposta salva, se houver conteúdo no Rich Text (vou usar uma propriedade virtual ou adicionar na tabela depois), você pode carregar aqui.
+              // Como não temos a coluna no banco ainda, o campo inicia vazio.
               
               let contatosCarregados = [{
                   nome: opEncontrada.contato || '',
@@ -186,6 +212,8 @@ function PipelineContent() {
 
   const fecharModalELimparURL = () => {
       setModalOpen(false);
+      setIncluirSegundaPagina(false);
+      setConteudoRichText("");
       router.replace('/pipeline', { scroll: false });
   };
 
@@ -654,7 +682,8 @@ function PipelineContent() {
     setNovaNotaInput(""); 
   };
 
-  const gerarPropostaIndividualPDF = () => {
+  // --- GERADOR DE PDF MODIFICADO PARA LER O HTML2CANVAS ---
+  const gerarPropostaIndividualPDF = async () => {
     if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
 
     const doc = new jsPDF({ orientation: 'portrait' });
@@ -843,17 +872,17 @@ function PipelineContent() {
     
     finalY += 25;
 
-    // --- 2. OBSERVAÇÕES ADICIONAIS (AGORA VEM ANTES DO CARTÃO) ---
+    // --- 2. OBSERVAÇÕES ADICIONAIS ---
     if (formData.observacoes_proposta && formData.observacoes_proposta.trim() !== '') {
         doc.setFontSize(9.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
         doc.text("OBSERVAÇÕES ADICIONAIS:", 14, finalY);
         doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
         const splitObs = doc.splitTextToSize(formData.observacoes_proposta, pageWidth - 28);
         doc.text(splitObs, 14, finalY + 5);
-        finalY += (splitObs.length * 4) + 6; // Empurra o Y para baixo conforme o tamanho do texto
+        finalY += (splitObs.length * 4) + 6; 
     }
 
-    // --- 3. BLOCO DE CARTÃO DE CRÉDITO (AGORA VEM DEPOIS) ---
+    // --- 3. BLOCO DE CARTÃO DE CRÉDITO ---
     doc.setFillColor(232, 245, 233); 
     doc.rect(14, finalY, pageWidth - 28, 10, 'F');
     doc.setFontSize(8.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
@@ -861,19 +890,38 @@ function PipelineContent() {
     doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
     doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 8);
     
-    // --- RODAPÉ COM SELOS (MOVIDO MAIS PARA CIMA) ---
+
+    // --- NOVA: PÁGINA 2 (ANEXOS LIVRES) ---
+    if (incluirSegundaPagina && richTextRef.current && conteudoRichText.trim() !== '' && conteudoRichText !== '<p><br></p>') {
+        doc.addPage();
+        
+        // Tira uma foto (canvas) do que o usuário formatou no ReactQuill
+        const canvas = await html2canvas(richTextRef.current, { scale: 2, useCORS: true });
+        const imgData = canvas.toDataURL('image/png');
+        
+        // Calcula a proporção da imagem para caber na página A4
+        const imgWidth = pageWidth - 28; // Margens laterais de 14
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        
+        // Adiciona um título opcional e cola a imagem gerada
+        doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.text("ANEXOS E INFORMAÇÕES ADICIONAIS", 14, 20);
+        doc.addImage(imgData, 'PNG', 14, 26, imgWidth, imgHeight);
+    }
+
+    // --- RODAPÉ COM SELOS (EM TODAS AS PÁGINAS) ---
     const pageCount = (doc as any).internal.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
         
         doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", pageWidth / 2, 258, { align: "center" }); // Subiu 4pts
+        doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", pageWidth / 2, 258, { align: "center" });
         doc.setFontSize(8); doc.setTextColor(100, 100, 100); doc.setFont("helvetica", "normal");
         const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e\npromovemos sua comercialização com responsabilidade e ética.";
-        doc.text(textQualidade, pageWidth / 2, 263, { align: "center", lineHeightFactor: 1.5 }); // Subiu 4pts
+        doc.text(textQualidade, pageWidth / 2, 263, { align: "center", lineHeightFactor: 1.5 }); 
 
         let imagemAdicionada = false;
-        try { doc.addImage("/selo.jpg", "JPEG", (pageWidth / 2) - 40, 269, 80, 13); imagemAdicionada = true; } // Subiu e ficou mais estreito
+        try { doc.addImage("/selo.jpg", "JPEG", (pageWidth / 2) - 40, 269, 80, 13); imagemAdicionada = true; } 
         catch (e1) { try { doc.addImage("/selo.png", "PNG", (pageWidth / 2) - 40, 269, 80, 13); imagemAdicionada = true; } catch (e2) {} }
         
         if (!imagemAdicionada) {
@@ -884,7 +932,7 @@ function PipelineContent() {
         doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
         doc.setLineWidth(1); 
         const bottomLineY = 289;
-        doc.line(14, bottomLineY - 4, pageWidth - 14, bottomLineY - 4); // A linha de baixo fica intacta
+        doc.line(14, bottomLineY - 4, pageWidth - 14, bottomLineY - 4); 
 
         doc.setFontSize(7.5); doc.setTextColor(150, 150, 150); doc.setFont("helvetica", "normal");
         doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, bottomLineY);
@@ -1161,7 +1209,6 @@ function PipelineContent() {
                               <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Parcelas</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
                           </div>
                           
-                          {/* CAMPOS REINSERIDOS AQUI */}
                           <div className="md:col-span-2">
                               <label className="text-xs font-bold text-slate-700 mb-1.5 block">Dias para 1ª Parcela</label>
                               <input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/>
@@ -1174,7 +1221,6 @@ function PipelineContent() {
                                   <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Custo Fixo / Fórm. (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold" value={formData.custo_fixo_operacional} onChange={e => setFormData({...formData, custo_fixo_operacional: e.target.value})}/></div>
                               </div>
                           </div>
-                          {/* FIM DOS CAMPOS REINSERIDOS */}
 
                       </>
                   ) : (
@@ -1209,7 +1255,7 @@ function PipelineContent() {
                   <div className="md:col-span-4 bg-slate-800 p-4 rounded-2xl flex items-center justify-between text-white mt-2 shadow-lg"><span className="text-xs font-black uppercase text-slate-300">Total Proposta</span><span className="text-xl md:text-2xl font-black text-[#82D14D]">{formatCurrency(formData.valor)}</span></div>
                   
                   <div className="md:col-span-4 mt-2">
-                      <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2 mb-2"><FileText size={14}/> Observações (PDF)</label>
+                      <label className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-2 mb-2"><FileText size={14}/> Observações (Pág. 1)</label>
                       <div className="relative">
                           <textarea 
                               maxLength={250}
@@ -1221,6 +1267,38 @@ function PipelineContent() {
                               {(formData.observacoes_proposta || '').length}/250 caracteres
                           </p>
                       </div>
+                  </div>
+
+                  {/* --- BLOCO NOVO: PÁGINA 2 (ANEXOS LIVRES) --- */}
+                  <div className="md:col-span-4 mt-4 bg-white border-2 border-blue-100 p-5 rounded-2xl">
+                      <div className="flex items-center justify-between mb-4">
+                          <div>
+                              <h4 className="text-sm font-black text-blue-900 flex items-center gap-2"><Edit3 size={18}/> Anexos Livres (Página 2)</h4>
+                              <p className="text-[10px] font-bold text-slate-500 mt-1">Habilite para adicionar prints, tabelas e formatação livre em uma segunda página do PDF.</p>
+                          </div>
+                          <label className="relative inline-flex items-center cursor-pointer">
+                              <input type="checkbox" className="sr-only peer" checked={incluirSegundaPagina} onChange={() => setIncluirSegundaPagina(!incluirSegundaPagina)} />
+                              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                          </label>
+                      </div>
+
+                      {incluirSegundaPagina && (
+                          <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden bg-white">
+                              {/* Esta div invisível é onde o HTML fica puro para o html2canvas ler perfeitamente */}
+                              <div className="absolute opacity-0 pointer-events-none w-[800px] left-0 top-0 -z-50 bg-white p-6" ref={richTextRef}>
+                                  <div dangerouslySetInnerHTML={{ __html: conteudoRichText }} className="prose prose-sm max-w-none prose-img:max-w-full prose-table:w-full prose-td:border prose-td:p-2 prose-th:bg-slate-100 prose-th:border prose-th:p-2"></div>
+                              </div>
+                              
+                              <ReactQuill 
+                                  theme="snow" 
+                                  value={conteudoRichText} 
+                                  onChange={setConteudoRichText}
+                                  modules={quillModules}
+                                  className="bg-white min-h-[300px]"
+                                  placeholder="Cole prints (Ctrl+V), crie listas ou digite observações longas..."
+                              />
+                          </div>
+                      )}
                   </div>
                   
                   <div className="md:col-span-4 flex items-center gap-2 mb-1 md:mb-2 mt-4 md:mt-6"><div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-black text-sm">3</div><h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Follow-up Interno</h3></div>
