@@ -12,7 +12,6 @@ import {
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import html2canvas from 'html2canvas';
 
 // IMPORTAÇÃO DINÂMICA DO REACT-QUILL (Para funcionar bem com Next.js)
 import dynamic from 'next/dynamic';
@@ -891,9 +890,12 @@ function PipelineContent() {
     doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 8);
     
 
-    // --- NOVA: PÁGINA 2 (ANEXOS LIVRES) ---
+  // --- NOVA: PÁGINA 2 (ANEXOS LIVRES) ---
     if (incluirSegundaPagina && richTextRef.current && conteudoRichText.trim() !== '' && conteudoRichText !== '<p><br></p>') {
         doc.addPage();
+        
+        // TRUQUE MÁGICO: Importar o html2canvas APENAS na hora de gerar o PDF!
+        const html2canvas = (await import('html2canvas')).default;
         
         // Tira uma foto (canvas) do que o usuário formatou no ReactQuill
         const canvas = await html2canvas(richTextRef.current, { scale: 2, useCORS: true });
