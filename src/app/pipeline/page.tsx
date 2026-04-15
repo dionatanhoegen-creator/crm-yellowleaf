@@ -654,7 +654,7 @@ function PipelineContent() {
     setNovaNotaInput(""); 
   };
 
- const gerarPropostaIndividualPDF = () => {
+const gerarPropostaIndividualPDF = () => {
     if (!editingOp) return alert("Salve a proposta primeiro antes de gerar o PDF.");
 
     const doc = new jsPDF({ orientation: 'portrait' });
@@ -689,7 +689,7 @@ function PipelineContent() {
     doc.line(14, 31, pageWidth - 14, 31);
 
     doc.setFillColor(248, 249, 250); 
-    doc.rect(14, 35, pageWidth - 28, 26, 'F');
+    doc.rect(14, 35, pageWidth - 28, 25, 'F');
 
     doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
     doc.text("DADOS DO CLIENTE", 18, 41);
@@ -697,25 +697,25 @@ function PipelineContent() {
     const contatoPrincipal = contatosList[0] || { nome: '', telefone: '' };
     const enderecoFormatadoPDF = `${formData.endereco || 'N/D'} - ${formData.cidade_exclusividade || ''} / ${formData.uf_exclusividade || ''}`;
 
-    doc.setFontSize(9); doc.setTextColor(80, 80, 80); doc.setFont("helvetica", "normal");
-    doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 18, 47);
+    doc.setFontSize(8.5); doc.setTextColor(80, 80, 80); doc.setFont("helvetica", "normal");
+    doc.text(`Razão Social: ${formData.nome_cliente || 'N/D'}`, 18, 46.5);
     
-    let clienteY = 52;
+    let clienteY = 51;
     if (contatoPrincipal.nome && contatoPrincipal.nome.trim() !== '') {
         doc.text(`Contato: ${contatoPrincipal.nome}`, 18, clienteY);
-        clienteY += 5;
+        clienteY += 4.5;
     }
     if (contatoPrincipal.telefone && contatoPrincipal.telefone.trim() !== '') {
         doc.text(`Telefone: ${contatoPrincipal.telefone}`, 18, clienteY);
-        clienteY += 5;
+        clienteY += 4.5;
     }
     doc.text(`Endereço: ${enderecoFormatadoPDF}`, 18, clienteY);
 
-    let finalY = 69;
+    let finalY = 67; // Subimos um pouco o início das tabelas
 
     if (formData.tipo_negociacao === 'cotacao') {
-        doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("ITENS DA COTAÇÃO", 14, 66); 
+        doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.text("ITENS DA COTAÇÃO", 14, finalY); 
 
         const itens = getItensCotacao();
         const tableBody = itens.map((it: any) => [
@@ -729,7 +729,7 @@ function PipelineContent() {
         ]);
 
         autoTable(doc, {
-            startY: 69,
+            startY: finalY + 2,
             head: [['Insumo', 'Info Adicional', 'Embalagem', 'Classificação', 'Preço/g', 'Total', 'Validade']],
             body: tableBody,
             theme: 'grid',
@@ -743,12 +743,10 @@ function PipelineContent() {
             }
         });
 
-        finalY = (doc as any).lastAutoTable.finalY || 69;
-
-        doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text(`TOTAL: ${formatCurrency(formData.valor)}`, pageWidth - 14, finalY + 10, { align: "right" });
-
-        finalY += 15;
+        finalY = (doc as any).lastAutoTable.finalY;
+        doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.text(`TOTAL: ${formatCurrency(formData.valor)}`, pageWidth - 14, finalY + 8, { align: "right" });
+        finalY += 14;
 
     } else {
         const precoG = parseMoney(formData.valor_g_tabela);
@@ -769,10 +767,11 @@ function PipelineContent() {
         const qtdFormulasParaPagarParcela = sugestaoVenda > 0 ? (valorParcela / sugestaoVenda) : 0;
         const viabilidadeDiaria = parseInt(String(diasPrimeiraParcela)) > 0 ? (qtdFormulasParaPagarParcela / parseInt(String(diasPrimeiraParcela))) : 0;
 
-        doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 14, 66); 
+        doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.text("ESPECIFICAÇÃO DO INVESTIMENTO", 14, finalY); 
+        
         autoTable(doc, {
-            startY: 69,
+            startY: finalY + 2,
             head: [['DESCRIÇÃO', 'VALORES']],
             body: [
                 ['Ativo/Insumo', formData.produto || 'N/D'],
@@ -787,14 +786,15 @@ function PipelineContent() {
             ],
             theme: 'grid',
             headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
-            styles: { fontSize: 9, cellPadding: 3, textColor: [60, 60, 60] },
+            // Reduzimos o padding e a fonte para compactar
+            styles: { fontSize: 8.5, cellPadding: 2, textColor: [60, 60, 60] },
             columnStyles: { 0: { cellWidth: 120, fontStyle: 'normal' }, 1: { cellWidth: 62, fontStyle: 'bold', halign: 'right' } }
         });
 
-        finalY = (doc as any).lastAutoTable.finalY || 130;
+        finalY = (doc as any).lastAutoTable.finalY;
         
         autoTable(doc, {
-            startY: finalY + 6,
+            startY: finalY + 4, // Espaço menor entre as tabelas
             head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
             body: [
                 [`Custo Matéria-Prima (Dose ${pesoFormula}g)`, formatCurrency(custoMP)],
@@ -804,81 +804,72 @@ function PipelineContent() {
             ],
             theme: 'grid',
             headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
-            styles: { fontSize: 9, cellPadding: 3, textColor: [60, 60, 60] },
+            styles: { fontSize: 8.5, cellPadding: 2, textColor: [60, 60, 60] },
             columnStyles: { 0: { cellWidth: 120, fontStyle: 'normal' }, 1: { cellWidth: 62, fontStyle: 'bold', halign: 'right' } }
         });
         
-        finalY = (doc as any).lastAutoTable.finalY || 165;
-        
-        // AJUSTE 1: Redução do espaço em branco para não forçar quebra de página
-        finalY += 8; 
+        finalY = (doc as any).lastAutoTable.finalY;
+        finalY += 8; // Espaço exato puxando as condições para cima
     }
 
-    // --- BLOCO COMUM PARA AMBAS AS PROPOSTAS (LOGÍSTICA E OBSERVAÇÕES) ---
-    // AJUSTE 2: Quebra de página controlada. O rodapé ocupa até o Y=255. 
-    // Se o bloco começar depois de 210, vai sobrepor. Então quebramos a página.
-    if (finalY > 210) {
+    // Quebra a página apenas se houver risco real de sobrepor o rodapé principal
+    if (finalY > 235) {
         doc.addPage();
         finalY = 20;
     }
 
-    doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+    // --- BLOCO DE LOGÍSTICA COMPACTADO ---
+    doc.setFontSize(9.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
     doc.text("CONDIÇÕES COMERCIAIS:", 14, finalY);
     
-    doc.setFontSize(9);
-    
     const drawRow = (label: string, value: string, y: number) => {
-        doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
+        doc.setFontSize(8.5); doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
         doc.text(label, 14, y);
         const labelWidth = doc.getTextWidth(label);
         doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
         doc.text(` ${value}`, 14 + labelWidth, y);
     };
 
-    drawRow("PAGAMENTO:", formData.condicoes_pagamento || 'A combinar', finalY + 6);
-    drawRow("TRANSPORTADORA:", formData.frete_transportadora || '-', finalY + 11);
+    drawRow("PAGAMENTO:", formData.condicoes_pagamento || 'A combinar', finalY + 5);
+    drawRow("TRANSPORTADORA:", formData.frete_transportadora || '-', finalY + 9.5);
 
     const pDias = formData.frete_previsao ? formData.frete_previsao.trim() : '';
     let prazoStr = 'A combinar';
     if (pDias) {
-        if (pDias.toLowerCase().includes('dia')) {
-            prazoStr = pDias;
-        } else {
-            prazoStr = pDias === '1' ? '1 dia' : `${pDias} dias`;
-        }
+        prazoStr = pDias.toLowerCase().includes('dia') ? pDias : (pDias === '1' ? '1 dia' : `${pDias} dias`);
     }
-    drawRow("PRAZO DE ENTREGA:", `Postagem + ${prazoStr} após confirmação.`, finalY + 16);
+    drawRow("PRAZO DE ENTREGA:", `Postagem + ${prazoStr} após confirmação.`, finalY + 14);
 
     const freteTexto = formData.frete_tipo === 'CIF' ? 'CIF - Por conta da YellowLeaf' : (formData.frete_tipo === 'FOB' ? 'FOB - Por conta do Cliente' : '-');
-    drawRow("FRETE:", freteTexto, finalY + 21);
+    drawRow("FRETE:", freteTexto, finalY + 18.5);
     
-    finalY += 28;
+    finalY += 24;
 
-    // BLOCO DE CARTÃO DE CRÉDITO
+    // --- BLOCO DE CARTÃO DE CRÉDITO COMPACTADO ---
     doc.setFillColor(232, 245, 233); 
-    doc.rect(14, finalY, pageWidth - 28, 12, 'F');
-    doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.text("NOVIDADE NA YELLOWLEAF!", 18, finalY + 5);
-    doc.setFontSize(8); doc.setFont("helvetica", "normal");
-    doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 9);
+    doc.rect(14, finalY, pageWidth - 28, 10, 'F'); // Altura reduzida para 10
+    doc.setFontSize(8.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+    doc.text("NOVIDADE NA YELLOWLEAF!", 18, finalY + 4.5);
+    doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
+    doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 8);
     
-    finalY += 18;
+    finalY += 15;
 
+    // --- OBSERVAÇÕES ---
     if (formData.observacoes_proposta && formData.observacoes_proposta.trim() !== '') {
-        doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.setFontSize(9.5); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
         doc.text("OBSERVAÇÕES ADICIONAIS:", 14, finalY);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+        doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
         const splitObs = doc.splitTextToSize(formData.observacoes_proposta, pageWidth - 28);
-        doc.text(splitObs, 14, finalY + 6);
+        doc.text(splitObs, 14, finalY + 5);
     }
 
-    // AJUSTE 3: RODAPÉ EM TODAS AS PÁGINAS
-    // Este loop volta em todas as páginas criadas (1 ou 2) e desenha o selo e contatos em todas.
+    // --- RODAPÉ GARANTIDO EM TODAS AS PÁGINAS ---
     const pageCount = (doc as any).internal.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
         
-        doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
         doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", pageWidth / 2, 262, { align: "center" });
         doc.setFontSize(8); doc.setTextColor(100, 100, 100); doc.setFont("helvetica", "normal");
         const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e\npromovemos sua comercialização com responsabilidade e ética.";
@@ -889,7 +880,7 @@ function PipelineContent() {
         catch (e1) { try { doc.addImage("/selo.png", "PNG", (pageWidth / 2) - 40, 273, 80, 15); imagemAdicionada = true; } catch (e2) {} }
         
         if (!imagemAdicionada) {
-            doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+            doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
             doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", pageWidth / 2, 280, { align: "center" });
         }
 
@@ -898,7 +889,7 @@ function PipelineContent() {
         const bottomLineY = 289;
         doc.line(14, bottomLineY - 4, pageWidth - 14, bottomLineY - 4);
 
-        doc.setFontSize(8); doc.setTextColor(150, 150, 150); doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5); doc.setTextColor(150, 150, 150); doc.setFont("helvetica", "normal");
         doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, bottomLineY);
         
         const representante = equipe.find(u => u.id === formData.user_id);
