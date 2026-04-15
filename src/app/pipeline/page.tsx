@@ -750,58 +750,6 @@ function PipelineContent() {
 
         finalY += 18;
 
-        // NOVO: CONDIÇÕES COMERCIAIS (TÓPICOS IGUAL AO SISTEMA ALINHADOS)
-        doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("CONDIÇÕES COMERCIAIS:", 14, finalY);
-        
-        doc.setFontSize(9);
-        
-        const drawRow = (label: string, value: string, y: number) => {
-            doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
-            doc.text(label, 14, y);
-            const labelWidth = doc.getTextWidth(label);
-            doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
-            doc.text(` ${value}`, 14 + labelWidth, y);
-        };
-
-        drawRow("PAGAMENTO:", formData.condicoes_pagamento || 'A combinar', finalY + 7);
-        drawRow("TRANSPORTADORA:", formData.frete_transportadora || '-', finalY + 12);
-
-        const pDias = formData.frete_previsao ? formData.frete_previsao.trim() : '';
-        let prazoStr = 'A combinar';
-        if (pDias) {
-            if (pDias.toLowerCase().includes('dia')) {
-                prazoStr = pDias;
-            } else {
-                prazoStr = pDias === '1' ? '1 dia' : `${pDias} dias`;
-            }
-        }
-        drawRow("PRAZO DE ENTREGA:", `Postagem + ${prazoStr} após confirmação.`, finalY + 17);
-
-        const freteTexto = formData.frete_tipo === 'CIF' ? 'CIF - Por conta da YellowLeaf' : (formData.frete_tipo === 'FOB' ? 'FOB - Por conta do Cliente' : '-');
-        drawRow("FRETE:", freteTexto, finalY + 22);
-        
-        finalY += 32;
-
-        // BLOCO DE CARTÃO DE CRÉDITO
-        doc.setFillColor(232, 245, 233); 
-        doc.rect(14, finalY, pageWidth - 28, 12, 'F');
-        doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("NOVIDADE NA YELLOWLEAF!", 18, finalY + 5);
-        doc.setFontSize(8); doc.setFont("helvetica", "normal");
-        doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 9);
-        
-        finalY += 20;
-
-        if (formData.observacoes_proposta && formData.observacoes_proposta.trim() !== '') {
-            doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-            doc.text("OBSERVAÇÕES ADICIONAIS:", 14, finalY);
-            doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
-            const splitObs = doc.splitTextToSize(formData.observacoes_proposta, pageWidth - 28);
-            doc.text(splitObs, 14, finalY + 6);
-            finalY += (splitObs.length * 5) + 10;
-        }
-
     } else {
         const precoG = parseMoney(formData.valor_g_tabela);
         const kg = parseMoney(formData.kg_proposto);
@@ -840,9 +788,12 @@ function PipelineContent() {
             theme: 'grid',
             headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
             styles: { fontSize: 9, cellPadding: 3, textColor: [60, 60, 60] },
-            columnStyles: { 0: { fontStyle: 'normal' }, 1: { fontStyle: 'bold', halign: 'right' } }
+            // AQUI ESTÁ O ALINHAMENTO EXATO DAS COLUNAS (120mm + 62mm = 182mm)
+            columnStyles: { 0: { cellWidth: 120, fontStyle: 'normal' }, 1: { cellWidth: 62, fontStyle: 'bold', halign: 'right' } }
         });
+
         finalY = (doc as any).lastAutoTable.finalY || 130;
+        
         autoTable(doc, {
             startY: finalY + 6,
             head: [['ANÁLISE DE RETORNO (PAYBACK)', 'ESTIMATIVA']],
@@ -855,41 +806,100 @@ function PipelineContent() {
             theme: 'grid',
             headStyles: { fillColor: darkGreen, textColor: 255, fontStyle: 'bold', halign: 'left' },
             styles: { fontSize: 9, cellPadding: 3, textColor: [60, 60, 60] },
-            columnStyles: { 0: { fontStyle: 'normal' }, 1: { fontStyle: 'bold', halign: 'right' } }
+            // MESMO ALINHAMENTO PARA A SEGUNDA TABELA
+            columnStyles: { 0: { cellWidth: 120, fontStyle: 'normal' }, 1: { cellWidth: 62, fontStyle: 'bold', halign: 'right' } }
         });
+        
         finalY = (doc as any).lastAutoTable.finalY || 165;
+        finalY += 15;
     }
 
+    // --- BLOCO COMUM PARA AMBAS AS PROPOSTAS (LOGÍSTICA E OBSERVAÇÕES) ---
+    // Impede que as informações fiquem cortadas no final da página
+    if (finalY > 230) {
+        doc.addPage();
+        finalY = 20;
+    }
+
+    doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+    doc.text("CONDIÇÕES COMERCIAIS:", 14, finalY);
+    
+    doc.setFontSize(9);
+    
+    const drawRow = (label: string, value: string, y: number) => {
+        doc.setFont("helvetica", "bold"); doc.setTextColor(0, 0, 0);
+        doc.text(label, 14, y);
+        const labelWidth = doc.getTextWidth(label);
+        doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+        doc.text(` ${value}`, 14 + labelWidth, y);
+    };
+
+    drawRow("PAGAMENTO:", formData.condicoes_pagamento || 'A combinar', finalY + 7);
+    drawRow("TRANSPORTADORA:", formData.frete_transportadora || '-', finalY + 12);
+
+    const pDias = formData.frete_previsao ? formData.frete_previsao.trim() : '';
+    let prazoStr = 'A combinar';
+    if (pDias) {
+        if (pDias.toLowerCase().includes('dia')) {
+            prazoStr = pDias;
+        } else {
+            prazoStr = pDias === '1' ? '1 dia' : `${pDias} dias`;
+        }
+    }
+    drawRow("PRAZO DE ENTREGA:", `Postagem + ${prazoStr} após confirmação.`, finalY + 17);
+
+    const freteTexto = formData.frete_tipo === 'CIF' ? 'CIF - Por conta da YellowLeaf' : (formData.frete_tipo === 'FOB' ? 'FOB - Por conta do Cliente' : '-');
+    drawRow("FRETE:", freteTexto, finalY + 22);
+    
+    finalY += 32;
+
+    // BLOCO DE CARTÃO DE CRÉDITO
+    doc.setFillColor(232, 245, 233); 
+    doc.rect(14, finalY, pageWidth - 28, 12, 'F');
+    doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+    doc.text("NOVIDADE NA YELLOWLEAF!", 18, finalY + 5);
+    doc.setFontSize(8); doc.setFont("helvetica", "normal");
+    doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 9);
+    
+    finalY += 20;
+
+    if (formData.observacoes_proposta && formData.observacoes_proposta.trim() !== '') {
+        doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
+        doc.text("OBSERVAÇÕES ADICIONAIS:", 14, finalY);
+        doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+        const splitObs = doc.splitTextToSize(formData.observacoes_proposta, pageWidth - 28);
+        doc.text(splitObs, 14, finalY + 6);
+        finalY += (splitObs.length * 5) + 10;
+    }
+
+    // --- RODAPÉ ---
     doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", pageWidth / 2, finalY + 12, { align: "center" });
+    doc.text("QUALIDADE E PRODUÇÃO CERTIFICADA", pageWidth / 2, 260, { align: "center" });
     doc.setFontSize(8); doc.setTextColor(100, 100, 100); doc.setFont("helvetica", "normal");
     const textQualidade = "Trabalhamos com matéria-prima advinda de produção certificada pelos mais altos padrões técnicos do mundo e\npromovemos sua comercialização com responsabilidade e ética.";
-    doc.text(textQualidade, pageWidth / 2, finalY + 17, { align: "center", lineHeightFactor: 1.5 });
+    doc.text(textQualidade, pageWidth / 2, 265, { align: "center", lineHeightFactor: 1.5 });
 
     let imagemAdicionada = false;
-    const logoY = finalY + 23;
-    try { doc.addImage("/selo.jpg", "JPEG", (pageWidth / 2) - 40, logoY, 80, 16); imagemAdicionada = true; } 
-    catch (e1) { try { doc.addImage("/selo.png", "PNG", (pageWidth / 2) - 40, logoY, 80, 16); imagemAdicionada = true; } catch (e2) {} }
+    try { doc.addImage("/selo.jpg", "JPEG", (pageWidth / 2) - 40, 270, 80, 16); imagemAdicionada = true; } 
+    catch (e1) { try { doc.addImage("/selo.png", "PNG", (pageWidth / 2) - 40, 270, 80, 16); imagemAdicionada = true; } catch (e2) {} }
     
     if (!imagemAdicionada) {
         doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", pageWidth / 2, logoY + 8, { align: "center" });
+        doc.text("HACCP   |   ISO FSSC 22000   |   GMP   |   CENTHIRD", pageWidth / 2, 278, { align: "center" });
     }
 
     doc.setDrawColor(darkGreen[0], darkGreen[1], darkGreen[2]);
     doc.setLineWidth(1); 
-    const bottomLineY = doc.internal.pageSize.height - 15;
-    doc.line(14, bottomLineY, pageWidth - 14, bottomLineY);
+    const bottomLineY = doc.internal.pageSize.height - 10;
+    doc.line(14, bottomLineY - 3, pageWidth - 14, bottomLineY - 3);
 
     doc.setFontSize(8); doc.setTextColor(150, 150, 150); doc.setFont("helvetica", "normal");
-    doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, bottomLineY + 5);
-    doc.text("www.yellowleaf.com.br | @yellowleafnutraceuticals", 14, bottomLineY + 9);
-
+    doc.text("YELLOW LEAF IMPORTAÇÃO E EXPORTAÇÃO LTDA | CNPJ: 45.643.261/0001-68", 14, bottomLineY);
+    
     const representante = equipe.find(u => u.id === formData.user_id);
     const responsavelNome = representante?.nome || usuarioLogado?.nome || 'Comercial YellowLeaf';
     const responsavelTel = representante?.telefone || '(44) 99102-7642';
-    doc.text(`${responsavelNome} - Comercial YellowLeaf`, pageWidth - 14, bottomLineY + 5, { align: "right" });
-    doc.text(`WhatsApp: ${responsavelTel}`, pageWidth - 14, bottomLineY + 9, { align: "right" });
+    doc.text(`${responsavelNome} - WhatsApp: ${responsavelTel}`, pageWidth - 14, bottomLineY, { align: "right" });
 
     const fileNamePrefix = formData.tipo_negociacao === 'cotacao' ? (isPedido ? 'Pedido' : 'Orcamento') : 'Proposta';
     doc.save(`${fileNamePrefix}_${formData.nome_cliente.replace(/\s+/g, '_')}_${formatPropostaId(formData.numero_proposta)}.pdf`);
@@ -1156,6 +1166,22 @@ function PipelineContent() {
                               <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">KG Bonificado</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold" value={formData.kg_bonificado} onChange={e => setFormData({...formData, kg_bonificado: e.target.value})}/></div>
                               <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Parcelas</label><input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold" value={formData.parcelas} onChange={e => setFormData({...formData, parcelas: e.target.value})}/></div>
                           </div>
+                          
+                          {/* CAMPOS REINSERIDOS AQUI */}
+                          <div className="md:col-span-2">
+                              <label className="text-xs font-bold text-slate-700 mb-1.5 block">Dias para 1ª Parcela</label>
+                              <input type="number" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold" value={formData.dias_primeira_parcela} onChange={e => setFormData({...formData, dias_primeira_parcela: e.target.value})}/>
+                          </div>
+                          <div className="md:col-span-4 border-t border-slate-200 my-2 md:my-4 pt-4">
+                              <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Variáveis do Payback (Para o PDF)</h4>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                  <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Peso da Fórmula (g)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold" value={formData.peso_formula_g} onChange={e => setFormData({...formData, peso_formula_g: e.target.value})}/></div>
+                                  <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Fator de Lucro</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold" value={formData.fator_lucro} onChange={e => setFormData({...formData, fator_lucro: e.target.value})}/></div>
+                                  <div><label className="text-xs font-bold text-slate-700 mb-1.5 block">Custo Fixo / Fórm. (R$)</label><input type="text" className="w-full bg-white border border-slate-300 rounded-xl p-3 text-sm font-bold" value={formData.custo_fixo_operacional} onChange={e => setFormData({...formData, custo_fixo_operacional: e.target.value})}/></div>
+                              </div>
+                          </div>
+                          {/* FIM DOS CAMPOS REINSERIDOS */}
+
                       </>
                   ) : (
                       <div className="md:col-span-4 bg-slate-50 border border-slate-200 p-4 rounded-xl shadow-sm">
