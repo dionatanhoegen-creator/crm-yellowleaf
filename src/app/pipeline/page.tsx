@@ -1325,9 +1325,9 @@ function PipelineContent() {
 
                       {incluirSegundaPagina && (
                           <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden bg-white relative">
-                              {/* Esta div invisível é onde o HTML fica puro para o html2canvas ler perfeitamente */}
-                              <div className="absolute opacity-0 pointer-events-none w-[800px] left-0 top-0 -z-50 bg-white p-6" ref={richTextRef}>
-                                  <div dangerouslySetInnerHTML={{ __html: conteudoRichText }} className="prose prose-sm max-w-none prose-img:max-w-full prose-table:w-full prose-td:border prose-td:p-2 prose-th:bg-slate-100 prose-th:border prose-th:p-2"></div>
+                            {/* Esta div invisível é onde o HTML fica puro para o html2canvas ler perfeitamente (FORÇANDO CORES HEX PARA EVITAR O ERRO 'LAB' DO TAILWIND) */}
+                              <div style={{ position: 'absolute', width: '800px', left: '-9999px', top: 0, backgroundColor: '#ffffff', color: '#222222', padding: '30px' }} ref={richTextRef}>
+                                  <div dangerouslySetInnerHTML={{ __html: conteudoRichText }} className="ql-editor" style={{ fontFamily: 'Helvetica, Arial, sans-serif', fontSize: '14px', backgroundColor: '#ffffff' }}></div>
                               </div>
                               
                               <ReactQuill 
