@@ -9,14 +9,13 @@ import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { 
   LayoutDashboard, Users, Trello, Package, Lock, 
   BarChart3, LogOut, Menu, X, ChevronRight,
-  FileText, Shield, ChevronDown, Stethoscope, Lightbulb, CalendarCheck, Target, TrendingUp, Bell, CheckCircle2, Circle, Trash2, Radar
+  FileText, Shield, ChevronDown, Stethoscope, Lightbulb, CalendarCheck, Target, TrendingUp, Bell, CheckCircle2, Circle, Trash2, Radar, Download
 } from 'lucide-react';
 
 const outfit = Outfit({ subsets: ["latin"] });
 
 const MENU_BASE = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard, key: 'faturamento', section: 'Visão Geral' },
-  // { name: 'Análise de Vendas', path: '/analise-vendas', icon: TrendingUp, key: 'faturamento', section: 'Visão Geral' }, // <-- OCULTADO TEMPORARIAMENTE
   { name: 'Faturamento', path: '/faturamento', icon: BarChart3, key: 'faturamento', section: 'Visão Geral' },
   { name: 'Relatórios', path: '/relatorios', icon: FileText, key: 'relatorios', section: 'Visão Geral' },
   { name: 'Prospecção', path: '/prospeccao', icon: Target, key: 'pipeline', section: 'Vendas & Comercial' },
@@ -43,6 +42,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
   const [notificacoes, setNotificacoes] = useState<any[]>([]);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
+  
+  // ESTADO PARA O BOTÃO DE INSTALAÇÃO DO APP
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   const isLoginPage = pathname === '/login';
 
@@ -54,6 +56,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   };
 
   useEffect(() => {
+    // 1. Ligar o Service Worker
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js?v=4').catch((err) => console.log('Erro no SW', err));
+    }
+
+    // 2. Capturar o evento de instalação do Android e mostrar o nosso botão
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault(); // Impede o Chrome de mostrar aquele aviso chato na tela
+      setDeferredPrompt(e); // Guarda o evento para usarmos no nosso botão
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
     let intervalId: NodeJS.Timeout;
 
     const carregarAcessos = async () => {
@@ -86,8 +100,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
     return () => {
         if (intervalId) clearInterval(intervalId);
+        window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
   }, [supabase, isLoginPage]);
+
+  // FUNÇÃO QUE DISPARA QUANDO CLICAR NO NOSSO BOTÃO DE INSTALAR
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+    }
+  };
 
   const buscarNotificacoes = async (userId: string) => {
       const { data } = await supabase
@@ -142,6 +167,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   if (isLoginPage) {
     return (
       <html lang="pt-br">
+        <head>
+          <link rel="manifest" href="/manifest.json?v=4" />
+          <meta name="theme-color" content="#0f392b" />
+          <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+          <meta name="mobile-web-app-capable" content="yes" />
+          <meta name="apple-mobile-web-app-capable" content="yes" />
+        </head>
         <body className={`${outfit.className} bg-slate-50 text-slate-700`}>
           {children}
         </body>
@@ -160,6 +192,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <html lang="pt-br">
+      <head>
+        <link rel="manifest" href="/manifest.json?v=4" />
+        <meta name="theme-color" content="#0f392b" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+      </head>
       <body className={`${outfit.className} bg-slate-50 text-slate-700 overflow-x-hidden`}>
         
         <header className="fixed top-0 left-0 right-0 h-16 bg-white border-b border-slate-200 z-[40] flex items-center px-4 justify-between shadow-sm">
@@ -312,7 +351,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             {menuPermitido.length === 0 && <p className="text-center text-xs text-slate-500 mt-10 px-4 leading-relaxed">Seu usuário não possui módulos liberados.<br/>Fale com o Administrador.</p>}
           </nav>
 
-          <div className="absolute bottom-0 left-0 right-0 p-6 bg-[#0a261d] border-t border-white/5">
+          <div className="absolute bottom-0 left-0 right-0 p-6 bg-[#0a261d] border-t border-white/5 flex flex-col gap-3">
+            
+            {/* NOSSO BOTÃO DE INSTALAR (Só aparece no Android se o Google autorizar) */}
+            {deferredPrompt && (
+                <button onClick={handleInstallApp} className="flex items-center justify-center gap-3 bg-green-600 hover:bg-green-500 text-white text-sm font-bold w-full p-3 rounded-xl shadow-lg transition animate-in fade-in zoom-in duration-300">
+                  <Download size={18} /> Instalar Aplicativo
+                </button>
+            )}
+
             <button onClick={handleLogout} className="flex items-center justify-center gap-3 text-red-400 hover:text-red-300 text-sm font-bold w-full p-3 rounded-xl border border-red-500/20 hover:bg-white/5 transition">
               <LogOut size={18} /> Encerrar Sessão
             </button>
