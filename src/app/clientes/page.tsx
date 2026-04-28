@@ -41,14 +41,15 @@ export default function ClientesPage() {
     fetchClientes();
   }, []);
 
-  // FUNÇÃO BLINDADA E CORRIGIDA (Sem cabeçalhos que assustam o Google)
+// FUNÇÃO 100% LIMPA (Sem disparar o bloqueio CORS do Google)
   const fetchClientes = async () => {
     try {
+      // O truque do timestamp continua para enganar o cache da Vercel
       const timestamp = new Date().getTime();
-      // O "?t=timestamp" já é suficiente para furar o cache da Vercel sem bloquear no Google
-      const response = await fetch(`${API_URL}?path=clientes&t=${timestamp}`, {
-          cache: 'no-store'
-      });
+      
+      // Chamada simples: sem o bloco { cache: ... } que irrita o Google
+      const response = await fetch(`${API_URL}?path=clientes&t=${timestamp}`);
+      
       const json = await response.json();
       if (json.success && Array.isArray(json.data)) {
         setClientes(json.data);
