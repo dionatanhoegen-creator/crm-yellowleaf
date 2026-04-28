@@ -14,17 +14,16 @@ const API_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zE
 export default function ClientesPage() {
   const [clientes, setClientes] = useState<any[]>([]);
   const [busca, setBusca] = useState("");
-  const [filtroVendedorPrincipal, setFiltroVendedorPrincipal] = useState(""); // NOVO: Filtro da tela principal
+  const [filtroVendedorPrincipal, setFiltroVendedorPrincipal] = useState("");
   const [loading, setLoading] = useState(true);
   const [clienteSelecionado, setClienteSelecionado] = useState<any>(null);
   const [mounted, setMounted] = useState(false);
 
-  // --- ESTADOS DO NOVO RELATÓRIO ---
   const [modalRelatorioOpen, setModalRelatorioOpen] = useState(false);
   const [filtroUF, setFiltroUF] = useState("");
   const [filtroCidade, setFiltroCidade] = useState("");
   const [filtroStatusRelatorio, setFiltroStatusRelatorio] = useState("todos"); 
-  const [filtroVendedorRelatorio, setFiltroVendedorRelatorio] = useState(""); // NOVO: Filtro no Relatório
+  const [filtroVendedorRelatorio, setFiltroVendedorRelatorio] = useState(""); 
   
   const [colunasRelatorio, setColunasRelatorio] = useState({
       fantasia: true,
@@ -42,13 +41,12 @@ export default function ClientesPage() {
     fetchClientes();
   }, []);
 
-  // --- FUNÇÃO ATUALIZADA COM QUEBRA DE CACHE ---
+  // FUNÇÃO BLINDADA COM QUEBRA DE CACHE (Garante a lista sempre ao vivo)
   const fetchClientes = async () => {
     try {
-      // Adicionamos um timestamp no final da URL para enganar o navegador e forçar ele a baixar os dados mais recentes do Google Sheets
       const timestamp = new Date().getTime();
       const response = await fetch(`${API_URL}?path=clientes&t=${timestamp}`, {
-          cache: 'no-store', // Diz ao Next.js para não usar cache
+          cache: 'no-store',
           headers: {
               'Pragma': 'no-cache',
               'Cache-Control': 'no-cache'
@@ -59,24 +57,21 @@ export default function ClientesPage() {
         setClientes(json.data);
       }
     } catch (error) {
-      console.error("Erro ao buscar clientes:", error);
+      console.error("Erro:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  // --- EXTRAIR LISTA ÚNICA DE VENDEDORES (GERENTES DE CONTA) ---
   const vendedoresDisponiveis = useMemo(() => {
       const vends = clientes.map(c => c.vendedor).filter(Boolean);
       return Array.from(new Set(vends)).sort();
   }, [clientes]);
 
-  // --- CÁLCULOS DO DASHBOARD ---
   const stats = useMemo(() => {
     const total = clientes.length;
     const bloqueados = clientes.filter(c => c.bloqueado).length;
     
-    // Inativos: Data de compra > 365 dias atrás
     const inativos = clientes.filter(c => {
       if (!c.ultima_compra) return false;
       const diffTime = Math.abs(new Date().getTime() - new Date(c.ultima_compra).getTime());
@@ -84,13 +79,11 @@ export default function ClientesPage() {
       return diffDays > 365;
     }).length;
 
-    // Novos: Sem data de última compra
     const novos = clientes.filter(c => !c.ultima_compra).length;
 
     return { total, bloqueados, inativos, novos };
   }, [clientes]);
 
-  // Filtro de busca (Atualizado com o Gerente de Conta)
   const clientesFiltrados = clientes.filter(c => {
     const termo = busca.toLowerCase();
     const matchTexto = (c.razao && c.razao.toLowerCase().includes(termo)) ||
@@ -102,7 +95,6 @@ export default function ClientesPage() {
     return matchTexto && matchVendedor;
   });
 
-  // --- FILTROS DINÂMICOS PARA O RELATÓRIO ---
   const ufsDisponiveis = useMemo(() => {
       const ufs = clientes.map(c => c.uf).filter(Boolean);
       return Array.from(new Set(ufs)).sort();
@@ -124,7 +116,7 @@ export default function ClientesPage() {
   };
 
   const calcularRecencia = (dataStr: string) => {
-    if (!dataStr) return { dias: null, texto: "Sem registro" };
+    if (!dataStr) return { dias: null, texto: "Sem registo" };
     const diffDays = Math.ceil(Math.abs(new Date().getTime() - new Date(dataStr).getTime()) / (1000 * 60 * 60 * 24)); 
     return { dias: diffDays, texto: `${diffDays} dias sem comprar` };
   };
@@ -139,7 +131,6 @@ export default function ClientesPage() {
     return isNaN(numero) ? "R$ 0,00" : numero.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
 
-  // --- FUNÇÃO PARA GERAR O RELATÓRIO PDF ---
   const gerarRelatorioPDF = () => {
       const doc = new jsPDF({ orientation: "landscape" });
 
@@ -158,11 +149,10 @@ export default function ClientesPage() {
       if (filtroStatusRelatorio !== 'todos') subTitulo += ` | Filtro: ${filtroStatusRelatorio.toUpperCase()}`;
       doc.text(subTitulo, 14, 21);
 
-      // 1. Aplica os filtros selecionados no modal
       let dadosOrdenados = clientes.filter(c => {
           if (filtroUF && c.uf !== filtroUF) return false;
           if (filtroCidade && c.cidade !== filtroCidade) return false;
-          if (filtroVendedorRelatorio && c.vendedor !== filtroVendedorRelatorio) return false; // Filtro novo no PDF
+          if (filtroVendedorRelatorio && c.vendedor !== filtroVendedorRelatorio) return false; 
           
           if (filtroStatusRelatorio === 'bloqueados' && !c.bloqueado) return false;
           if (filtroStatusRelatorio === 'inativos') {
@@ -176,10 +166,8 @@ export default function ClientesPage() {
           return true;
       });
 
-      // 2. Ordena por nome Fantasia
       dadosOrdenados.sort((a, b) => (a.fantasia || a.razao || "").localeCompare(b.fantasia || b.razao || ""));
 
-      // 3. Monta Cabeçalhos dinamicamente
       let headers = [];
       if (colunasRelatorio.fantasia) headers.push('Nome Fantasia');
       if (colunasRelatorio.razao) headers.push('Razão Social');
@@ -190,7 +178,6 @@ export default function ClientesPage() {
       if (colunasRelatorio.ultima_compra) headers.push('Últ. Compra');
       if (colunasRelatorio.recencia) headers.push('Status/Recência');
 
-      // 4. Monta o Corpo da Tabela
       const tableBody = dadosOrdenados.map(c => {
           let row: any[] = [];
           if (colunasRelatorio.fantasia) row.push(c.fantasia || '-');
@@ -201,7 +188,7 @@ export default function ClientesPage() {
           if (colunasRelatorio.vendedor) row.push(c.vendedor || '-');
           
           if (colunasRelatorio.ultima_compra) {
-              row.push(c.ultima_compra ? new Date(c.ultima_compra).toLocaleDateString('pt-BR') : 'Sem registro');
+              row.push(c.ultima_compra ? new Date(c.ultima_compra).toLocaleDateString('pt-BR') : 'Sem registo');
           }
 
           if (colunasRelatorio.recencia) {
@@ -236,7 +223,6 @@ export default function ClientesPage() {
     <div className="p-3 md:p-6 bg-slate-50 min-h-screen font-sans text-slate-800 pb-20 md:pb-6">
       <div className="max-w-7xl mx-auto">
         
-        {/* HEADER E TÍTULO COM BOTÃO DE RELATÓRIO */}
         <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
           <div>
               <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Carteira de Clientes</h1>
@@ -250,7 +236,6 @@ export default function ClientesPage() {
           </button>
         </div>
 
-        {/* --- MINI DASHBOARD --- */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
           <div className="bg-white p-3 md:p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
              <div className="p-2 md:p-3 bg-blue-50 text-blue-600 rounded-xl shrink-0"><Users className="w-5 h-5 md:w-6 md:h-6"/></div>
@@ -282,7 +267,6 @@ export default function ClientesPage() {
           </div>
         </div>
 
-        {/* BARRA DE BUSCA E FILTRO DE GERENTE DE CONTA */}
         <div className="flex flex-col md:flex-row gap-3 mb-6">
           <div className="relative flex-1">
             <input 
@@ -308,7 +292,6 @@ export default function ClientesPage() {
           </div>
         </div>
 
-        {/* LISTA DE CARDS */}
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 animate-pulse">
             {[1,2,3,4,5,6].map(i => <div key={i} className="h-40 bg-slate-200 rounded-2xl"></div>)}
@@ -365,7 +348,6 @@ export default function ClientesPage() {
           </div>
         )}
 
-        {/* --- MODAL DE CONFIGURAÇÃO DE RELATÓRIO (BOTTOM SHEET MOBILE) --- */}
         {modalRelatorioOpen && mounted && createPortal(
           <div className="fixed inset-0 z-[99999] flex items-end md:items-center justify-center bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200 md:p-4">
              <div className="bg-white w-full max-w-3xl rounded-t-3xl md:rounded-3xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 md:zoom-in-95 duration-200 border border-slate-100 max-h-[90vh] flex flex-col">
@@ -457,7 +439,6 @@ export default function ClientesPage() {
           </div>, document.body
         )}
 
-        {/* --- MODAL DETALHES (BOTTOM SHEET MOBILE) --- */}
         {clienteSelecionado && mounted && createPortal(
           <div className="fixed inset-0 z-[99999] flex items-end md:items-center justify-center bg-slate-900/80 backdrop-blur-sm animate-in fade-in duration-200 md:p-4">
             <div className="absolute inset-0" onClick={() => setClienteSelecionado(null)}></div>
@@ -586,7 +567,7 @@ export default function ClientesPage() {
                 </button>
                 <button 
                   onClick={() => {
-                      const num = prompt("Digite o celular (apenas números):", clienteSelecionado.whatsapp || "");
+                      const num = prompt("Digite o telemóvel (apenas números):", clienteSelecionado.whatsapp || "");
                       if(num) abrirWhats(num);
                   }}
                   className="w-full md:flex-1 bg-green-600 hover:bg-green-700 text-white py-3.5 md:py-3 rounded-xl font-bold shadow-lg hover:shadow-green-200 transition transform active:scale-[0.98] flex items-center justify-center gap-2 text-sm"
