@@ -41,16 +41,13 @@ export default function ClientesPage() {
     fetchClientes();
   }, []);
 
-  // FUNÇÃO BLINDADA COM QUEBRA DE CACHE (Garante a lista sempre ao vivo)
+  // FUNÇÃO BLINDADA E CORRIGIDA (Sem cabeçalhos que assustam o Google)
   const fetchClientes = async () => {
     try {
       const timestamp = new Date().getTime();
+      // O "?t=timestamp" já é suficiente para furar o cache da Vercel sem bloquear no Google
       const response = await fetch(`${API_URL}?path=clientes&t=${timestamp}`, {
-          cache: 'no-store',
-          headers: {
-              'Pragma': 'no-cache',
-              'Cache-Control': 'no-cache'
-          }
+          cache: 'no-store'
       });
       const json = await response.json();
       if (json.success && Array.isArray(json.data)) {
