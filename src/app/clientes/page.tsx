@@ -9,7 +9,7 @@ import {
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-const API_URL = "https://script.google.com/macros/s/AKfycbzHIwreq_eM4TYwGTlpV_zEZwFgK0CxApBjMMSqkzaTVPkyz5R42fM-qc9aMLpzKGSz/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbw81mirFOFVrPZUoCokzCcqW_EDrwL8DztfypKwlUrnSuJXjpmOBWi_gRbS5oXZhB-9/exec";
 
 export default function ClientesPage() {
   const [clientes, setClientes] = useState<any[]>([]);
