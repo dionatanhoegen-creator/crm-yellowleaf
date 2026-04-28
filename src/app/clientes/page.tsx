@@ -42,15 +42,24 @@ export default function ClientesPage() {
     fetchClientes();
   }, []);
 
+  // --- FUNÇÃO ATUALIZADA COM QUEBRA DE CACHE ---
   const fetchClientes = async () => {
     try {
-      const response = await fetch(`${API_URL}?path=clientes`);
+      // Adicionamos um timestamp no final da URL para enganar o navegador e forçar ele a baixar os dados mais recentes do Google Sheets
+      const timestamp = new Date().getTime();
+      const response = await fetch(`${API_URL}?path=clientes&t=${timestamp}`, {
+          cache: 'no-store', // Diz ao Next.js para não usar cache
+          headers: {
+              'Pragma': 'no-cache',
+              'Cache-Control': 'no-cache'
+          }
+      });
       const json = await response.json();
       if (json.success && Array.isArray(json.data)) {
         setClientes(json.data);
       }
     } catch (error) {
-      console.error("Erro:", error);
+      console.error("Erro ao buscar clientes:", error);
     } finally {
       setLoading(false);
     }
