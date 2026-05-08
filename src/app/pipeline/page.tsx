@@ -981,10 +981,16 @@ function PipelineContent() {
                 doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
                 doc.text("ANEXOS E INFORMAÇÕES ADICIONAIS", 14, 20);
                 
-                // === LÓGICA MÁGICA: FATIAMENTO DE PÁGINAS ===
+   // === LÓGICA MÁGICA: FATIAMENTO DE PÁGINAS ===
                 let heightLeft = imgHeight;
                 let position = 26; 
-                const footerSpaceY = 250; // Onde começa o espaço do seu rodapé
+                const pageHeight = doc.internal.pageSize.getHeight();
+                
+                // 1. Recuo da margem para quebrar uma linha antes (afasta do selo)
+                const footerSpaceY = 230; 
+                
+                // 2. Sobreposição para não perder leitura se a imagem fatiar no meio da letra
+                const overlap = 4; 
                 
                 // Desenha a imagem na primeira página
                 doc.addImage(imgData, 'PNG', 14, position, imgWidth, imgHeight);
@@ -999,7 +1005,8 @@ function PipelineContent() {
                 // Loop que cria páginas novas até acabar o texto
                 while (heightLeft > 0) {
                     doc.addPage();
-                    let newPosition = 20 - printedHeight; 
+                    // O '+ overlap' recua a imagem na página nova para recuperar textos fatiados
+                    let newPosition = 20 - printedHeight + overlap; 
                     
                     doc.addImage(imgData, 'PNG', 14, newPosition, imgWidth, imgHeight);
                     
@@ -1012,9 +1019,8 @@ function PipelineContent() {
                     doc.rect(0, footerSpaceY, pageWidth, pageHeight - footerSpaceY, 'F');
                     
                     heightLeft -= (footerSpaceY - 20);
-                    printedHeight += (footerSpaceY - 20);
+                    printedHeight += (footerSpaceY - 20) - overlap;
                 }
-
                 // 4. Apaga o mini-navegador
                 document.body.removeChild(iframe);
             }
