@@ -903,37 +903,38 @@ function PipelineContent() {
         doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
         doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 8);
         
-        // --- NOVA: PÁGINA 2 (ANEXOS LIVRES COM IFRAME ISOLADO PARA EVITAR O ERRO 'LAB') ---
+// --- NOVA: PÁGINA 2 (ANEXOS LIVRES COM IFRAME ISOLADO PARA EVITAR O ERRO 'LAB') ---
         if (incluirSegundaPagina && conteudoRichText && conteudoRichText.trim() !== '' && conteudoRichText !== '<p><br></p>') {
             doc.addPage();
             
             // 1. Cria um "mini-navegador" escondido
             const iframe = document.createElement('iframe');
             iframe.style.position = 'absolute';
-            iframe.style.width = '800px';
+            // REDUZIMOS A LARGURA PARA NÃO "ESMAGAR" A IMAGEM NO PDF
+            iframe.style.width = '650px'; 
             iframe.style.left = '-9999px';
             document.body.appendChild(iframe);
 
             const iframeDoc = iframe.contentWindow?.document;
             if (iframeDoc) {
-                // 2. Preenche com CSS limpo e o texto do editor
+                // 2. Preenche com CSS limpo forçando tamanhos de fontes maiores
                 iframeDoc.open();
                 iframeDoc.write(`
                     <!DOCTYPE html>
                     <html>
                     <head>
                         <style>
-                            body { font-family: Helvetica, Arial, sans-serif; font-size: 14px; color: #333333; background: white; margin: 0; padding: 0; }
+                            body { font-family: Helvetica, Arial, sans-serif; font-size: 16px; color: #333333; background: white; margin: 0; padding: 20px; line-height: 1.5; }
                             * { box-sizing: border-box; }
                             table { width: 100%; border-collapse: collapse; margin-bottom: 1em; }
-                            th, td { border: 1px solid #cccccc; padding: 8px; text-align: left; }
+                            th, td { border: 1px solid #cccccc; padding: 8px; }
                             th { background-color: #f8f9fa; font-weight: bold; }
-                            h1, h2, h3 { color: #125530; margin-bottom: 0.5em; font-weight: bold; }
+                            h1 { font-size: 26px; color: #125530; margin-bottom: 0.5em; font-weight: bold; }
+                            h2 { font-size: 22px; color: #125530; margin-bottom: 0.5em; font-weight: bold; }
+                            h3 { font-size: 18px; color: #125530; margin-bottom: 0.5em; font-weight: bold; }
                             p { margin-bottom: 1em; }
-                            strong { font-weight: bold; color: #125530; }
-                            em { font-style: italic; }
+                            img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
                             ul, ol { margin-left: 20px; margin-bottom: 1em; padding-left: 20px; }
-                            img { max-width: 100%; height: auto; }
                         </style>
                     </head>
                     <body>
@@ -943,10 +944,10 @@ function PipelineContent() {
                 `);
                 iframeDoc.close();
 
-                // Dá 100 milissegundos pro mini-navegador processar a tela
-                await new Promise(resolve => setTimeout(resolve, 100));
+                // Dá 150 milissegundos pro mini-navegador processar a tela e as imagens
+                await new Promise(resolve => setTimeout(resolve, 150));
 
-                // 3. Tira a foto apenas do mini-navegador (onde o Tailwind não existe)
+                // 3. Tira a foto apenas do mini-navegador
                 const html2canvasModule = await import('html2canvas');
                 const html2canvas = html2canvasModule.default || html2canvasModule;
 
