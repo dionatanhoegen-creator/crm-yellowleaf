@@ -910,31 +910,40 @@ function PipelineContent() {
             // 1. Cria um "mini-navegador" escondido
             const iframe = document.createElement('iframe');
             iframe.style.position = 'absolute';
-            // REDUZIMOS A LARGURA PARA NÃO "ESMAGAR" A IMAGEM NO PDF
-            iframe.style.width = '650px'; 
+            iframe.style.width = '700px'; // Força largura exata para não distorcer a fonte
             iframe.style.left = '-9999px';
             document.body.appendChild(iframe);
 
             const iframeDoc = iframe.contentWindow?.document;
             if (iframeDoc) {
-                // 2. Preenche com CSS limpo forçando tamanhos de fontes maiores
+                // 2. Preenche com CSS limpo, forçando os 700px e fontes maiores
                 iframeDoc.open();
                 iframeDoc.write(`
                     <!DOCTYPE html>
                     <html>
                     <head>
                         <style>
-                            body { font-family: Helvetica, Arial, sans-serif; font-size: 16px; color: #333333; background: white; margin: 0; padding: 20px; line-height: 1.5; }
+                            body { 
+                                width: 700px; 
+                                margin: 0; 
+                                padding: 10px; 
+                                font-family: Helvetica, Arial, sans-serif; 
+                                font-size: 18px; /* FONTE BASE AUMENTADA */
+                                color: #333333; 
+                                background: white; 
+                                line-height: 1.5; 
+                            }
                             * { box-sizing: border-box; }
                             table { width: 100%; border-collapse: collapse; margin-bottom: 1em; }
                             th, td { border: 1px solid #cccccc; padding: 8px; }
                             th { background-color: #f8f9fa; font-weight: bold; }
-                            h1 { font-size: 26px; color: #125530; margin-bottom: 0.5em; font-weight: bold; }
-                            h2 { font-size: 22px; color: #125530; margin-bottom: 0.5em; font-weight: bold; }
-                            h3 { font-size: 18px; color: #125530; margin-bottom: 0.5em; font-weight: bold; }
+                            h1 { font-size: 28px; color: #125530; margin-bottom: 0.5em; font-weight: bold; }
+                            h2 { font-size: 24px; color: #125530; margin-bottom: 0.5em; font-weight: bold; }
+                            h3 { font-size: 20px; color: #125530; margin-bottom: 0.5em; font-weight: bold; }
                             p { margin-bottom: 1em; }
                             img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
                             ul, ol { margin-left: 20px; margin-bottom: 1em; padding-left: 20px; }
+                            strong { font-weight: bold; color: #125530; }
                         </style>
                     </head>
                     <body>
@@ -944,10 +953,10 @@ function PipelineContent() {
                 `);
                 iframeDoc.close();
 
-                // Dá 150 milissegundos pro mini-navegador processar a tela e as imagens
-                await new Promise(resolve => setTimeout(resolve, 150));
+                // Tempo para processar o render do HTML
+                await new Promise(resolve => setTimeout(resolve, 200));
 
-                // 3. Tira a foto apenas do mini-navegador
+                // 3. Tira a foto usando html2canvas com largura travada
                 const html2canvasModule = await import('html2canvas');
                 const html2canvas = html2canvasModule.default || html2canvasModule;
 
@@ -955,12 +964,15 @@ function PipelineContent() {
                     scale: 2,
                     useCORS: true,
                     logging: false,
-                    backgroundColor: '#ffffff'
+                    backgroundColor: '#ffffff',
+                    width: 700,
+                    windowWidth: 700
                 });
 
                 const imgData = canvas.toDataURL('image/png');
                 const imgWidth = pageWidth - 28; 
                 let imgHeight = (canvas.height * imgWidth) / canvas.width;
+                const pageHeight = doc.internal.pageSize.getHeight();
                 
                 if (isNaN(imgHeight) || imgHeight <= 0) {
                     imgHeight = 100;
@@ -968,13 +980,45 @@ function PipelineContent() {
                 
                 doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
                 doc.text("ANEXOS E INFORMAÇÕES ADICIONAIS", 14, 20);
-                doc.addImage(imgData, 'PNG', 14, 26, imgWidth, imgHeight);
+                
+                // === LÓGICA MÁGICA: FATIAMENTO DE PÁGINAS ===
+                let heightLeft = imgHeight;
+                let position = 26; 
+                const footerSpaceY = 250; // Onde começa o espaço do seu rodapé
+                
+                // Desenha a imagem na primeira página
+                doc.addImage(imgData, 'PNG', 14, position, imgWidth, imgHeight);
+                
+                // Limpa o fundo para o rodapé não ficar sobre a imagem
+                doc.setFillColor(255, 255, 255);
+                doc.rect(0, footerSpaceY, pageWidth, pageHeight - footerSpaceY, 'F');
+                
+                heightLeft -= (footerSpaceY - position);
+                let printedHeight = footerSpaceY - position; 
+                
+                // Loop que cria páginas novas até acabar o texto
+                while (heightLeft > 0) {
+                    doc.addPage();
+                    let newPosition = 20 - printedHeight; 
+                    
+                    doc.addImage(imgData, 'PNG', 14, newPosition, imgWidth, imgHeight);
+                    
+                    // Limpa a margem do topo
+                    doc.setFillColor(255, 255, 255);
+                    doc.rect(0, 0, pageWidth, 20, 'F');
+                    
+                    // Limpa a margem do rodapé
+                    doc.setFillColor(255, 255, 255);
+                    doc.rect(0, footerSpaceY, pageWidth, pageHeight - footerSpaceY, 'F');
+                    
+                    heightLeft -= (footerSpaceY - 20);
+                    printedHeight += (footerSpaceY - 20);
+                }
 
                 // 4. Apaga o mini-navegador
                 document.body.removeChild(iframe);
             }
         }
-
         // --- RODAPÉ ---
         const pageCount = (doc as any).internal.getNumberOfPages();
         for (let i = 1; i <= pageCount; i++) {
