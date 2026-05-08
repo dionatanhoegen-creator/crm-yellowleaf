@@ -562,7 +562,6 @@ function PipelineContent() {
             });
 
             if (repEncontrado) {
-                // Ajuste: Verifica se o cliente é do PRÓPRIO usuário logado, se for, ele pode abrir normalmente.
                 if (repEncontrado.id === usuarioLogado?.id) {
                     setIsRepLocked(true); 
                     setFormData(prev => ({ ...prev, user_id: repEncontrado.id }));
@@ -577,7 +576,6 @@ function PipelineContent() {
                         onCancel: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, cnpj: '', user_id: usuarioLogado.id })); setLoadingCNPJ(false); }
                     });
                 } else {
-                    // Ajuste: Se o vendedor logado tentar pegar cliente de OUTRO vendedor, a tela VERMELHA bloqueia.
                     setBlockModal({ 
                         open: true, 
                         title: 'CLIENTE DE OUTRA CARTEIRA', 
@@ -903,7 +901,7 @@ function PipelineContent() {
         doc.setFontSize(7.5); doc.setFont("helvetica", "normal");
         doc.text("Agora você pode pagar suas compras com CARTÃO DE CRÉDITO! Mais facilidade e praticidade, solicite o link para pagamento.", 18, finalY + 8);
         
-// --- NOVA: PÁGINA 2 (ANEXOS LIVRES COM IFRAME ISOLADO PARA EVITAR O ERRO 'LAB') ---
+        // --- NOVA: PÁGINA 2 (ANEXOS LIVRES COM IFRAME ISOLADO PARA EVITAR O ERRO 'LAB') ---
         if (incluirSegundaPagina && conteudoRichText && conteudoRichText.trim() !== '' && conteudoRichText !== '<p><br></p>') {
             doc.addPage();
             
@@ -972,7 +970,7 @@ function PipelineContent() {
                 const imgData = canvas.toDataURL('image/png');
                 const imgWidth = pageWidth - 28; 
                 let imgHeight = (canvas.height * imgWidth) / canvas.width;
-                const pageHeight = doc.internal.pageSize.getHeight();
+                const pageHeight = (doc as any).internal.pageSize.getHeight();
                 
                 if (isNaN(imgHeight) || imgHeight <= 0) {
                     imgHeight = 100;
@@ -981,12 +979,9 @@ function PipelineContent() {
                 doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
                 doc.text("ANEXOS E INFORMAÇÕES ADICIONAIS", 14, 20);
                 
-// === LÓGICA MÁGICA: FATIAMENTO DE PÁGINAS ===
+                // === LÓGICA MÁGICA: FATIAMENTO DE PÁGINAS ===
                 let heightLeft = imgHeight;
                 let position = 26; 
-                
-                // CORREÇÃO PARA A VERCEL: Adicionado (doc as any)
-                const pageHeight = (doc as any).internal.pageSize.getHeight();
                 
                 // 1. Recuo da margem para quebrar uma linha antes (afasta do selo)
                 const footerSpaceY = 230; 
@@ -1023,22 +1018,12 @@ function PipelineContent() {
                     heightLeft -= (footerSpaceY - 20);
                     printedHeight += (footerSpaceY - 20) - overlap;
                 }
-                    
-                    // Limpa a margem do topo
-                    doc.setFillColor(255, 255, 255);
-                    doc.rect(0, 0, pageWidth, 20, 'F');
-                    
-                    // Limpa a margem do rodapé
-                    doc.setFillColor(255, 255, 255);
-                    doc.rect(0, footerSpaceY, pageWidth, pageHeight - footerSpaceY, 'F');
-                    
-                    heightLeft -= (footerSpaceY - 20);
-                    printedHeight += (footerSpaceY - 20) - overlap;
-                }
+
                 // 4. Apaga o mini-navegador
                 document.body.removeChild(iframe);
             }
         }
+
         // --- RODAPÉ ---
         const pageCount = (doc as any).internal.getNumberOfPages();
         for (let i = 1; i <= pageCount; i++) {
