@@ -981,10 +981,12 @@ function PipelineContent() {
                 doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(darkGreen[0], darkGreen[1], darkGreen[2]);
                 doc.text("ANEXOS E INFORMAÇÕES ADICIONAIS", 14, 20);
                 
-   // === LÓGICA MÁGICA: FATIAMENTO DE PÁGINAS ===
+// === LÓGICA MÁGICA: FATIAMENTO DE PÁGINAS ===
                 let heightLeft = imgHeight;
                 let position = 26; 
-                const pageHeight = doc.internal.pageSize.getHeight();
+                
+                // CORREÇÃO PARA A VERCEL: Adicionado (doc as any)
+                const pageHeight = (doc as any).internal.pageSize.getHeight();
                 
                 // 1. Recuo da margem para quebrar uma linha antes (afasta do selo)
                 const footerSpaceY = 230; 
@@ -1009,6 +1011,18 @@ function PipelineContent() {
                     let newPosition = 20 - printedHeight + overlap; 
                     
                     doc.addImage(imgData, 'PNG', 14, newPosition, imgWidth, imgHeight);
+                    
+                    // Limpa a margem do topo
+                    doc.setFillColor(255, 255, 255);
+                    doc.rect(0, 0, pageWidth, 20, 'F');
+                    
+                    // Limpa a margem do rodapé
+                    doc.setFillColor(255, 255, 255);
+                    doc.rect(0, footerSpaceY, pageWidth, pageHeight - footerSpaceY, 'F');
+                    
+                    heightLeft -= (footerSpaceY - 20);
+                    printedHeight += (footerSpaceY - 20) - overlap;
+                }
                     
                     // Limpa a margem do topo
                     doc.setFillColor(255, 255, 255);
