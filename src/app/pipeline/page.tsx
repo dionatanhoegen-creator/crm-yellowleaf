@@ -412,7 +412,9 @@ function PipelineContent() {
           let novoItem = { ...it, [campo]: valor };
 
           if (campo === 'preco_g') {
-              novoItem.preco_g = parseFloat(String(valor).replace(',', '.')) || 0;
+              // Ajuste: Mantemos o valor exatamente como o usuário digitou (ex: "25,")
+              // A conversão float só será feita no momento de calcular o total.
+              novoItem.preco_g = valor; 
           }
 
           if (campo === 'insumo') {
@@ -443,6 +445,7 @@ function PipelineContent() {
           if (campo === 'fracionamento' || campo === 'tipo_venda' || campo === 'insumo' || campo === 'preco_g') {
               const numStr = String(novoItem.fracionamento).replace(/\D/g, ''); 
               const gramas = parseFloat(numStr) || 0;
+              // Aqui fazemos a conversão segura tratando a vírgula para calcular o total
               const precoTratado = parseFloat(String(novoItem.preco_g).replace(',', '.')) || 0;
 
               if (novoItem.tipo_venda === 'Bonificado') {
@@ -559,7 +562,12 @@ function PipelineContent() {
             });
 
             if (repEncontrado) {
-                if (isSDRUser || isAdminUser) {
+                // Ajuste: Verifica se o cliente é do PRÓPRIO usuário logado, se for, ele pode abrir normalmente.
+                if (repEncontrado.id === usuarioLogado?.id) {
+                    setIsRepLocked(true); 
+                    setFormData(prev => ({ ...prev, user_id: repEncontrado.id }));
+                    preencherDadosAPI(cnpjLimpo, chavesERP);
+                } else if (isSDRUser || isAdminUser) {
                     setIsRepLocked(false); 
                     setConfirmModal({
                         open: true,
@@ -569,14 +577,16 @@ function PipelineContent() {
                         onCancel: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, cnpj: '', user_id: usuarioLogado.id })); setLoadingCNPJ(false); }
                     });
                 } else {
-                    setIsRepLocked(true); 
-                    setConfirmModal({
-                        open: true,
-                        title: 'DIRECIONAMENTO AUTOMÁTICO',
-                        message: `A farmácia "${nomeFantasiaOuRazao}" já pertence à carteira de ${repEncontrado.nome.toUpperCase()}.\n\nAo continuar, esta oportunidade será criada e repassada automaticamente para o Pipeline dele(a).`,
-                        onConfirm: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, user_id: repEncontrado.id })); preencherDadosAPI(cnpjLimpo, chavesERP); },
-                        onCancel: () => { setConfirmModal({ open: false, message: '', onConfirm: () => {}, onCancel: () => {} }); setFormData(prev => ({ ...prev, cnpj: '', user_id: usuarioLogado.id })); setIsRepLocked(false); setLoadingCNPJ(false); }
+                    // Ajuste: Se o vendedor logado tentar pegar cliente de OUTRO vendedor, a tela VERMELHA bloqueia.
+                    setBlockModal({ 
+                        open: true, 
+                        title: 'CLIENTE DE OUTRA CARTEIRA', 
+                        message: `A farmácia "${nomeFantasiaOuRazao}" JÁ ESTÁ CADASTRADA.`, 
+                        motivo: `Pertence ao representante: ${repEncontrado.nome.toUpperCase()}.\n\nVocê não tem permissão para abrir propostas na carteira de outro vendedor.` 
                     });
+                    setFormData(prev => ({ ...prev, cnpj: '' })); 
+                    setLoadingCNPJ(false);
+                    return; 
                 }
                 return;
             } else {
